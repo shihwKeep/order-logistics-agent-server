@@ -1,20 +1,27 @@
 package com.xjjk.agent.common.api;
 
-import java.time.Instant;
+import com.fasterxml.jackson.annotation.JsonFormat;
+
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 
 public record ApiResponse<T>(
         String code,
         String message,
         T data,
-        Instant timestamp
+        @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+        OffsetDateTime timestamp
 ) {
+
+    private static final ZoneId DEFAULT_ZONE_ID =
+            ZoneId.of("Asia/Shanghai");
 
     public static <T> ApiResponse<T> success(T data) {
         return new ApiResponse<>(
                 "SUCCESS",
                 "success",
                 data,
-                Instant.now()
+                OffsetDateTime.now(DEFAULT_ZONE_ID)
         );
     }
 
@@ -23,7 +30,7 @@ public record ApiResponse<T>(
                 errorCode.code(),
                 errorCode.message(),
                 null,
-                Instant.now()
+                OffsetDateTime.now(DEFAULT_ZONE_ID)
         );
     }
 }
