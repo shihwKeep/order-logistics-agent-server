@@ -1,6 +1,9 @@
 package com.xjjk.agent.system.api;
 
 import com.xjjk.agent.common.api.ApiResponse;
+import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.identity.web.CurrentAgentIdentity;
+import com.xjjk.agent.system.api.dto.CurrentIdentityResponse;
 import com.xjjk.agent.system.api.dto.PingResponse;
 import com.xjjk.agent.tenant.web.CurrentTenantId;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +22,21 @@ public class SystemController {
                 "UP",
                 "order-logistics-agent-server",
                 companyId
+        );
+
+        return ApiResponse.success(response);
+    }
+
+    @GetMapping("/whoami")
+    public ApiResponse<CurrentIdentityResponse> whoami(
+            @CurrentAgentIdentity AgentIdentity identity
+    ) {
+        CurrentIdentityResponse response = new CurrentIdentityResponse(
+                identity.userId(),
+                identity.account(),
+                identity.name(),
+                identity.orgId(),
+                identity.companyId()
         );
 
         return ApiResponse.success(response);
