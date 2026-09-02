@@ -16,12 +16,12 @@ public class SystemController {
 
     @GetMapping("/ping")
     public ApiResponse<PingResponse> ping(
-            @CurrentTenantId long companyId
+            @CurrentTenantId long tenantId
     ) {
         PingResponse response = new PingResponse(
                 "UP",
                 "order-logistics-agent-server",
-                companyId
+                tenantId
         );
 
         return ApiResponse.success(response);
@@ -36,7 +36,7 @@ public class SystemController {
                 identity.account(),
                 identity.name(),
                 identity.orgId(),
-                identity.companyId()
+                identity.tenantId()
         );
 
         return ApiResponse.success(response);

@@ -45,7 +45,7 @@ public class TenantIdArgumentResolver
         }
 
         Object tenantId = request.getAttribute(
-                TenantInterceptor.TENANT_ID_ATTRIBUTE
+                TenantContext.TENANT_ID_ATTRIBUTE
         );
 
         if (!(tenantId instanceof Long)) {

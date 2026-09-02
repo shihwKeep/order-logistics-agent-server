@@ -4,7 +4,7 @@ import com.xjjk.agent.common.api.ApiErrorCode;
 import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.identity.service.SspxAuthenticationService;
-import com.xjjk.agent.tenant.web.TenantInterceptor;
+import com.xjjk.agent.tenant.web.TenantContext;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Lazy;
@@ -43,19 +43,8 @@ public class SspxAuthenticationInterceptor implements HandlerInterceptor {
         }
 
         AgentIdentity identity = authenticationService.authenticate(authorization);
-        Object tenantAttribute = request.getAttribute(
-                TenantInterceptor.TENANT_ID_ATTRIBUTE
-        );
-
-        if (!(tenantAttribute instanceof Long tenantId)) {
-            throw new BusinessException(ApiErrorCode.INTERNAL_SERVER_ERROR);
-        }
-
-        if (identity.companyId() != tenantId) {
-            throw new BusinessException(ApiErrorCode.TENANT_ACCESS_DENIED);
-        }
-
         request.setAttribute(IDENTITY_ATTRIBUTE, identity);
+        request.setAttribute(TenantContext.TENANT_ID_ATTRIBUTE, identity.tenantId());
         return true;
     }
 }

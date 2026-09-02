@@ -5,6 +5,6 @@ public record AgentIdentity(
         String account,
         String name,
         long orgId,
-        long companyId
+        long tenantId
 ) {
 }

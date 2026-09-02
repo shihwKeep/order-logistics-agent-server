@@ -5,6 +5,6 @@ public record CurrentIdentityResponse(
         String account,
         String name,
         long orgId,
-        long companyId
+        long tenantId
 ) {
 }
