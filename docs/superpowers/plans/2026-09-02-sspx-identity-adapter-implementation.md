@@ -331,6 +331,7 @@ import com.xjjk.agent.identity.service.SspxAuthenticationService;
 import com.xjjk.agent.tenant.web.TenantInterceptor;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -346,7 +347,7 @@ public class SspxAuthenticationInterceptor implements HandlerInterceptor {
     private final SspxAuthenticationService authenticationService;
 
     public SspxAuthenticationInterceptor(
-            SspxAuthenticationService authenticationService
+            @Lazy SspxAuthenticationService authenticationService
     ) {
         this.authenticationService = authenticationService;
     }
