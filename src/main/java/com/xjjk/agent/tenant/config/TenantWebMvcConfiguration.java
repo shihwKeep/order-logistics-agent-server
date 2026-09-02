@@ -3,6 +3,7 @@ package com.xjjk.agent.tenant.config;
 import com.xjjk.agent.tenant.web.TenantIdArgumentResolver;
 import com.xjjk.agent.tenant.web.TenantInterceptor;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
@@ -28,7 +29,8 @@ public class TenantWebMvcConfiguration implements WebMvcConfigurer {
             InterceptorRegistry registry
     ) {
         registry.addInterceptor(tenantInterceptor)
-                .addPathPatterns("/api/v1/**");
+                .addPathPatterns("/api/v1/**")
+                .order(Ordered.HIGHEST_PRECEDENCE);
     }
 
     @Override
