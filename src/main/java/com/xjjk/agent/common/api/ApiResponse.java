@@ -17,4 +17,13 @@ public record ApiResponse<T>(
                 Instant.now()
         );
     }
+
+    public static <T> ApiResponse<T> failure(ApiErrorCode errorCode) {
+        return new ApiResponse<>(
+                errorCode.code(),
+                errorCode.message(),
+                null,
+                Instant.now()
+        );
+    }
 }
