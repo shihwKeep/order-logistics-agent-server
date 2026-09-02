@@ -28,6 +28,10 @@ public class IdentityWebMvcConfiguration implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(authenticationInterceptor)
                 .addPathPatterns("/api/v1/**")
+                .excludePathPatterns(
+                        "/api/v1/auth/login",
+                        "/api/v1/auth/refresh"
+                )
                 .order(Ordered.HIGHEST_PRECEDENCE + 1);
     }
 

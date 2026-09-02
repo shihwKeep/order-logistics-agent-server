@@ -40,6 +40,18 @@ public enum ApiErrorCode {
             "登录状态无效或已过期"
     ),
 
+    AUTH_CREDENTIALS_INVALID(
+            HttpStatus.UNAUTHORIZED,
+            "AUTH_CREDENTIALS_INVALID",
+            "账号或密码错误"
+    ),
+
+    AUTH_ACCOUNT_UNAVAILABLE(
+            HttpStatus.FORBIDDEN,
+            "AUTH_ACCOUNT_UNAVAILABLE",
+            "当前账号不可登录，请联系管理员"
+    ),
+
     AUTH_SERVICE_UNAVAILABLE(
             HttpStatus.SERVICE_UNAVAILABLE,
             "AUTH_SERVICE_UNAVAILABLE",
