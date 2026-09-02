@@ -33,8 +33,8 @@ public class RestClientSspxOAuthClient implements SspxOAuthClient {
     @Override
     public SspxTokenResponse passwordGrant(String username, String password) {
         MultiValueMap<String, String> form = commonForm("password");
-        form.add("name", username);
-        form.add("pwd", password);
+        form.add("username", username);
+        form.add("password", password);
         return requestToken(form);
     }
 

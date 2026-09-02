@@ -33,8 +33,8 @@ class RestClientSspxOAuthClientTest {
                         containsString("client_id=test-client"),
                         containsString("client_secret=test-secret"),
                         containsString("scope=profile"),
-                        containsString("name=agent"),
-                        containsString("pwd=password")
+                        containsString("username=agent"),
+                        containsString("password=password")
                 )))
                 .andRespond(withSuccess("""
                         {
