@@ -28,6 +28,30 @@ public enum ApiErrorCode {
             "无权访问该租户"
     ),
 
+    AUTH_HEADER_MISSING(
+            HttpStatus.UNAUTHORIZED,
+            "AUTH_HEADER_MISSING",
+            "缺少登录凭证"
+    ),
+
+    AUTH_TOKEN_INVALID(
+            HttpStatus.UNAUTHORIZED,
+            "AUTH_TOKEN_INVALID",
+            "登录状态无效或已过期"
+    ),
+
+    AUTH_SERVICE_UNAVAILABLE(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "AUTH_SERVICE_UNAVAILABLE",
+            "认证服务暂时不可用"
+    ),
+
+    AUTH_RESPONSE_INVALID(
+            HttpStatus.BAD_GATEWAY,
+            "AUTH_RESPONSE_INVALID",
+            "认证服务响应异常"
+    ),
+
     INTERNAL_SERVER_ERROR(
             HttpStatus.INTERNAL_SERVER_ERROR,
             "INTERNAL_SERVER_ERROR",
