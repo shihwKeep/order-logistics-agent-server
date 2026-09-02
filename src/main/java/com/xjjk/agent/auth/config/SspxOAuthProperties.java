@@ -12,5 +12,19 @@ public record SspxOAuthProperties(
             String clientId,
             String clientSecret
     ) {
+
+        public OAuth {
+            if (isMissingOrUnresolved(clientId) || isMissingOrUnresolved(clientSecret)) {
+                throw new IllegalArgumentException(
+                        "SSPX OAuth credentials are missing; configure the required environment variables"
+                );
+            }
+        }
+
+        private static boolean isMissingOrUnresolved(String value) {
+            return value == null
+                    || value.isBlank()
+                    || (value.startsWith("${") && value.endsWith("}"));
+        }
     }
 }
