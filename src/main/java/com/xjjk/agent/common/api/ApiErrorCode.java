@@ -64,6 +64,18 @@ public enum ApiErrorCode {
             "认证服务响应异常"
     ),
 
+    CONVERSATION_NOT_FOUND(
+            HttpStatus.NOT_FOUND,
+            "CONVERSATION_NOT_FOUND",
+            "会话不存在或无权访问"
+    ),
+
+    CONVERSATION_BUSY(
+            HttpStatus.CONFLICT,
+            "CONVERSATION_BUSY",
+            "当前会话仍有请求未结束，请稍后重试"
+    ),
+
     INTERNAL_SERVER_ERROR(
             HttpStatus.INTERNAL_SERVER_ERROR,
             "INTERNAL_SERVER_ERROR",
