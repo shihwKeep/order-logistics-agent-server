@@ -30,6 +30,8 @@ public record ChatHistoryCacheProperties(
         int warmQueueCapacity
 ) {
 
+    private static final Duration MAX_TTL = Duration.ofDays(365);
+
     public ChatHistoryCacheProperties {
         if (!StringUtils.hasText(keyPrefix)
                 || !keyPrefix.matches("[A-Za-z0-9:_-]+")
@@ -40,8 +42,12 @@ public record ChatHistoryCacheProperties(
         Objects.requireNonNull(ttl, "历史缓存 TTL 不能为空");
         Objects.requireNonNull(ttlJitter, "历史缓存 TTL 抖动不能为空");
 
-        if (ttl.isZero() || ttl.isNegative()) {
-            throw new IllegalArgumentException("历史缓存 TTL 必须大于零");
+        if (ttl.isZero()
+                || ttl.isNegative()
+                || ttl.compareTo(MAX_TTL) > 0) {
+            throw new IllegalArgumentException(
+                    "历史缓存 TTL 必须大于零且不能超过 365 天"
+            );
         }
 
         if (ttlJitter.isNegative()
