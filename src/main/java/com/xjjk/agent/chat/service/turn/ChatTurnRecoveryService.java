@@ -7,10 +7,12 @@ import com.xjjk.agent.chat.persistence.entity.AgentConversationEntity;
 import com.xjjk.agent.chat.persistence.entity.AgentMessageEntity;
 import com.xjjk.agent.chat.persistence.mapper.AgentConversationMapper;
 import com.xjjk.agent.chat.persistence.mapper.AgentMessageMapper;
+import com.xjjk.agent.chat.service.memory.ChatHistoryChangedEvent;
 import com.xjjk.agent.common.api.ApiErrorCode;
 import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -34,6 +36,7 @@ public class ChatTurnRecoveryService {
 
     private final AgentConversationMapper conversationMapper;
     private final AgentMessageMapper messageMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * 尝试恢复当前用户会话中的过期占用。
@@ -89,6 +92,32 @@ public class ChatTurnRecoveryService {
             return false;
         }
 
+        // 已确认占用过期，本次恢复将改变助手消息状态。
+        Long currentMemoryVersion = conversation.getMemoryVersion();
+        Long lastMessageSequence = conversation.getLastMessageSequence();
+        Long currentMemoryUntilSequence =
+                conversation.getMemoryUntilSequence();
+
+        if (currentMemoryVersion == null
+                || currentMemoryVersion < 0
+                || lastMessageSequence == null
+                || lastMessageSequence < 1
+                || currentMemoryUntilSequence == null
+                || currentMemoryUntilSequence < 0
+                || currentMemoryUntilSequence > lastMessageSequence) {
+            throw new IllegalStateException("会话稳定历史游标异常");
+        }
+
+        long nextMemoryVersion =
+                Math.addExact(currentMemoryVersion, 1L);
+
+        /*
+         * 恢复事务会把过期的 GENERATING 助手消息转为 INTERRUPTED。
+         * 状态更新成功后，当前助手消息也进入稳定终态边界，
+         * 但 INTERRUPTED 轮次不会被选入模型上下文。
+         */
+        long nextMemoryUntilSequence = lastMessageSequence;
+
         // 保留已落库正文，只改变消息状态及错误信息。
         int messageRows = messageMapper.update(
                 null,
@@ -115,6 +144,7 @@ public class ChatTurnRecoveryService {
             throw new BusinessException(ApiErrorCode.INTERNAL_SERVER_ERROR);
         }
 
+        // 标记消息中断、推进历史版本和释放占用必须一起提交。
         int conversationRows = conversationMapper.update(
                 null,
                 Wrappers.<AgentConversationEntity>lambdaUpdate()
@@ -129,12 +159,24 @@ public class ChatTurnRecoveryService {
                         .le(AgentConversationEntity::getActiveUntil, now)
                         .set(AgentConversationEntity::getActiveRequestId, null)
                         .set(AgentConversationEntity::getActiveUntil, null)
+                        .set(AgentConversationEntity::getMemoryVersion,
+                                nextMemoryVersion)
+                        .set(AgentConversationEntity::getMemoryUntilSequence,
+                                nextMemoryUntilSequence)
                         .set(AgentConversationEntity::getUpdatedAt, now)
         );
 
         if (conversationRows != 1) {
             throw new BusinessException(ApiErrorCode.INTERNAL_SERVER_ERROR);
         }
+
+        eventPublisher.publishEvent(new ChatHistoryChangedEvent(
+                identity.tenantId(),
+                identity.userId(),
+                conversationId,
+                nextMemoryVersion,
+                nextMemoryUntilSequence
+        ));
 
         return true;
     }

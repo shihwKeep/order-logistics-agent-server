@@ -8,9 +8,11 @@ import com.xjjk.agent.chat.persistence.entity.AgentConversationEntity;
 import com.xjjk.agent.chat.persistence.entity.AgentMessageEntity;
 import com.xjjk.agent.chat.persistence.mapper.AgentConversationMapper;
 import com.xjjk.agent.chat.persistence.mapper.AgentMessageMapper;
+import com.xjjk.agent.chat.service.memory.ChatHistoryChangedEvent;
 import com.xjjk.agent.common.api.ApiErrorCode;
 import com.xjjk.agent.common.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -32,6 +34,7 @@ public class ChatTurnFinishService {
 
     private final AgentConversationMapper conversationMapper;
     private final AgentMessageMapper messageMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * 尝试结束本轮问答。
@@ -95,6 +98,32 @@ public class ChatTurnFinishService {
             return false;
         }
 
+        // 已锁定会话并确认本轮仍拥有收尾资格。
+        Long currentMemoryVersion = conversation.getMemoryVersion();
+        Long lastMessageSequence = conversation.getLastMessageSequence();
+        Long currentMemoryUntilSequence =
+                conversation.getMemoryUntilSequence();
+
+        if (currentMemoryVersion == null
+                || currentMemoryVersion < 0
+                || lastMessageSequence == null
+                || lastMessageSequence < 1
+                || currentMemoryUntilSequence == null
+                || currentMemoryUntilSequence < 0
+                || currentMemoryUntilSequence > lastMessageSequence) {
+            throw new IllegalStateException("会话稳定历史游标异常");
+        }
+
+        long nextMemoryVersion =
+                Math.addExact(currentMemoryVersion, 1L);
+
+        /*
+         * 当前请求独占该会话，而且开始事务已经把
+         * lastMessageSequence 更新为当前助手消息序号。
+         * 因此收尾成功后，该序号成为新的稳定历史边界。
+         */
+        long nextMemoryUntilSequence = lastMessageSequence;
+
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC)
                 .truncatedTo(ChronoUnit.MILLIS);
 
@@ -126,7 +155,7 @@ public class ChatTurnFinishService {
             throw new BusinessException(ApiErrorCode.INTERNAL_SERVER_ERROR);
         }
 
-        // 保存消息和释放占用属于同一个事务，不能只成功一半。
+        // 保存消息、推进稳定历史游标和释放占用属于同一个事务，不能只成功一部分。
         int conversationRows = conversationMapper.update(
                 null,
                 Wrappers.<AgentConversationEntity>lambdaUpdate()
@@ -138,12 +167,24 @@ public class ChatTurnFinishService {
                                 turn.requestId())
                         .set(AgentConversationEntity::getActiveRequestId, null)
                         .set(AgentConversationEntity::getActiveUntil, null)
+                        .set(AgentConversationEntity::getMemoryVersion,
+                                nextMemoryVersion)
+                        .set(AgentConversationEntity::getMemoryUntilSequence,
+                                nextMemoryUntilSequence)
                         .set(AgentConversationEntity::getUpdatedAt, now)
         );
 
         if (conversationRows != 1) {
             throw new BusinessException(ApiErrorCode.INTERNAL_SERVER_ERROR);
         }
+
+        eventPublisher.publishEvent(new ChatHistoryChangedEvent(
+                turn.tenantId(),
+                turn.userId(),
+                turn.conversationId(),
+                nextMemoryVersion,
+                nextMemoryUntilSequence
+        ));
 
         return true;
     }
