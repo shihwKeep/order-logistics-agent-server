@@ -2,6 +2,7 @@ package com.xjjk.agent.chat.service.memory;
 
 import com.xjjk.agent.chat.observation.ChatHistoryCacheMetrics;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
@@ -16,6 +17,11 @@ import org.springframework.transaction.event.TransactionalEventListener;
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(
+        prefix = "agent.chat.history.cache",
+        name = "enabled",
+        havingValue = "true"
+)
 public class ChatHistoryCacheWarmListener {
 
     private final ThreadPoolTaskExecutor executor;
