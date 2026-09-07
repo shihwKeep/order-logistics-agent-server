@@ -276,6 +276,8 @@ POST /internal/agent/logistics/tracks/query
 }
 ```
 
+这里的 `carrierId` 是 `data_carrier.Id`，不是顺丰、EMS、德邦、京东等供应商类型。`silu-logistics` 必须根据该 ID 读取自己的 `data_carrier.Type` 后选择刷新器，禁止把记录主键直接当作承运商类型比较；记录不存在、已删除或类型不受支持时，不执行任何猜测式刷新。
+
 处理规则：
 
 1. 批量精确查询 ES。
@@ -295,6 +297,7 @@ NOT_SHIPPED
 NO_TRACE
 REFRESH_TIMEOUT
 DOWNSTREAM_UNAVAILABLE
+UNSUPPORTED_REFRESH
 ```
 
 ## 10. Agent 工具与通用上下文
