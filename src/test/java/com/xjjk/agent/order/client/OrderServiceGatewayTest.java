@@ -1,0 +1,358 @@
+package com.xjjk.agent.order.client;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.order.domain.OrderIdentifierType;
+import com.xjjk.agent.order.domain.OrderLogisticsResult;
+import com.xjjk.agent.order.domain.OrderSearchResult;
+import com.xjjk.agent.order.service.OrderServiceUnavailableException;
+import feign.FeignException;
+import feign.Request;
+import feign.Response;
+import feign.RetryableException;
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
+import java.time.OffsetDateTime;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class OrderServiceGatewayTest {
+    private static final String TOKEN = "service-secret";
+    private static final AgentIdentity IDENTITY =
+            new AgentIdentity(10567L, "agent", "坐席", 10L, 1L);
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
+
+    @Test
+    void sendsTrustedIdentityHeadersAndMapsOrderResponseWithoutSensitiveInternalId() {
+        AtomicReference<Headers> captured = new AtomicReference<>();
+        OrderSearchClient client = (token, tenant, user, org, requestId, request) -> {
+            captured.set(new Headers(token, tenant, user, org, requestId));
+            assertThat(request).isEqualTo(
+                    new OrderSearchClient.OrderSearchRequest("O123", OrderIdentifierType.AUTO));
+            return searchSuccess();
+        };
+        OrderServiceGateway gateway = gateway(client, unusedLogisticsClient());
+
+        OrderSearchResult result = gateway.search(
+                "O123", OrderIdentifierType.AUTO, IDENTITY, "request-1");
+
+        assertThat(captured.get()).isEqualTo(
+                new Headers(TOKEN, 1L, 10567L, 10L, "request-1"));
+        assertThat(result.matchedBy()).isEqualTo(OrderIdentifierType.ORDER_CODE);
+        assertThat(result.total()).isEqualTo(1);
+        assertThat(result.items()).singleElement().satisfies(item -> {
+            assertThat(item.orderCode()).isEqualTo("O123");
+            assertThat(item.payAmountInFen()).isEqualTo(12900L);
+            assertThat(item.goods()).singleElement()
+                    .satisfies(goods -> assertThat(goods.skuCode()).isEqualTo("SKU001"));
+        });
+        assertThat(result.items().getFirst().getClass().getRecordComponents())
+                .extracting(component -> component.getName())
+                .doesNotContain("orderId", "mobile", "address");
+        assertThatThrownBy(() -> result.items().add(result.items().getFirst()))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> result.items().getFirst().goods().clear())
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void deserializesLowercaseAndUppercaseOrderServiceEnvelopes() throws Exception {
+        String data = """
+                {"matchedBy":"ORDER_CODE","total":0,"truncated":false,
+                 "queriedAt":"2026-09-07T14:30:00+08:00","items":[],"internalOrderId":99}
+                """;
+
+        OrderServiceResponse<OrderSearchClient.OrderSearchData> lowercase = OBJECT_MAPPER.readValue(
+                "{\"code\":1000,\"message\":\"success\",\"data\":" + data + "}",
+                new TypeReference<>() { });
+        OrderServiceResponse<OrderSearchClient.OrderSearchData> uppercase = OBJECT_MAPPER.readValue(
+                "{\"Code\":1000,\"Message\":\"success\",\"Data\":" + data + "}",
+                new TypeReference<>() { });
+
+        assertThat(lowercase.code()).isEqualTo(1000);
+        assertThat(lowercase.data().items()).isEmpty();
+        assertThat(uppercase.code()).isEqualTo(1000);
+        assertThat(uppercase.data().queriedAt())
+                .isEqualTo(OffsetDateTime.parse("2026-09-07T14:30:00+08:00"));
+    }
+
+    @Test
+    void mapsLogisticsResponseAndSendsTheSameTrustedHeaders() {
+        AtomicReference<Headers> captured = new AtomicReference<>();
+        OrderLogisticsClient client = (token, tenant, user, org, requestId, request) -> {
+            captured.set(new Headers(token, tenant, user, org, requestId));
+            assertThat(request.identifier()).isEqualTo("SF123456");
+            assertThat(request.identifierType()).isEqualTo(OrderIdentifierType.LOGISTICS_CODE);
+            return logisticsSuccess();
+        };
+        OrderServiceGateway gateway = gateway(unusedSearchClient(), client);
+
+        OrderLogisticsResult result = gateway.logistics(
+                "SF123456", OrderIdentifierType.LOGISTICS_CODE, IDENTITY, "request-2");
+
+        assertThat(captured.get()).isEqualTo(
+                new Headers(TOKEN, 1L, 10567L, 10L, "request-2"));
+        assertThat(result.order().orderCode()).isEqualTo("O123");
+        assertThat(result.shipments()).singleElement().satisfies(shipment -> {
+            assertThat(shipment.logisticsCode()).isEqualTo("SF123456");
+            assertThat(shipment.traces()).extracting(node -> node.description())
+                    .containsExactly("快件已到达南京转运中心");
+        });
+        assertThatThrownBy(() -> result.shipments().clear())
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void convertsNullResponseNonSuccessCodeAndNullDataToSafeExceptionWithoutRetry() {
+        List<OrderServiceResponse<OrderSearchClient.OrderSearchData>> responses = List.of(
+                new OrderServiceResponse<>(1001, "business error", searchSuccess().data()),
+                new OrderServiceResponse<>(1000, "success", null));
+        for (OrderServiceResponse<OrderSearchClient.OrderSearchData> response : responses) {
+            AtomicInteger attempts = new AtomicInteger();
+            OrderSearchClient client = (token, tenant, user, org, requestId, request) -> {
+                attempts.incrementAndGet();
+                return response;
+            };
+            assertThatThrownBy(() -> gateway(client, unusedLogisticsClient()).search(
+                    "O123", OrderIdentifierType.AUTO, IDENTITY, "request-invalid"))
+                    .isInstanceOf(OrderServiceUnavailableException.class)
+                    .hasMessage("订单服务响应不可用");
+            assertThat(attempts).hasValue(1);
+        }
+
+        AtomicInteger nullAttempts = new AtomicInteger();
+        OrderSearchClient nullClient = (token, tenant, user, org, requestId, request) -> {
+            nullAttempts.incrementAndGet();
+            return null;
+        };
+        assertThatThrownBy(() -> gateway(nullClient, unusedLogisticsClient()).search(
+                "O123", OrderIdentifierType.AUTO, IDENTITY, "request-null"))
+                .isInstanceOf(OrderServiceUnavailableException.class)
+                .hasMessage("订单服务响应不可用");
+        assertThat(nullAttempts).hasValue(1);
+    }
+
+    @Test
+    void rejectsInvalidCriticalResponseStructureWithoutRetry() {
+        AtomicInteger attempts = new AtomicInteger();
+        OrderSearchClient client = (token, tenant, user, org, requestId, request) -> {
+            attempts.incrementAndGet();
+            return new OrderServiceResponse<>(1000, "success", new OrderSearchClient.OrderSearchData(
+                    "ORDER_CODE", 1L, false, OffsetDateTime.now(), List.of(
+                    new OrderSearchClient.OrderCardData(
+                            " ", "OUT123", 80, "在途", "2026-09-07 12:00:00",
+                            "石**", 12900L, 0, List.of(), "顺丰", List.of()))));
+        };
+
+        assertThatThrownBy(() -> gateway(client, unusedLogisticsClient()).search(
+                "O123", OrderIdentifierType.AUTO, IDENTITY, "request-invalid-data"))
+                .isInstanceOf(OrderServiceUnavailableException.class)
+                .hasMessage("订单服务响应不可用");
+        assertThat(attempts).hasValue(1);
+    }
+
+    @Test
+    void convertsNullCollectionElementToSafeResponseException() {
+        OrderSearchClient client = (token, tenant, user, org, requestId, request) ->
+                new OrderServiceResponse<>(1000, "success", new OrderSearchClient.OrderSearchData(
+                        "ORDER_CODE", 1L, false, OffsetDateTime.now(),
+                        Arrays.asList((OrderSearchClient.OrderCardData) null)));
+
+        assertThatThrownBy(() -> gateway(client, unusedLogisticsClient()).search(
+                "O123", OrderIdentifierType.AUTO, IDENTITY, "request-null-item"))
+                .isInstanceOf(OrderServiceUnavailableException.class)
+                .hasMessage("订单服务响应不可用");
+    }
+
+    @Test
+    void retriesConnectionFailureOnceForSearchAndReturnsSecondResult() {
+        AtomicInteger attempts = new AtomicInteger();
+        OrderSearchClient client = (token, tenant, user, org, requestId, request) -> {
+            if (attempts.incrementAndGet() == 1) {
+                throw networkFailure(new ConnectException("connection refused"));
+            }
+            return searchSuccess();
+        };
+
+        OrderSearchResult result = gateway(client, unusedLogisticsClient()).search(
+                "O123", OrderIdentifierType.AUTO, IDENTITY, "request-retry");
+
+        assertThat(result.items()).hasSize(1);
+        assertThat(attempts).hasValue(2);
+    }
+
+    @Test
+    void retriesReadTimeoutOnceForLogisticsAndReturnsSecondResult() {
+        AtomicInteger attempts = new AtomicInteger();
+        OrderLogisticsClient client = (token, tenant, user, org, requestId, request) -> {
+            if (attempts.incrementAndGet() == 1) {
+                throw networkFailure(new SocketTimeoutException("read timed out"));
+            }
+            return logisticsSuccess();
+        };
+
+        OrderLogisticsResult result = gateway(unusedSearchClient(), client).logistics(
+                "SF123456", OrderIdentifierType.LOGISTICS_CODE, IDENTITY, "request-timeout");
+
+        assertThat(result.shipments()).hasSize(1);
+        assertThat(attempts).hasValue(2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {502, 503, 504})
+    void retriesTransientHttpStatusOnceForLogistics(int status) {
+        AtomicInteger attempts = new AtomicInteger();
+        OrderLogisticsClient client = (token, tenant, user, org, requestId, request) -> {
+            if (attempts.incrementAndGet() == 1) {
+                throw httpFailure(status);
+            }
+            return logisticsSuccess();
+        };
+
+        OrderLogisticsResult result = gateway(unusedSearchClient(), client).logistics(
+                "SF123456", OrderIdentifierType.LOGISTICS_CODE, IDENTITY, "request-retry-logistics");
+
+        assertThat(result.shipments()).hasSize(1);
+        assertThat(attempts).hasValue(2);
+    }
+
+    @Test
+    void retriesTransientHttpStatusEvenWhenFeignRepresentsRetryAfterAsRetryableException() {
+        AtomicInteger attempts = new AtomicInteger();
+        OrderSearchClient client = (token, tenant, user, org, requestId, request) -> {
+            if (attempts.incrementAndGet() == 1) {
+                throw new RetryableException(
+                        503,
+                        "service unavailable",
+                        Request.HttpMethod.POST,
+                        0L,
+                        request());
+            }
+            return searchSuccess();
+        };
+
+        OrderSearchResult result = gateway(client, unusedLogisticsClient()).search(
+                "O123", OrderIdentifierType.AUTO, IDENTITY, "request-retry-after");
+
+        assertThat(result.items()).hasSize(1);
+        assertThat(attempts).hasValue(2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {400, 401, 403, 404, 409, 422, 500})
+    void doesNotRetryNonTransientHttpStatus(int status) {
+        AtomicInteger attempts = new AtomicInteger();
+        OrderSearchClient client = (token, tenant, user, org, requestId, request) -> {
+            attempts.incrementAndGet();
+            throw httpFailure(status);
+        };
+
+        assertThatThrownBy(() -> gateway(client, unusedLogisticsClient()).search(
+                "O123", OrderIdentifierType.AUTO, IDENTITY, "request-no-retry"))
+                .isInstanceOf(OrderServiceUnavailableException.class)
+                .hasMessage("订单服务调用失败");
+        assertThat(attempts).hasValue(1);
+    }
+
+    @Test
+    void stopsAfterExactlyTwoTransientAttempts() {
+        AtomicInteger attempts = new AtomicInteger();
+        OrderLogisticsClient client = (token, tenant, user, org, requestId, request) -> {
+            attempts.incrementAndGet();
+            throw httpFailure(503);
+        };
+
+        assertThatThrownBy(() -> gateway(unusedSearchClient(), client).logistics(
+                "SF123456", OrderIdentifierType.LOGISTICS_CODE, IDENTITY, "request-exhausted"))
+                .isInstanceOf(OrderServiceUnavailableException.class)
+                .hasMessage("订单服务调用失败");
+        assertThat(attempts).hasValue(2);
+    }
+
+    @Test
+    void rejectsBlankInternalTokenAtStartupBoundary() {
+        assertThatThrownBy(() -> new OrderServiceGateway(
+                unusedSearchClient(), unusedLogisticsClient(), "  "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("integration.order.internal-token");
+    }
+
+    private static OrderServiceGateway gateway(
+            OrderSearchClient searchClient,
+            OrderLogisticsClient logisticsClient) {
+        return new OrderServiceGateway(searchClient, logisticsClient, TOKEN);
+    }
+
+    private static OrderServiceResponse<OrderSearchClient.OrderSearchData> searchSuccess() {
+        return new OrderServiceResponse<>(1000, "success", new OrderSearchClient.OrderSearchData(
+                "ORDER_CODE", 1L, false, OffsetDateTime.parse("2026-09-07T14:30:00+08:00"),
+                List.of(new OrderSearchClient.OrderCardData(
+                        "O123", "OUT123", 80, "在途", "2026-09-07 12:00:00", "石**",
+                        12900L, 1,
+                        List.of(new OrderSearchClient.OrderGoodsData(
+                                "商品名称", "SKU001", "规格", 2)),
+                        "顺丰速运", List.of("SF123456")))));
+    }
+
+    private static OrderServiceResponse<OrderLogisticsClient.OrderLogisticsData> logisticsSuccess() {
+        return new OrderServiceResponse<>(1000, "success", new OrderLogisticsClient.OrderLogisticsData(
+                new OrderLogisticsClient.OrderSummaryData("O123", 80, "在途"),
+                OffsetDateTime.parse("2026-09-07T14:30:00+08:00"), false,
+                List.of(new OrderLogisticsClient.ShipmentData(
+                        "SF123456", "顺丰速运", "SUCCESS", "运输中", "已到达南京",
+                        List.of(new OrderLogisticsClient.TrackNodeData(
+                                "2026-09-07 10:30:00", "南京市", "快件已到达南京转运中心"))))));
+    }
+
+    private static OrderSearchClient unusedSearchClient() {
+        return (token, tenant, user, org, requestId, request) -> {
+            throw new AssertionError("unexpected search call");
+        };
+    }
+
+    private static OrderLogisticsClient unusedLogisticsClient() {
+        return (token, tenant, user, org, requestId, request) -> {
+            throw new AssertionError("unexpected logistics call");
+        };
+    }
+
+    private static RetryableException networkFailure(Exception cause) {
+        return new RetryableException(
+                -1, "network failure", Request.HttpMethod.POST, cause, (Long) null, request());
+    }
+
+    private static FeignException httpFailure(int status) {
+        Response response = Response.builder()
+                .status(status)
+                .reason("downstream failure")
+                .request(request())
+                .headers(Map.of())
+                .body(new byte[0])
+                .build();
+        return FeignException.errorStatus("order", response);
+    }
+
+    private static Request request() {
+        return Request.create(
+                Request.HttpMethod.POST,
+                "http://order/internal/agent/orders",
+                Map.of(),
+                null,
+                StandardCharsets.UTF_8,
+                null);
+    }
+
+    private record Headers(String token, long tenantId, long userId, long orgId, String requestId) {
+    }
+}
