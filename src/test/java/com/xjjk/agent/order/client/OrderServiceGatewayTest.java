@@ -22,11 +22,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLHandshakeException;
 import org.apache.hc.core5.http.ConnectionRequestTimeoutException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -71,27 +74,37 @@ class OrderServiceGatewayTest {
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 
-    @Test
-    void deserializesLowercaseAndUppercaseOrderServiceEnvelopes() throws Exception {
+    @ParameterizedTest(name = "message field {0} with envelope {1}/{2}")
+    @MethodSource("orderEnvelopeVariants")
+    void deserializesAllMessageAliasesAndEnvelopeCases(
+            String messageField,
+            String codeField,
+            String dataField) throws Exception {
         String data = """
                 {"matchedBy":"ORDER_CODE","total":0,"truncated":false,
                  "queriedAt":"2026-09-07T14:30:00+08:00","items":[],"internalOrderId":99}
                 """;
+        String expectedMessage = "success-" + messageField;
+        String json = "{\"" + codeField + "\":1000,\"" + messageField + "\":\""
+                + expectedMessage + "\",\"" + dataField + "\":" + data + "}";
 
-        OrderServiceResponse<OrderSearchClient.OrderSearchData> lowercase = OBJECT_MAPPER.readValue(
-                "{\"code\":1000,\"msg\":\"lower success\",\"data\":" + data + "}",
-                new TypeReference<>() { });
-        OrderServiceResponse<OrderSearchClient.OrderSearchData> uppercase = OBJECT_MAPPER.readValue(
-                "{\"Code\":1000,\"Msg\":\"upper success\",\"Data\":" + data + "}",
+        OrderServiceResponse<OrderSearchClient.OrderSearchData> response = OBJECT_MAPPER.readValue(
+                json,
                 new TypeReference<>() { });
 
-        assertThat(lowercase.code()).isEqualTo(1000);
-        assertThat(lowercase.message()).isEqualTo("lower success");
-        assertThat(lowercase.data().items()).isEmpty();
-        assertThat(uppercase.code()).isEqualTo(1000);
-        assertThat(uppercase.message()).isEqualTo("upper success");
-        assertThat(uppercase.data().queriedAt())
+        assertThat(response.code()).isEqualTo(1000);
+        assertThat(response.message()).isEqualTo(expectedMessage);
+        assertThat(response.data().items()).isEmpty();
+        assertThat(response.data().queriedAt())
                 .isEqualTo(OffsetDateTime.parse("2026-09-07T14:30:00+08:00"));
+    }
+
+    private static Stream<Arguments> orderEnvelopeVariants() {
+        return Stream.of(
+                Arguments.of("message", "code", "data"),
+                Arguments.of("Message", "Code", "Data"),
+                Arguments.of("msg", "code", "data"),
+                Arguments.of("Msg", "Code", "Data"));
     }
 
     @Test
