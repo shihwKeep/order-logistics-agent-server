@@ -10,7 +10,8 @@ import com.xjjk.agent.chat.stream.ChatStreamControl;
 import com.xjjk.agent.chat.stream.ChatStreamError;
 import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.identity.domain.AgentIdentity;
-import com.xjjk.agent.product.tool.ProductToolRequestContext;
+import com.xjjk.agent.tool.AgentToolRequestContext;
+import com.xjjk.agent.tool.ToolCallGuard;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -129,17 +130,21 @@ public class ChatTurnRunner {
             ChatTurnExecution execution
     ) throws IOException {
         // try-with-resources 保证正常结束、异常和取消时都关闭上游模型流，释放 HTTP 连接。
-        ProductToolRequestContext toolContext = new ProductToolRequestContext(
+        // Guard 是严格的“单轮状态”：本轮同参调用共享结果，最多允许三个不同调用键。
+        // 必须在这里随请求创建，不能注入为单例，否则不同用户/轮次会串结果和额度。
+        AgentToolRequestContext toolContext = new AgentToolRequestContext(
                 execution.requestId,
                 identity,
                 result -> {
                     try {
-                        // 商品图片和分页等完整结构只走 SSE result，不进入模型上下文。
-                        session.result("product-list", result);
+                        // 完整业务数据只走 SSE result，不进入模型上下文；通用结果在此
+                        // 转换为既有 kind + data SSE 契约，避免工具层依赖具体传输实现。
+                        session.result(result.kind(), result.data());
                     } catch (IOException exception) {
                         throw new UncheckedIOException(exception);
                     }
-                });
+                },
+                new ToolCallGuard(3));
         try (var responses = aiChatService
                 .stream(message, selection, toolContext)
                 .toStream(1)) {

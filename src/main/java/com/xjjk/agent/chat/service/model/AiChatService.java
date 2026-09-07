@@ -3,7 +3,7 @@ package com.xjjk.agent.chat.service.model;
 import com.xjjk.agent.chat.domain.memory.ChatContextSelection;
 import com.xjjk.agent.chat.service.memory.RequestChatMemory;
 import com.xjjk.agent.product.tool.ProductQueryTools;
-import com.xjjk.agent.product.tool.ProductToolRequestContext;
+import com.xjjk.agent.tool.AgentToolRequestContext;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -38,13 +38,13 @@ public class AiChatService {
      *
      * @param message 当前用户问题，应与筛选时使用的问题一致
      * @param selection 已完成权限检查和预算筛选的上下文
-     * @param toolRequestContext 仅在服务端流转的工具调用身份和 SSE 输出上下文
+     * @param toolRequestContext 仅在服务端流转的工具身份、SSE 输出和单轮调用保护上下文
      * @return 模型流式响应
      */
     public Flux<ChatResponse> stream(
             String message,
             ChatContextSelection selection,
-            ProductToolRequestContext toolRequestContext
+            AgentToolRequestContext toolRequestContext
     ) {
         Assert.hasText(message, "消息内容不能为空");
         Objects.requireNonNull(selection, "上下文筛选结果不能为空");
@@ -66,7 +66,7 @@ public class AiChatService {
                     // 和 SSE 发布器不会进入模型提示词，也不能由模型参数覆盖。
                     .tools(productQueryTools)
                     .toolContext(Map.of(
-                            ProductToolRequestContext.CONTEXT_KEY,
+                            AgentToolRequestContext.CONTEXT_KEY,
                             toolRequestContext))
                     .advisors(spec -> spec
                             .advisors(memoryAdvisor)

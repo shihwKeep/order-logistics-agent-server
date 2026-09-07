@@ -5,12 +5,16 @@ import com.xjjk.agent.product.domain.ProductSearchQuery;
 import com.xjjk.agent.product.domain.ProductSearchResult;
 import com.xjjk.agent.product.service.ProductSearchGateway;
 import com.xjjk.agent.product.service.ProductSearchUnavailableException;
+import com.xjjk.agent.tool.AgentToolRequestContext;
+import com.xjjk.agent.tool.ToolUiResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
+
+import java.time.OffsetDateTime;
 
 /**
  * 暴露给模型的商品只读工具。
@@ -32,7 +36,7 @@ public class ProductQueryTools {
             @ToolParam(description = "商品名称、SPU编码、SKU编码或条码") String keyword,
             @ToolParam(description = "页码，从1开始", required = false) Integer pageIndex,
             ToolContext toolContext) {
-        ProductToolRequestContext requestContext = requestContext(toolContext);
+        AgentToolRequestContext requestContext = requestContext(toolContext);
         ProductSearchQuery query;
         try {
             query = ProductSearchQuery.of(keyword, pageIndex, DEFAULT_PAGE_SIZE);
@@ -40,10 +44,29 @@ public class ProductQueryTools {
             return "商品查询参数不完整，请让用户提供商品名称或商品编码。";
         }
 
+        String canonicalArguments = query.keyword()
+                + "|" + query.pageIndex()
+                + "|" + DEFAULT_PAGE_SIZE;
+        return requestContext.callGuard().execute(
+                "search_products",
+                canonicalArguments,
+                () -> executeSearch(query, requestContext));
+    }
+
+    private String executeSearch(
+            ProductSearchQuery query,
+            AgentToolRequestContext requestContext
+    ) {
         try {
             ProductSearchResult result = gateway.search(query);
-            // SSE 只使用服务端注入的发布器，模型参数无法指定输出目标。
-            requestContext.resultPublisher().publish(result);
+            // 完整结果只走服务端注入的发布器；成功结果由 Guard 缓存，
+            // 因而同参重复工具调用不会再次查询下游或重复发布 SSE。
+            requestContext.outputPublisher().publish(new ToolUiResult(
+                    "search_products",
+                    "product-list",
+                    1,
+                    OffsetDateTime.now(),
+                    result));
             return toModelResult(result);
         } catch (ProductSearchUnavailableException exception) {
             log.warn("product_tool_failed requestId={}, userId={}, exceptionType={}",
@@ -53,12 +76,12 @@ public class ProductQueryTools {
         }
     }
 
-    private ProductToolRequestContext requestContext(ToolContext context) {
+    private AgentToolRequestContext requestContext(ToolContext context) {
         if (context == null) {
             throw new IllegalStateException("商品工具缺少请求上下文");
         }
-        Object value = context.getContext().get(ProductToolRequestContext.CONTEXT_KEY);
-        if (!(value instanceof ProductToolRequestContext requestContext)) {
+        Object value = context.getContext().get(AgentToolRequestContext.CONTEXT_KEY);
+        if (!(value instanceof AgentToolRequestContext requestContext)) {
             throw new IllegalStateException("商品工具请求上下文不合法");
         }
         return requestContext;
