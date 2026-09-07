@@ -94,6 +94,12 @@ public enum ApiErrorCode {
             "当前请求上下文超过预算，请缩短输入或减少附加内容"
     ),
 
+    CHAT_ACTION_UNAVAILABLE(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "CHAT_ACTION_UNAVAILABLE",
+            "当前物流查询暂时不可用，请稍后重试"
+    ),
+
     INTERNAL_SERVER_ERROR(
             HttpStatus.INTERNAL_SERVER_ERROR,
             "INTERNAL_SERVER_ERROR",

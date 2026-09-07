@@ -1,5 +1,7 @@
 package com.xjjk.agent.chat.service.stream;
 
+import com.xjjk.agent.chat.action.ChatActionDispatcher;
+import com.xjjk.agent.chat.api.dto.ChatStreamRequest;
 import com.xjjk.agent.chat.domain.MessageStatus;
 import com.xjjk.agent.chat.domain.memory.ChatContextSelection;
 import com.xjjk.agent.chat.service.memory.ChatContextPreparationService;
@@ -14,6 +16,7 @@ import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.tool.AgentToolRequestContext;
 import com.xjjk.agent.tool.ToolCallGuard;
+import com.xjjk.agent.tool.ToolUiResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -39,10 +42,10 @@ public class ChatTurnRunner {
     private final AiChatService aiChatService;
     private final ChatTurnFinalizer finalizer;
     private final ChatToolResultRecorder resultRecorder;
+    private final ChatActionDispatcher actionDispatcher;
 
     public void run(
-            String conversationId,
-            String message,
+            ChatStreamRequest request,
             AgentIdentity identity,
             ChatStreamControl control,
             ChatSseSession session,
@@ -51,7 +54,7 @@ public class ChatTurnRunner {
         // 每次请求独享一个执行上下文；Spring 单例服务中不保存正文、状态等可变数据。
         ChatTurnExecution execution = new ChatTurnExecution(fallbackRequestId);
         try {
-            execute(conversationId, message, identity, control, session, execution);
+            execute(request, identity, control, session, execution);
         } catch (BusinessException exception) {
             execution.status = MessageStatus.FAILED;
             execution.error = new ChatStreamError(
@@ -81,8 +84,7 @@ public class ChatTurnRunner {
     }
 
     private void execute(
-            String conversationId,
-            String message,
+            ChatStreamRequest request,
             AgentIdentity identity,
             ChatStreamControl control,
             ChatSseSession session,
@@ -94,7 +96,8 @@ public class ChatTurnRunner {
 
         // 第一步：通过短事务创建本轮 USER/ASSISTANT 消息并占用会话。
         // 仅在任务真正获得线程执行时才创建记录；prepare 返回时开始事务已经提交。
-        execution.prepared(preparationService.prepare(conversationId, identity, message));
+        execution.prepared(preparationService.prepare(
+                request.conversationId(), identity, request.message()));
         if (control.isStopRequested()) {
             return;
         }
@@ -102,9 +105,15 @@ public class ChatTurnRunner {
         // 第二步：先把正式 conversationId/requestId 告知前端，后续事件都可据此关联本轮请求。
         session.session(execution.turn.conversationId(), execution.requestId);
 
+        if (request.action() != null) {
+            executeAction(request, identity, session, execution);
+            return;
+        }
+
         // 第三步：基于 MySQL 稳定游标读取短期记忆，执行 Token 预算和上下文裁剪。
         // 该阶段可能命中 Redis，也可能 fail-open 回源 MySQL，但不会绕过会话归属校验。
-        ChatContextSelection selection = contextService.prepare(execution.turn, message, control);
+        ChatContextSelection selection = contextService.prepare(
+                execution.turn, request.message(), control);
         if (control.isStopRequested()) {
             return;
         }
@@ -114,7 +123,7 @@ public class ChatTurnRunner {
 
         // 进入模型调用前预置失败结果；只有模型流正常结束后才会计算最终成功状态。
         execution.error = ChatStreamError.forStatus(MessageStatus.FAILED);
-        consumeModel(message, selection, identity, control, session, execution);
+        consumeModel(request.message(), selection, identity, control, session, execution);
 
         if (!control.isStopRequested()) {
             // 第五步：根据正文和 finishReason 判断 SUCCESS、OUTPUT_LIMIT、
@@ -122,6 +131,29 @@ public class ChatTurnRunner {
             execution.status = completedStatus(execution);
             execution.error = ChatStreamError.forStatus(execution.status);
         }
+    }
+
+    private void executeAction(
+            ChatStreamRequest request,
+            AgentIdentity identity,
+            ChatSseSession session,
+            ChatTurnExecution execution) throws IOException {
+        /*
+         * 卡片动作是后端白名单命令：不加载对话上下文，也不让模型判断调用哪个工具。
+         * 但它仍使用开始事务产生的可信身份和 requestId，并由同一个 finalizer
+         * 原子保存用户消息、固定助手正文、结构化结果和稳定历史游标。
+         */
+        session.queryingLogistics();
+        ChatActionDispatcher.DispatchResult dispatched = actionDispatcher.dispatch(
+                request.action(), identity, execution.requestId);
+        publishToolResult(dispatched.uiResult(), session, execution);
+
+        execution.content.append(dispatched.assistantText());
+        session.delta(dispatched.assistantText());
+        execution.metrics.markFirstDeltaSent();
+        execution.finishReason = "ACTION_COMPLETED";
+        execution.status = MessageStatus.SUCCESS;
+        execution.error = null;
     }
 
     private void consumeModel(
@@ -138,26 +170,7 @@ public class ChatTurnRunner {
         AgentToolRequestContext toolContext = new AgentToolRequestContext(
                 execution.requestId,
                 identity,
-                result -> {
-                    synchronized (execution) {
-                        /*
-                         * 固定顺序不能调整：先完成字段、JSON 和 UTF-8 字节上限校验，
-                         * 再登记到本轮待落库集合，最后才向前端发送 SSE result。
-                         * 因此已经展示的正常卡片一定拥有可持久化快照；如果之后模型
-                         * 失败、取消或客户端断开，收尾事务仍会保存已经登记的结果。
-                         */
-                        PendingMessageResult pending = resultRecorder.prepare(
-                                result, execution.nextResultSequence());
-                        execution.addResult(pending);
-                        try {
-                            // 完整业务数据只走 SSE result，不进入模型上下文；这里保留
-                            // schemaVersion 与 queriedAt，前端才能按版本解析并展示查询时点。
-                            session.result(result);
-                        } catch (IOException exception) {
-                            throw new UncheckedIOException(exception);
-                        }
-                    }
-                },
+                result -> publishToolResultUnchecked(result, session, execution),
                 new ToolCallGuard(3));
         try (var responses = aiChatService
                 .stream(message, selection, toolContext)
@@ -170,6 +183,33 @@ public class ChatTurnRunner {
                 }
                 acceptResponse(response, session, execution);
             }
+        }
+    }
+
+    private void publishToolResultUnchecked(
+            ToolUiResult result,
+            ChatSseSession session,
+            ChatTurnExecution execution) {
+        try {
+            publishToolResult(result, session, execution);
+        } catch (IOException exception) {
+            throw new UncheckedIOException(exception);
+        }
+    }
+
+    private void publishToolResult(
+            ToolUiResult result,
+            ChatSseSession session,
+            ChatTurnExecution execution) throws IOException {
+        synchronized (execution) {
+            /*
+             * 固定顺序不能调整：先完成字段、JSON 和 UTF-8 字节上限校验，
+             * 再登记到本轮待落库集合，最后才向前端发送 SSE result。
+             */
+            PendingMessageResult pending = resultRecorder.prepare(
+                    result, execution.nextResultSequence());
+            execution.addResult(pending);
+            session.result(result);
         }
     }
 

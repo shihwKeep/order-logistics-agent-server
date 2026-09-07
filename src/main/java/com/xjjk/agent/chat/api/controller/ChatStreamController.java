@@ -34,6 +34,6 @@ public class ChatStreamController {
             HttpServletResponse response
     ) throws IOException {
         response.setHeader("Cache-Control", "no-cache");
-        return streamService.start(request.conversationId(), request.message(), identity);
+        return streamService.start(request, identity);
     }
 }

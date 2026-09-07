@@ -31,6 +31,12 @@ public final class ChatSseSession {
         send("status", new ChatStreamPayloads.Status("GENERATING", "正在生成回答"));
     }
 
+    /** 卡片动作正在确定性查询物流，不表示模型正在生成。 */
+    public void queryingLogistics() throws IOException {
+        send("status", new ChatStreamPayloads.Status(
+                "QUERYING_LOGISTICS", "正在查询物流"));
+    }
+
     public void delta(String text) throws IOException {
         send("delta", new ChatStreamPayloads.Delta(text));
     }

@@ -1,5 +1,6 @@
 package com.xjjk.agent.chat.api.dto;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -9,6 +10,9 @@ public record ChatStreamRequest(
 
         @NotBlank(message = "消息内容不能为空")
         @Size(max = 2000, message = "消息内容不能超过2000个字符")
-        String message
+        String message,
+
+        @Valid
+        ChatActionRequest action
 ) {
 }

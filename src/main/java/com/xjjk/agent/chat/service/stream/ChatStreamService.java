@@ -1,5 +1,6 @@
 package com.xjjk.agent.chat.service.stream;
 
+import com.xjjk.agent.chat.api.dto.ChatStreamRequest;
 import com.xjjk.agent.chat.domain.MessageStatus;
 import com.xjjk.agent.chat.stream.ChatSseSession;
 import com.xjjk.agent.chat.stream.ChatStreamControl;
@@ -37,8 +38,7 @@ public class ChatStreamService {
     }
 
     public SseEmitter start(
-            String conversationId,
-            String message,
+            ChatStreamRequest request,
             AgentIdentity identity
     ) throws IOException {
         // start 只负责建立 SSE 通道和调度后台任务，不在 Tomcat 请求线程中执行模型调用。
@@ -57,7 +57,7 @@ public class ChatStreamService {
         // 使用 FutureTask 是为了把“提交到线程池的任务”和“可取消对象”合并为同一个实例。
         // runner 内部才会创建业务消息、读取上下文、调用模型并完成数据库收尾。
         FutureTask<Void> task = new FutureTask<>(() -> {
-            runner.run(conversationId, message, identity, control, session, fallbackRequestId);
+            runner.run(request, identity, control, session, fallbackRequestId);
             return null;
         });
 
