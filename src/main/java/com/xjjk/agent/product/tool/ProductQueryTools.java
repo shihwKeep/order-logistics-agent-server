@@ -47,10 +47,15 @@ public class ProductQueryTools {
         String canonicalArguments = query.keyword()
                 + "|" + query.pageIndex()
                 + "|" + DEFAULT_PAGE_SIZE;
-        return requestContext.callGuard().execute(
-                "search_products",
-                canonicalArguments,
-                () -> executeSearch(query, requestContext));
+        try {
+            return requestContext.callGuard().execute(
+                    "search_products",
+                    canonicalArguments,
+                    () -> executeSearch(query, requestContext));
+        } catch (ProductSearchUnavailableException exception) {
+            // 友好提示在 Guard 外转换，确保下游异常先触发失败键删除和额度归还。
+            return "商品查询服务暂时不可用，请稍后重试。";
+        }
     }
 
     private String executeSearch(
@@ -69,10 +74,11 @@ public class ProductQueryTools {
                     result));
             return toModelResult(result);
         } catch (ProductSearchUnavailableException exception) {
+            // 只由真正访问下游的首次执行者记录一次，等待同一 Future 的调用者不重复打印。
             log.warn("product_tool_failed requestId={}, userId={}, exceptionType={}",
                     requestContext.requestId(), requestContext.identity().userId(),
                     exception.getClass().getSimpleName());
-            return "商品查询服务暂时不可用，请稍后重试。";
+            throw exception;
         }
     }
 

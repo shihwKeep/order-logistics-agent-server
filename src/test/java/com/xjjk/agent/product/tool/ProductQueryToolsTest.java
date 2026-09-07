@@ -3,6 +3,7 @@ package com.xjjk.agent.product.tool;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.product.domain.ProductSearchItem;
 import com.xjjk.agent.product.domain.ProductSearchResult;
+import com.xjjk.agent.product.service.ProductSearchUnavailableException;
 import com.xjjk.agent.tool.AgentToolRequestContext;
 import com.xjjk.agent.tool.ToolCallGuard;
 import com.xjjk.agent.tool.ToolUiResult;
@@ -77,5 +78,34 @@ class ProductQueryToolsTest {
         assertThat(duplicate).isEqualTo(first);
         assertThat(searches).hasValue(1);
         assertThat(publications).hasValue(1);
+    }
+
+    @Test
+    void retriesSameCanonicalCallAfterGatewayFailure() {
+        ProductSearchResult recoveredResult = new ProductSearchResult(
+                "鱼油", 1, 10, 0, false, List.of());
+        AtomicInteger searches = new AtomicInteger();
+        AtomicReference<ToolUiResult> published = new AtomicReference<>();
+        ProductQueryTools tools = new ProductQueryTools(query -> {
+            if (searches.incrementAndGet() == 1) {
+                throw new ProductSearchUnavailableException("temporary failure");
+            }
+            return recoveredResult;
+        });
+        AgentToolRequestContext requestContext = new AgentToolRequestContext(
+                "request-1",
+                new AgentIdentity(10567L, "10567", "测试坐席", 1L, 1L),
+                published::set,
+                new ToolCallGuard(1));
+        ToolContext toolContext = new ToolContext(java.util.Map.of(
+                AgentToolRequestContext.CONTEXT_KEY, requestContext));
+
+        String failed = tools.searchProducts("鱼油", 1, toolContext);
+        String recovered = tools.searchProducts("鱼油", 1, toolContext);
+
+        assertThat(failed).isEqualTo("商品查询服务暂时不可用，请稍后重试。");
+        assertThat(recovered).isEqualTo("未查询到匹配商品。");
+        assertThat(searches).hasValue(2);
+        assertThat(published.get().data()).isSameAs(recoveredResult);
     }
 }
