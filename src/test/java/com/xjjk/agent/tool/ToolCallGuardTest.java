@@ -140,13 +140,12 @@ class ToolCallGuardTest {
             assertThat(calls.removalApplied.await(2, TimeUnit.SECONDS)).isTrue();
 
             // remove 仍被测试 Map 暂停时，旧调用组的 Future 必须已经先完成为失败。
-            assertThat(waiters).allMatch(Future::isDone);
-
-            calls.allowRemovalReturn.countDown();
-            assertFutureFailedWith(owner, firstFailure);
             for (Future<String> waiter : waiters) {
                 assertFutureFailedWith(waiter, firstFailure);
             }
+
+            calls.allowRemovalReturn.countDown();
+            assertFutureFailedWith(owner, firstFailure);
 
             Future<String> retryOwner = executor.submit(() -> guard.execute(
                     "search_orders", "AUTO|O1", () -> {
