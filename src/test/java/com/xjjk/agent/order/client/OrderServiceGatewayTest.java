@@ -12,7 +12,9 @@ import feign.Request;
 import feign.Response;
 import feign.RetryableException;
 import java.net.ConnectException;
+import java.net.ProtocolException;
 import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
@@ -20,6 +22,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.net.ssl.SSLException;
+import javax.net.ssl.SSLHandshakeException;
+import org.apache.hc.core5.http.ConnectionRequestTimeoutException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -74,15 +79,17 @@ class OrderServiceGatewayTest {
                 """;
 
         OrderServiceResponse<OrderSearchClient.OrderSearchData> lowercase = OBJECT_MAPPER.readValue(
-                "{\"code\":1000,\"message\":\"success\",\"data\":" + data + "}",
+                "{\"code\":1000,\"msg\":\"lower success\",\"data\":" + data + "}",
                 new TypeReference<>() { });
         OrderServiceResponse<OrderSearchClient.OrderSearchData> uppercase = OBJECT_MAPPER.readValue(
-                "{\"Code\":1000,\"Message\":\"success\",\"Data\":" + data + "}",
+                "{\"Code\":1000,\"Msg\":\"upper success\",\"Data\":" + data + "}",
                 new TypeReference<>() { });
 
         assertThat(lowercase.code()).isEqualTo(1000);
+        assertThat(lowercase.message()).isEqualTo("lower success");
         assertThat(lowercase.data().items()).isEmpty();
         assertThat(uppercase.code()).isEqualTo(1000);
+        assertThat(uppercase.message()).isEqualTo("upper success");
         assertThat(uppercase.data().queriedAt())
                 .isEqualTo(OffsetDateTime.parse("2026-09-07T14:30:00+08:00"));
     }
@@ -104,11 +111,18 @@ class OrderServiceGatewayTest {
         assertThat(captured.get()).isEqualTo(
                 new Headers(TOKEN, 1L, 10567L, 10L, "request-2"));
         assertThat(result.order().orderCode()).isEqualTo("O123");
-        assertThat(result.shipments()).singleElement().satisfies(shipment -> {
-            assertThat(shipment.logisticsCode()).isEqualTo("SF123456");
-            assertThat(shipment.traces()).extracting(node -> node.description())
-                    .containsExactly("快件已到达南京转运中心");
-        });
+        assertThat(result.shipments()).extracting(shipment -> shipment.logisticsCode())
+                .containsExactly("SF123456", "YT987654");
+        assertThat(result.shipments().get(0).traces())
+                .extracting(node -> node.time() + "|" + node.description())
+                .containsExactly(
+                        "2026-09-07 10:30:00|快件已到达南京转运中心",
+                        "2026-09-07 09:00:00|快件已从南京站发出");
+        assertThat(result.shipments().get(1).traces())
+                .extracting(node -> node.time() + "|" + node.description())
+                .containsExactly(
+                        "2026-09-07 08:20:00|包裹到达苏州分拨中心",
+                        "2026-09-07 07:10:00|包裹已揽收");
         assertThatThrownBy(() -> result.shipments().clear())
                 .isInstanceOf(UnsupportedOperationException.class);
     }
@@ -205,8 +219,55 @@ class OrderServiceGatewayTest {
         OrderLogisticsResult result = gateway(unusedSearchClient(), client).logistics(
                 "SF123456", OrderIdentifierType.LOGISTICS_CODE, IDENTITY, "request-timeout");
 
-        assertThat(result.shipments()).hasSize(1);
+        assertThat(result.shipments()).hasSize(2);
         assertThat(attempts).hasValue(2);
+    }
+
+    @Test
+    void retriesNestedConnectionAndCurrentHttpClientPoolTimeout() {
+        List<Exception> retryableCauses = List.of(
+                new IllegalStateException("wrapped", new ConnectException("connection refused")),
+                new ConnectionRequestTimeoutException("connection pool timeout"));
+
+        for (Exception cause : retryableCauses) {
+            AtomicInteger attempts = new AtomicInteger();
+            OrderSearchClient client = (token, tenant, user, org, requestId, request) -> {
+                if (attempts.incrementAndGet() == 1) {
+                    throw networkFailure(cause);
+                }
+                return searchSuccess();
+            };
+
+            assertThat(gateway(client, unusedLogisticsClient()).search(
+                    "O123", OrderIdentifierType.AUTO, IDENTITY, "request-current-http"))
+                    .isNotNull();
+            assertThat(attempts).hasValue(2);
+        }
+    }
+
+    @Test
+    void doesNotRetryNegativeStatusForDnsTlsProtocolOrGenericIoFailures() {
+        List<Exception> nonRetryableCauses = List.of(
+                new UnknownHostException("private-host.invalid"),
+                new SSLException("tls failure"),
+                new SSLHandshakeException("certificate failure"),
+                new ProtocolException("protocol failure"),
+                new org.apache.hc.core5.http.ProtocolException("http protocol failure"),
+                new java.io.IOException("write failure"));
+
+        for (Exception cause : nonRetryableCauses) {
+            AtomicInteger attempts = new AtomicInteger();
+            OrderSearchClient client = (token, tenant, user, org, requestId, request) -> {
+                attempts.incrementAndGet();
+                throw networkFailure(cause);
+            };
+
+            assertThatThrownBy(() -> gateway(client, unusedLogisticsClient()).search(
+                    "O123", OrderIdentifierType.AUTO, IDENTITY, "request-non-transient"))
+                    .isInstanceOf(OrderServiceUnavailableException.class)
+                    .hasMessage("订单服务调用失败");
+            assertThat(attempts).hasValue(1);
+        }
     }
 
     @ParameterizedTest
@@ -223,7 +284,7 @@ class OrderServiceGatewayTest {
         OrderLogisticsResult result = gateway(unusedSearchClient(), client).logistics(
                 "SF123456", OrderIdentifierType.LOGISTICS_CODE, IDENTITY, "request-retry-logistics");
 
-        assertThat(result.shipments()).hasSize(1);
+        assertThat(result.shipments()).hasSize(2);
         assertThat(attempts).hasValue(2);
     }
 
@@ -281,6 +342,27 @@ class OrderServiceGatewayTest {
     }
 
     @Test
+    void cutsOffDownstreamExceptionCauseAndSensitiveResponseBody() {
+        AtomicInteger attempts = new AtomicInteger();
+        OrderSearchClient client = (token, tenant, user, org, requestId, request) -> {
+            attempts.incrementAndGet();
+            throw httpFailure(500, "sensitive-downstream-body");
+        };
+
+        Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(() ->
+                gateway(client, unusedLogisticsClient()).search(
+                        "O123", OrderIdentifierType.AUTO, IDENTITY, "request-sensitive"));
+
+        assertThat(thrown)
+                .isInstanceOf(OrderServiceUnavailableException.class)
+                .hasMessage("订单服务调用失败")
+                .hasNoCause();
+        assertThat(thrown.toString()).doesNotContain("sensitive-downstream-body");
+        assertThat(thrown.getSuppressed()).isEmpty();
+        assertThat(attempts).hasValue(1);
+    }
+
+    @Test
     void rejectsBlankInternalTokenAtStartupBoundary() {
         assertThatThrownBy(() -> new OrderServiceGateway(
                 unusedSearchClient(), unusedLogisticsClient(), "  "))
@@ -309,10 +391,21 @@ class OrderServiceGatewayTest {
         return new OrderServiceResponse<>(1000, "success", new OrderLogisticsClient.OrderLogisticsData(
                 new OrderLogisticsClient.OrderSummaryData("O123", 80, "在途"),
                 OffsetDateTime.parse("2026-09-07T14:30:00+08:00"), false,
-                List.of(new OrderLogisticsClient.ShipmentData(
-                        "SF123456", "顺丰速运", "SUCCESS", "运输中", "已到达南京",
-                        List.of(new OrderLogisticsClient.TrackNodeData(
-                                "2026-09-07 10:30:00", "南京市", "快件已到达南京转运中心"))))));
+                List.of(
+                        new OrderLogisticsClient.ShipmentData(
+                                "SF123456", "顺丰速运", "SUCCESS", "运输中", "已到达南京",
+                                List.of(
+                                        new OrderLogisticsClient.TrackNodeData(
+                                                "2026-09-07 10:30:00", "南京市", "快件已到达南京转运中心"),
+                                        new OrderLogisticsClient.TrackNodeData(
+                                                "2026-09-07 09:00:00", "南京市", "快件已从南京站发出"))),
+                        new OrderLogisticsClient.ShipmentData(
+                                "YT987654", "圆通速递", "SUCCESS", "运输中", "已到达苏州",
+                                List.of(
+                                        new OrderLogisticsClient.TrackNodeData(
+                                                "2026-09-07 08:20:00", "苏州市", "包裹到达苏州分拨中心"),
+                                        new OrderLogisticsClient.TrackNodeData(
+                                                "2026-09-07 07:10:00", "无锡市", "包裹已揽收"))))));
     }
 
     private static OrderSearchClient unusedSearchClient() {
@@ -333,12 +426,16 @@ class OrderServiceGatewayTest {
     }
 
     private static FeignException httpFailure(int status) {
+        return httpFailure(status, "");
+    }
+
+    private static FeignException httpFailure(int status, String body) {
         Response response = Response.builder()
                 .status(status)
                 .reason("downstream failure")
                 .request(request())
                 .headers(Map.of())
-                .body(new byte[0])
+                .body(body, StandardCharsets.UTF_8)
                 .build();
         return FeignException.errorStatus("order", response);
     }

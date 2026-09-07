@@ -12,9 +12,18 @@ import com.xjjk.agent.order.service.OrderQueryGateway;
 import com.xjjk.agent.order.service.OrderServiceUnavailableException;
 import feign.FeignException;
 import feign.RetryableException;
+import java.net.ConnectException;
+import java.net.ProtocolException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Supplier;
+import javax.net.ssl.SSLException;
+import org.apache.hc.core5.http.ConnectionRequestTimeoutException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -129,7 +138,8 @@ public class OrderServiceGateway implements OrderQueryGateway {
                             identifierType,
                             attempt,
                             failureCategory(exception));
-                    throw new OrderServiceUnavailableException("订单服务调用失败", exception);
+                    // Feign 异常可能携带请求头或下游响应正文，跨适配器边界时必须切断原始异常链。
+                    throw new OrderServiceUnavailableException("订单服务调用失败");
                 }
                 log.warn(
                         "order_gateway requestId={}, operation={}, identifierType={}, attempt={}, status=RETRYING, failureCategory={}",
@@ -145,9 +155,13 @@ public class OrderServiceGateway implements OrderQueryGateway {
 
     private boolean isTransientFailure(RuntimeException exception) {
         if (exception instanceof RetryableException retryableException) {
-            // 负状态码表示连接、读超时等 I/O 故障；带 Retry-After 的 5xx 也可能被 Feign 包装成该类型。
+            // 带 Retry-After 的 5xx 可能被 Feign 包成 RetryableException，仍按明确 HTTP 状态判断。
+            if (isRetryableStatus(retryableException.status())) {
+                return true;
+            }
+            // 负状态码只表示请求执行阶段失败，并不天然可重试；必须继续核对明确的底层原因。
             return retryableException.status() < 0
-                    || isRetryableStatus(retryableException.status());
+                    && hasRetryableConnectionOrReadTimeoutCause(retryableException.getCause());
         }
         if (exception instanceof FeignException feignException) {
             return isRetryableStatus(feignException.status());
@@ -159,12 +173,36 @@ public class OrderServiceGateway implements OrderQueryGateway {
         return status == 502 || status == 503 || status == 504;
     }
 
+    private boolean hasRetryableConnectionOrReadTimeoutCause(Throwable cause) {
+        boolean foundRetryableCause = false;
+        Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Throwable current = cause;
+             current != null && visited.add(current);
+             current = current.getCause()) {
+            // DNS、TLS/证书和协议错误通常不会通过同请求重试恢复；即使链中还包着连接异常也拒绝重试。
+            if (current instanceof UnknownHostException
+                    || current instanceof SSLException
+                    || current instanceof ProtocolException
+                    || current instanceof org.apache.hc.core5.http.ProtocolException) {
+                return false;
+            }
+            if (current instanceof ConnectException
+                    || current instanceof SocketTimeoutException
+                    || current instanceof ConnectionRequestTimeoutException) {
+                foundRetryableCause = true;
+            }
+        }
+        return foundRetryableCause;
+    }
+
     private String failureCategory(RuntimeException exception) {
         if (exception instanceof FeignException feignException && feignException.status() > 0) {
             return "HTTP_" + feignException.status();
         }
         if (exception instanceof RetryableException) {
-            return "NETWORK_IO";
+            return hasRetryableConnectionOrReadTimeoutCause(exception.getCause())
+                    ? "NETWORK_TRANSIENT"
+                    : "NETWORK_NON_TRANSIENT";
         }
         return "CLIENT_ERROR";
     }
