@@ -50,7 +50,35 @@ public interface OrderSearchClient {
             Integer goodsTotalCount,
             List<OrderGoodsData> goods,
             String carrierName,
-            List<String> logisticsCodes) {
+            List<String> logisticsCodes,
+            Long paymentMethodCode,
+            String paymentMethodText,
+            OrderAmountData amount,
+            OrderRecipientData recipient,
+            Integer goodsLineCount,
+            Boolean goodsTruncated,
+            Integer shipmentCount,
+            Boolean shipmentsTruncated,
+            List<OrderShipmentData> shipments) {
+
+        /** 兼容旧响应夹具；Feign 解码旧 JSON 时新增字段同样自然为 null。 */
+        public OrderCardData(
+                String orderCode,
+                String outerOrderCode,
+                Integer statusCode,
+                String statusText,
+                String orderTime,
+                String customerDisplayName,
+                Long payAmountInFen,
+                Integer goodsTotalCount,
+                List<OrderGoodsData> goods,
+                String carrierName,
+                List<String> logisticsCodes) {
+            this(orderCode, outerOrderCode, statusCode, statusText, orderTime,
+                    customerDisplayName, payAmountInFen, goodsTotalCount, goods,
+                    carrierName, logisticsCodes, null, null, null, null,
+                    null, null, null, null, null);
+        }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -58,6 +86,40 @@ public interface OrderSearchClient {
             String goodsName,
             String skuCode,
             String specification,
-            Integer quantity) {
+            Long unitPriceInFen,
+            Integer quantity,
+            Long subtotalInFen,
+            Boolean gift) {
+
+        public OrderGoodsData(
+                String goodsName,
+                String skuCode,
+                String specification,
+                Integer quantity) {
+            this(goodsName, skuCode, specification, null, quantity, null, null);
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record OrderAmountData(
+            Long goodsTotalInFen,
+            Long discountInFen,
+            Long balanceDeductionInFen,
+            Long freightInFen,
+            Long receivableInFen) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record OrderRecipientData(
+            String nameMasked,
+            String phoneMasked,
+            String regionText) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record OrderShipmentData(
+            String carrierName,
+            String logisticsCode,
+            String deliveryTime) {
     }
 }
