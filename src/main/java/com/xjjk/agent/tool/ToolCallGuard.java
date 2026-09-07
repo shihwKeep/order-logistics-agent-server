@@ -19,6 +19,7 @@ public final class ToolCallGuard {
     private final AtomicInteger distinctCallCount = new AtomicInteger();
     private final ConcurrentHashMap<String, CompletableFuture<String>> calls =
             new ConcurrentHashMap<>();
+    private final Object admissionLock = new Object();
 
     public ToolCallGuard(int maxDistinctCalls) {
         if (maxDistinctCalls <= 0) {
@@ -44,18 +45,24 @@ public final class ToolCallGuard {
 
         String callKey = toolName + '\n' + canonicalArguments;
         CompletableFuture<String> candidate = new CompletableFuture<>();
-        CompletableFuture<String> existing = calls.putIfAbsent(callKey, candidate);
+        CompletableFuture<String> existing;
+        boolean limitExceeded = false;
+        // 新键登记与额度变化使用同一把短锁。工具调用和 Future 等待均在锁外执行，
+        // 因而不会串行化真实下游请求，只保证“开放重试”和额度归还不可交错。
+        synchronized (admissionLock) {
+            existing = calls.putIfAbsent(callKey, candidate);
+            if (existing == null) {
+                limitExceeded = distinctCallCount.incrementAndGet() > maxDistinctCalls;
+            }
+        }
         if (existing != null) {
             return await(existing);
         }
 
-        // 只有成功占据新键的线程才计数；超过上限的键不会留在缓存中。
-        int currentCount = distinctCallCount.incrementAndGet();
-        if (currentCount > maxDistinctCalls) {
+        if (limitExceeded) {
             ToolCallLimitExceededException exception =
                     new ToolCallLimitExceededException(maxDistinctCalls);
-            removeFailedCall(callKey, candidate);
-            candidate.completeExceptionally(exception);
+            completeFailedCall(callKey, candidate, exception);
             throw exception;
         }
 
@@ -66,20 +73,25 @@ public final class ToolCallGuard {
             return result;
         } catch (RuntimeException | Error exception) {
             // 失败键不应永久占用调用额度；移除后调用方可按明确策略重新尝试。
-            removeFailedCall(callKey, candidate);
-            candidate.completeExceptionally(exception);
+            completeFailedCall(callKey, candidate, exception);
             throw exception;
         }
     }
 
-    private void removeFailedCall(
+    private void completeFailedCall(
             String callKey,
-            CompletableFuture<String> candidate
+            CompletableFuture<String> candidate,
+            Throwable exception
     ) {
-        // 先归还额度、再移除键；并发重复调用在移除前仍共享本次失败，
-        // 移除完成后的明确重试才会成为新的首次执行者。
-        distinctCallCount.decrementAndGet();
-        calls.remove(callKey, candidate);
+        // Future 是失败调用组的线性化点：先让已经附着的等待者全部观察同一失败，
+        // 再原子地删除该键并归还额度。删除前到达的调用仍属于旧失败组；
+        // 删除完成后的调用才允许登记为新的首次执行者。
+        candidate.completeExceptionally(exception);
+        synchronized (admissionLock) {
+            if (calls.remove(callKey, candidate)) {
+                distinctCallCount.decrementAndGet();
+            }
+        }
     }
 
     private String await(CompletableFuture<String> existing) {
