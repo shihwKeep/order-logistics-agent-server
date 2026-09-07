@@ -1,11 +1,14 @@
 package com.xjjk.agent.order.client;
 
 import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.order.domain.OrderAmount;
 import com.xjjk.agent.order.domain.OrderCard;
 import com.xjjk.agent.order.domain.OrderGoodsSummary;
 import com.xjjk.agent.order.domain.OrderIdentifierType;
 import com.xjjk.agent.order.domain.OrderLogisticsResult;
+import com.xjjk.agent.order.domain.OrderRecipient;
 import com.xjjk.agent.order.domain.OrderSearchResult;
+import com.xjjk.agent.order.domain.OrderShipmentSummary;
 import com.xjjk.agent.order.domain.ShipmentTimeline;
 import com.xjjk.agent.order.domain.TrackNode;
 import com.xjjk.agent.order.service.OrderQueryGateway;
@@ -43,7 +46,7 @@ public class OrderServiceGateway implements OrderQueryGateway {
     private static final int ORDER_SUCCESS_CODE = 1000;
     private static final int MAX_ATTEMPTS = 2;
     private static final int MAX_ORDER_ITEMS = 5;
-    private static final int MAX_GOODS_PER_ORDER = 3;
+    private static final int MAX_GOODS_PER_ORDER = 20;
     private static final int MAX_LOGISTICS_CODES = 10;
     private static final int MAX_SHIPMENTS = 10;
     private static final int MAX_TRACKS_PER_SHIPMENT = 50;
@@ -278,9 +281,28 @@ public class OrderServiceGateway implements OrderQueryGateway {
 
     private OrderCard mapOrderCard(OrderSearchClient.OrderCardData source) {
         if (source == null || isBlank(source.orderCode()) || source.statusCode() == null
-                || source.payAmountInFen() == null || source.payAmountInFen() < 0
                 || source.goodsTotalCount() == null || source.goodsTotalCount() < 0
-                || source.goods() == null || source.logisticsCodes() == null) {
+                || source.goods() == null) {
+            throw invalidResponse();
+        }
+        return isRich(source) ? mapRichOrderCard(source) : mapLegacyOrderCard(source);
+    }
+
+    /**
+     * 只要出现任一富卡片结构字段，就必须按完整富契约校验，不能把半截新响应当旧卡片放行。
+     */
+    private boolean isRich(OrderSearchClient.OrderCardData source) {
+        return source.recipient() != null
+                || source.goodsLineCount() != null
+                || source.goodsTruncated() != null
+                || source.shipmentCount() != null
+                || source.shipmentsTruncated() != null
+                || source.shipments() != null;
+    }
+
+    private OrderCard mapLegacyOrderCard(OrderSearchClient.OrderCardData source) {
+        if (source.payAmountInFen() == null || source.payAmountInFen() < 0
+                || source.logisticsCodes() == null) {
             throw invalidResponse();
         }
         List<OrderSearchClient.OrderGoodsData> sourceGoods = source.goods();
@@ -288,7 +310,7 @@ public class OrderServiceGateway implements OrderQueryGateway {
                 || source.goodsTotalCount() < sourceGoods.size()) {
             throw invalidResponse();
         }
-        List<OrderGoodsSummary> goods = sourceGoods.stream().map(this::mapGoods).toList();
+        List<OrderGoodsSummary> goods = sourceGoods.stream().map(this::mapLegacyGoods).toList();
         List<String> logisticsCodes = source.logisticsCodes();
         if (logisticsCodes.size() > MAX_LOGISTICS_CODES
                 || logisticsCodes.stream().anyMatch(this::isBlank)) {
@@ -308,13 +330,153 @@ public class OrderServiceGateway implements OrderQueryGateway {
                 logisticsCodes);
     }
 
-    private OrderGoodsSummary mapGoods(OrderSearchClient.OrderGoodsData source) {
+    private OrderCard mapRichOrderCard(OrderSearchClient.OrderCardData source) {
+        if (source.recipient() == null
+                || source.goodsLineCount() == null || source.goodsLineCount() < 0
+                || source.goodsTruncated() == null
+                || source.shipmentCount() == null || source.shipmentCount() < 0
+                || source.shipmentsTruncated() == null
+                || source.shipments() == null) {
+            throw invalidResponse();
+        }
+        if (source.goods().size() > MAX_GOODS_PER_ORDER
+                || source.goodsLineCount() < source.goods().size()
+                || (!source.goodsTruncated()
+                && source.goodsLineCount() != source.goods().size())
+                || source.goodsTotalCount() < source.goods().size()
+                || source.shipments().size() > MAX_SHIPMENTS
+                || source.shipmentCount() < source.shipments().size()
+                || (!source.shipmentsTruncated()
+                && source.shipmentCount() != source.shipments().size())) {
+            throw invalidResponse();
+        }
+
+        List<OrderGoodsSummary> goods = source.goods().stream()
+                .map(this::mapRichGoods)
+                .toList();
+        List<OrderShipmentSummary> shipments = source.shipments().stream()
+                .map(this::mapOrderShipment)
+                .toList();
+        OrderAmount amount = mapAmount(source.amount());
+        OrderRecipient recipient = mapRecipient(source.recipient());
+
+        // 兼容字段由新结构重新派生，不信任下游可能互相矛盾的旧别名。
+        long legacyPayAmount = amount == null ? 0L : amount.receivableInFen();
+        String legacyCarrier = shipments.isEmpty() ? "" : shipments.getFirst().carrierName();
+        List<String> legacyCodes = shipments.stream()
+                .map(OrderShipmentSummary::logisticsCode)
+                .toList();
+        return new OrderCard(
+                source.orderCode(),
+                source.outerOrderCode(),
+                source.statusCode(),
+                source.statusText(),
+                source.orderTime(),
+                recipient.nameMasked(),
+                legacyPayAmount,
+                source.goodsTotalCount(),
+                goods,
+                legacyCarrier,
+                legacyCodes,
+                source.paymentMethodCode(),
+                source.paymentMethodText(),
+                amount,
+                recipient,
+                source.goodsLineCount(),
+                source.goodsTruncated(),
+                source.shipmentCount(),
+                source.shipmentsTruncated(),
+                shipments);
+    }
+
+    private OrderGoodsSummary mapLegacyGoods(OrderSearchClient.OrderGoodsData source) {
         if (source == null || isBlank(source.goodsName())
                 || source.quantity() == null || source.quantity() <= 0) {
             throw invalidResponse();
         }
         return new OrderGoodsSummary(
                 source.goodsName(), source.skuCode(), source.specification(), source.quantity());
+    }
+
+    private OrderGoodsSummary mapRichGoods(OrderSearchClient.OrderGoodsData source) {
+        if (source == null || isBlank(source.goodsName())
+                || source.unitPriceInFen() == null || source.unitPriceInFen() < 0
+                || source.quantity() == null || source.quantity() <= 0
+                || source.subtotalInFen() == null || source.subtotalInFen() < 0
+                || source.gift() == null) {
+            throw invalidResponse();
+        }
+        return new OrderGoodsSummary(
+                source.goodsName(),
+                source.skuCode(),
+                source.specification(),
+                source.unitPriceInFen(),
+                source.quantity(),
+                source.subtotalInFen(),
+                source.gift());
+    }
+
+    private OrderAmount mapAmount(OrderSearchClient.OrderAmountData source) {
+        if (source == null) {
+            return null;
+        }
+        if (isNegative(source.goodsTotalInFen())
+                || isNegative(source.discountInFen())
+                || isNegative(source.balanceDeductionInFen())
+                || isNegative(source.freightInFen())
+                || isNegative(source.receivableInFen())) {
+            throw invalidResponse();
+        }
+        return new OrderAmount(
+                source.goodsTotalInFen(),
+                source.discountInFen(),
+                source.balanceDeductionInFen(),
+                source.freightInFen(),
+                source.receivableInFen());
+    }
+
+    private OrderRecipient mapRecipient(OrderSearchClient.OrderRecipientData source) {
+        if (unsafeMaskedName(source.nameMasked()) || unsafeMaskedPhone(source.phoneMasked())) {
+            throw invalidResponse();
+        }
+        return new OrderRecipient(
+                source.nameMasked(), source.phoneMasked(), source.regionText());
+    }
+
+    private OrderShipmentSummary mapOrderShipment(OrderSearchClient.OrderShipmentData source) {
+        if (source == null || isBlank(source.logisticsCode())) {
+            throw invalidResponse();
+        }
+        return new OrderShipmentSummary(
+                source.carrierName(), source.logisticsCode(), source.deliveryTime());
+    }
+
+    private boolean isNegative(Long value) {
+        return value == null || value < 0L;
+    }
+
+    private boolean unsafeMaskedName(String value) {
+        if (isBlank(value)) {
+            return false;
+        }
+        return value.codePointCount(0, value.length()) > 1 && value.indexOf('*') < 0;
+    }
+
+    private boolean unsafeMaskedPhone(String value) {
+        if (isBlank(value)) {
+            return false;
+        }
+        String[] phones = value.split("[、,，]", -1);
+        if (phones.length > 2) {
+            return true;
+        }
+        for (String phone : phones) {
+            long digitCount = phone.chars().filter(Character::isDigit).count();
+            if (isBlank(phone) || phone.indexOf('*') < 0 || digitCount > 7) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private OrderLogisticsResult mapLogisticsResponse(
