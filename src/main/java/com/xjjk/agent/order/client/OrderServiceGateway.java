@@ -40,6 +40,8 @@ public class OrderServiceGateway implements OrderQueryGateway {
     private static final int MAX_ATTEMPTS = 2;
     private static final int MAX_ORDER_ITEMS = 5;
     private static final int MAX_GOODS_PER_ORDER = 3;
+    private static final int MAX_LOGISTICS_CODES = 10;
+    private static final int MAX_SHIPMENTS = 10;
     private static final int MAX_TRACKS_PER_SHIPMENT = 50;
 
     private final OrderSearchClient searchClient;
@@ -211,12 +213,17 @@ public class OrderServiceGateway implements OrderQueryGateway {
             OrderServiceResponse<OrderSearchClient.OrderSearchData> response) {
         OrderSearchClient.OrderSearchData data = requireSuccessfulData(response);
         OrderIdentifierType matchedBy = parseMatchedBy(data.matchedBy());
+        // 下游契约要求集合字段始终显式返回数组；null 代表响应结构损坏，不能降级成空结果。
         if (data.total() == null || data.total() < 0
-                || data.truncated() == null || data.queriedAt() == null) {
+                || data.truncated() == null || data.queriedAt() == null
+                || data.items() == null) {
             throw invalidResponse();
         }
-        List<OrderSearchClient.OrderCardData> sourceItems = safeList(data.items());
-        if (sourceItems.size() > MAX_ORDER_ITEMS) {
+        List<OrderSearchClient.OrderCardData> sourceItems = data.items();
+        // Agent 不静默截断越界数据，避免把下游契约漂移伪装成一次正常查询。
+        if (sourceItems.size() > MAX_ORDER_ITEMS
+                || data.total() < sourceItems.size()
+                || (!data.truncated() && data.total() != sourceItems.size())) {
             throw invalidResponse();
         }
         List<OrderCard> items = sourceItems.stream().map(this::mapOrderCard).toList();
@@ -227,16 +234,19 @@ public class OrderServiceGateway implements OrderQueryGateway {
     private OrderCard mapOrderCard(OrderSearchClient.OrderCardData source) {
         if (source == null || isBlank(source.orderCode()) || source.statusCode() == null
                 || source.payAmountInFen() == null || source.payAmountInFen() < 0
-                || source.goodsTotalCount() == null || source.goodsTotalCount() < 0) {
+                || source.goodsTotalCount() == null || source.goodsTotalCount() < 0
+                || source.goods() == null || source.logisticsCodes() == null) {
             throw invalidResponse();
         }
-        List<OrderSearchClient.OrderGoodsData> sourceGoods = safeList(source.goods());
-        if (sourceGoods.size() > MAX_GOODS_PER_ORDER) {
+        List<OrderSearchClient.OrderGoodsData> sourceGoods = source.goods();
+        if (sourceGoods.size() > MAX_GOODS_PER_ORDER
+                || source.goodsTotalCount() < sourceGoods.size()) {
             throw invalidResponse();
         }
         List<OrderGoodsSummary> goods = sourceGoods.stream().map(this::mapGoods).toList();
-        List<String> logisticsCodes = safeList(source.logisticsCodes());
-        if (logisticsCodes.stream().anyMatch(this::isBlank)) {
+        List<String> logisticsCodes = source.logisticsCodes();
+        if (logisticsCodes.size() > MAX_LOGISTICS_CODES
+                || logisticsCodes.stream().anyMatch(this::isBlank)) {
             throw invalidResponse();
         }
         return new OrderCard(
@@ -266,12 +276,14 @@ public class OrderServiceGateway implements OrderQueryGateway {
             OrderServiceResponse<OrderLogisticsClient.OrderLogisticsData> response) {
         OrderLogisticsClient.OrderLogisticsData data = requireSuccessfulData(response);
         OrderLogisticsClient.OrderSummaryData sourceOrder = data.order();
+        // shipments/traces 都是契约必填数组；数量越界直接判为非法响应，不在 Agent 层截断或合并。
         if (sourceOrder == null || isBlank(sourceOrder.orderCode())
                 || sourceOrder.statusCode() == null || data.queriedAt() == null
-                || data.partial() == null) {
+                || data.partial() == null || data.shipments() == null
+                || data.shipments().size() > MAX_SHIPMENTS) {
             throw invalidResponse();
         }
-        List<ShipmentTimeline> shipments = safeList(data.shipments()).stream()
+        List<ShipmentTimeline> shipments = data.shipments().stream()
                 .map(this::mapShipment)
                 .toList();
         return new OrderLogisticsResult(
@@ -283,10 +295,11 @@ public class OrderServiceGateway implements OrderQueryGateway {
     }
 
     private ShipmentTimeline mapShipment(OrderLogisticsClient.ShipmentData source) {
-        if (source == null || isBlank(source.logisticsCode()) || isBlank(source.resultStatus())) {
+        if (source == null || isBlank(source.logisticsCode()) || isBlank(source.resultStatus())
+                || source.traces() == null) {
             throw invalidResponse();
         }
-        List<OrderLogisticsClient.TrackNodeData> sourceTraces = safeList(source.traces());
+        List<OrderLogisticsClient.TrackNodeData> sourceTraces = source.traces();
         if (sourceTraces.size() > MAX_TRACKS_PER_SHIPMENT) {
             throw invalidResponse();
         }
@@ -340,11 +353,6 @@ public class OrderServiceGateway implements OrderQueryGateway {
 
     private OrderServiceUnavailableException invalidResponse() {
         return new OrderServiceUnavailableException("订单服务响应不可用");
-    }
-
-    private <T> List<T> safeList(List<T> source) {
-        // 先保留 DTO 容器用于逐项校验；领域 record 构造时再做不可变复制。
-        return source == null ? List.of() : source;
     }
 
     private boolean isBlank(String value) {

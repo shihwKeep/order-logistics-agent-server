@@ -189,6 +189,88 @@ class OrderServiceGatewayTest {
         assertThat(attempts).hasValue(1);
     }
 
+    @ParameterizedTest(name = "reject invalid search collection contract: {0}")
+    @MethodSource("invalidSearchCollectionResponses")
+    void rejectsInvalidSearchCollectionContract(
+            String caseName,
+            OrderSearchClient.OrderSearchData invalidData) {
+        AtomicInteger attempts = new AtomicInteger();
+        OrderSearchClient client = (token, tenant, user, org, requestId, request) -> {
+            attempts.incrementAndGet();
+            return new OrderServiceResponse<>(1000, "success", invalidData);
+        };
+
+        assertThatThrownBy(() -> gateway(client, unusedLogisticsClient()).search(
+                "O123", OrderIdentifierType.AUTO, IDENTITY, "request-invalid-collections"))
+                .isInstanceOf(OrderServiceUnavailableException.class)
+                .hasMessage("订单服务响应不可用");
+        assertThat(attempts).hasValue(1);
+    }
+
+    private static Stream<Arguments> invalidSearchCollectionResponses() {
+        OrderSearchClient.OrderGoodsData goods = orderGoods();
+        OrderSearchClient.OrderCardData validCard = orderCard(
+                1, List.of(goods), List.of("SF123456"));
+        return Stream.of(
+                Arguments.of("items-null", searchData(1L, false, null)),
+                Arguments.of("total-less-than-items", searchData(
+                        1L, false, List.of(validCard, validCard))),
+                Arguments.of("untruncated-total-greater-than-items", searchData(
+                        2L, false, List.of(validCard))),
+                Arguments.of("goods-null", searchData(
+                        1L, false, List.of(orderCard(1, null, List.of("SF123456"))))),
+                Arguments.of("goods-total-less-than-returned-goods", searchData(
+                        1L, false, List.of(orderCard(0, List.of(goods), List.of("SF123456"))))),
+                Arguments.of("logistics-codes-null", searchData(
+                        1L, false, List.of(orderCard(1, List.of(goods), null)))),
+                Arguments.of("logistics-codes-over-limit", searchData(
+                        1L, false, List.of(orderCard(
+                                1,
+                                List.of(goods),
+                                Stream.generate(() -> "SF123456").limit(11).toList())))));
+    }
+
+    @Test
+    void allowsTruncatedPageWithPositiveTotalAndNoItems() {
+        OrderSearchClient client = (token, tenant, user, org, requestId, request) ->
+                new OrderServiceResponse<>(1000, "success", searchData(1L, true, List.of()));
+
+        OrderSearchResult result = gateway(client, unusedLogisticsClient()).search(
+                "O123", OrderIdentifierType.AUTO, IDENTITY, "request-empty-page");
+
+        assertThat(result.total()).isEqualTo(1L);
+        assertThat(result.truncated()).isTrue();
+        assertThat(result.items()).isEmpty();
+    }
+
+    @ParameterizedTest(name = "reject invalid logistics collection contract: {0}")
+    @MethodSource("invalidLogisticsCollectionResponses")
+    void rejectsInvalidLogisticsCollectionContract(
+            String caseName,
+            OrderLogisticsClient.OrderLogisticsData invalidData) {
+        AtomicInteger attempts = new AtomicInteger();
+        OrderLogisticsClient client = (token, tenant, user, org, requestId, request) -> {
+            attempts.incrementAndGet();
+            return new OrderServiceResponse<>(1000, "success", invalidData);
+        };
+
+        assertThatThrownBy(() -> gateway(unusedSearchClient(), client).logistics(
+                "SF123456", OrderIdentifierType.LOGISTICS_CODE,
+                IDENTITY, "request-invalid-logistics-collections"))
+                .isInstanceOf(OrderServiceUnavailableException.class)
+                .hasMessage("订单服务响应不可用");
+        assertThat(attempts).hasValue(1);
+    }
+
+    private static Stream<Arguments> invalidLogisticsCollectionResponses() {
+        OrderLogisticsClient.ShipmentData shipment = shipment(List.of());
+        return Stream.of(
+                Arguments.of("shipments-null", logisticsData(null)),
+                Arguments.of("shipments-over-limit", logisticsData(
+                        Stream.generate(() -> shipment).limit(11).toList())),
+                Arguments.of("traces-null", logisticsData(List.of(shipment(null)))));
+    }
+
     @Test
     void convertsNullCollectionElementToSafeResponseException() {
         OrderSearchClient client = (token, tenant, user, org, requestId, request) ->
@@ -392,12 +474,32 @@ class OrderServiceGatewayTest {
     private static OrderServiceResponse<OrderSearchClient.OrderSearchData> searchSuccess() {
         return new OrderServiceResponse<>(1000, "success", new OrderSearchClient.OrderSearchData(
                 "ORDER_CODE", 1L, false, OffsetDateTime.parse("2026-09-07T14:30:00+08:00"),
-                List.of(new OrderSearchClient.OrderCardData(
-                        "O123", "OUT123", 80, "在途", "2026-09-07 12:00:00", "石**",
-                        12900L, 1,
-                        List.of(new OrderSearchClient.OrderGoodsData(
-                                "商品名称", "SKU001", "规格", 2)),
-                        "顺丰速运", List.of("SF123456")))));
+                List.of(orderCard(1, List.of(orderGoods()), List.of("SF123456")))));
+    }
+
+    private static OrderSearchClient.OrderSearchData searchData(
+            long total,
+            boolean truncated,
+            List<OrderSearchClient.OrderCardData> items) {
+        return new OrderSearchClient.OrderSearchData(
+                "ORDER_CODE",
+                total,
+                truncated,
+                OffsetDateTime.parse("2026-09-07T14:30:00+08:00"),
+                items);
+    }
+
+    private static OrderSearchClient.OrderCardData orderCard(
+            int goodsTotalCount,
+            List<OrderSearchClient.OrderGoodsData> goods,
+            List<String> logisticsCodes) {
+        return new OrderSearchClient.OrderCardData(
+                "O123", "OUT123", 80, "在途", "2026-09-07 12:00:00", "石**",
+                12900L, goodsTotalCount, goods, "顺丰速运", logisticsCodes);
+    }
+
+    private static OrderSearchClient.OrderGoodsData orderGoods() {
+        return new OrderSearchClient.OrderGoodsData("商品名称", "SKU001", "规格", 2);
     }
 
     private static OrderServiceResponse<OrderLogisticsClient.OrderLogisticsData> logisticsSuccess() {
@@ -419,6 +521,21 @@ class OrderServiceGatewayTest {
                                                 "2026-09-07 08:20:00", "苏州市", "包裹到达苏州分拨中心"),
                                         new OrderLogisticsClient.TrackNodeData(
                                                 "2026-09-07 07:10:00", "无锡市", "包裹已揽收"))))));
+    }
+
+    private static OrderLogisticsClient.OrderLogisticsData logisticsData(
+            List<OrderLogisticsClient.ShipmentData> shipments) {
+        return new OrderLogisticsClient.OrderLogisticsData(
+                new OrderLogisticsClient.OrderSummaryData("O123", 80, "在途"),
+                OffsetDateTime.parse("2026-09-07T14:30:00+08:00"),
+                false,
+                shipments);
+    }
+
+    private static OrderLogisticsClient.ShipmentData shipment(
+            List<OrderLogisticsClient.TrackNodeData> traces) {
+        return new OrderLogisticsClient.ShipmentData(
+                "SF123456", "顺丰速运", "SUCCESS", "运输中", "已到达南京", traces);
     }
 
     private static OrderSearchClient unusedSearchClient() {
