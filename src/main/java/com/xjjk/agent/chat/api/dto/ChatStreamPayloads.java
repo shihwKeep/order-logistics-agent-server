@@ -1,5 +1,7 @@
 package com.xjjk.agent.chat.api.dto;
 
+import java.time.OffsetDateTime;
+
 public final class ChatStreamPayloads {
 
     private ChatStreamPayloads() {
@@ -27,6 +29,8 @@ public final class ChatStreamPayloads {
      */
     public record Result(
             String kind,
+            int schemaVersion,
+            OffsetDateTime queriedAt,
             Object data
     ) {
     }

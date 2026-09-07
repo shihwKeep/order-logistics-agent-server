@@ -2,6 +2,7 @@ package com.xjjk.agent.chat.stream;
 
 import com.xjjk.agent.chat.api.dto.ChatStreamEvent;
 import com.xjjk.agent.chat.api.dto.ChatStreamPayloads;
+import com.xjjk.agent.tool.ToolUiResult;
 import org.springframework.http.MediaType;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -35,8 +36,19 @@ public final class ChatSseSession {
     }
 
     /** 发送工具产生的结构化结果，正文仍由模型通过 delta 输出。 */
-    public void result(String kind, Object data) throws IOException {
-        send("result", new ChatStreamPayloads.Result(kind, data));
+    public void result(ToolUiResult result) throws IOException {
+        Objects.requireNonNull(result, "工具结果不能为空");
+        result(result.kind(), result.schemaVersion(), result.queriedAt(), result.data());
+    }
+
+    /** 工具名属于服务端调用元数据，不进入前端公开的 result 负载。 */
+    public void result(
+            String kind,
+            int schemaVersion,
+            java.time.OffsetDateTime queriedAt,
+            Object data) throws IOException {
+        send("result", new ChatStreamPayloads.Result(
+                kind, schemaVersion, queriedAt, data));
     }
 
     /** 仅由确认回答成功落库的收尾流程调用。 */

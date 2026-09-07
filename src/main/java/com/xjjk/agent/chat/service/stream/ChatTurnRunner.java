@@ -137,9 +137,9 @@ public class ChatTurnRunner {
                 identity,
                 result -> {
                     try {
-                        // 完整业务数据只走 SSE result，不进入模型上下文；通用结果在此
-                        // 转换为既有 kind + data SSE 契约，避免工具层依赖具体传输实现。
-                        session.result(result.kind(), result.data());
+                        // 完整业务数据只走 SSE result，不进入模型上下文；这里保留
+                        // schemaVersion 与 queriedAt，前端才能按版本解析并展示查询时点。
+                        session.result(result);
                     } catch (IOException exception) {
                         throw new UncheckedIOException(exception);
                     }

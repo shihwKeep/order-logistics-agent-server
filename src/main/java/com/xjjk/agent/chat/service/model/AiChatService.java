@@ -2,32 +2,55 @@ package com.xjjk.agent.chat.service.model;
 
 import com.xjjk.agent.chat.domain.memory.ChatContextSelection;
 import com.xjjk.agent.chat.service.memory.RequestChatMemory;
+import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.order.tool.OrderQueryTools;
+import com.xjjk.agent.order.tool.OrderToolAvailability;
 import com.xjjk.agent.product.tool.ProductQueryTools;
 import com.xjjk.agent.tool.AgentToolRequestContext;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.support.ToolCallbacks;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
 import reactor.core.publisher.Flux;
 
-import java.util.Objects;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class AiChatService {
 
     private final ChatClient chatClient;
-    private final ProductQueryTools productQueryTools;
+    private final List<ToolCallback> productToolCallbacks;
+    private final Map<String, ToolCallback> orderToolCallbacks;
+    private final OrderToolAvailability orderToolAvailability;
 
     public AiChatService(
             @Qualifier("agentChatClient") ChatClient chatClient,
-            ProductQueryTools productQueryTools
+            ProductQueryTools productQueryTools,
+            OrderQueryTools orderQueryTools,
+            OrderToolAvailability orderToolAvailability
     ) {
         this.chatClient = chatClient;
-        this.productQueryTools = productQueryTools;
+        this.productToolCallbacks = List.of(ToolCallbacks.from(productQueryTools));
+        this.orderToolCallbacks = Arrays.stream(ToolCallbacks.from(orderQueryTools))
+                .collect(Collectors.toUnmodifiableMap(
+                        callback -> callback.getToolDefinition().name(),
+                        Function.identity()));
+        this.orderToolAvailability = orderToolAvailability;
+
+        // 启动期即验证代码声明的工具名，避免注解改名后灰度选择静默失效。
+        requireOrderCallback("search_orders");
+        requireOrderCallback("get_order_logistics");
     }
 
     /**
@@ -59,12 +82,17 @@ public class AiChatService {
             MessageChatMemoryAdvisor memoryAdvisor =
                     MessageChatMemoryAdvisor.builder(memory).build();
 
+            List<ToolCallback> selectedCallbacks = selectToolCallbacks(
+                    toolRequestContext.identity());
+
             return chatClient
                     .prompt()
                     .user(message)
                     // 工具只注册在本次请求，ToolContext 中的可信身份、requestId
                     // 和 SSE 发布器不会进入模型提示词，也不能由模型参数覆盖。
-                    .tools(productQueryTools)
+                    // 订单与物流是两个独立灰度能力。必须按当前认证组织筛选
+                    // ToolCallback，不能注册整个 OrderQueryTools 后在工具内部假关闭。
+                    .toolCallbacks(selectedCallbacks)
                     .toolContext(Map.of(
                             AgentToolRequestContext.CONTEXT_KEY,
                             toolRequestContext))
@@ -77,5 +105,25 @@ public class AiChatService {
                     .stream()
                     .chatResponse();
         });
+    }
+
+    /** 每次请求基于可信身份生成精确工具清单；商品工具保持始终注册。 */
+    List<ToolCallback> selectToolCallbacks(AgentIdentity identity) {
+        List<ToolCallback> selected = new ArrayList<>(productToolCallbacks);
+        if (orderToolAvailability.isOrderAvailable(identity)) {
+            selected.add(requireOrderCallback("search_orders"));
+        }
+        if (orderToolAvailability.isLogisticsAvailable(identity)) {
+            selected.add(requireOrderCallback("get_order_logistics"));
+        }
+        return List.copyOf(selected);
+    }
+
+    private ToolCallback requireOrderCallback(String toolName) {
+        ToolCallback callback = orderToolCallbacks.get(toolName);
+        if (callback == null) {
+            throw new IllegalStateException("缺少订单工具定义: " + toolName);
+        }
+        return callback;
     }
 }
