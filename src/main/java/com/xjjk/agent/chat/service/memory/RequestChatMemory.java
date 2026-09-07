@@ -45,6 +45,11 @@ public final class RequestChatMemory implements ChatMemory {
             messages.add(new UserMessage(selection.selectedSummary()));
         }
 
+        if (selection.selectedBusinessReference() != null) {
+            // 业务引用只用于指代消解，同样保持 USER 低权限并放在原始历史之前。
+            messages.add(new UserMessage(selection.selectedBusinessReference()));
+        }
+
         for (ChatHistoryTurn turn : selection.selectedTurns()) {
             messages.add(new UserMessage(turn.userContent()));
             messages.add(new AssistantMessage(turn.assistantContent()));

@@ -6,13 +6,15 @@ import com.xjjk.agent.chat.domain.memory.ChatContextSelection;
 import com.xjjk.agent.chat.domain.memory.ChatHistorySnapshot;
 import com.xjjk.agent.chat.domain.memory.ChatHistoryCursor;
 import com.xjjk.agent.chat.domain.summary.ChatSummarySnapshot;
+import com.xjjk.agent.chat.reference.ChatBusinessContextRenderer;
+import com.xjjk.agent.chat.reference.RecentOrderReferenceProvider;
 import com.xjjk.agent.chat.service.summary.ChatSummaryProvider;
 import com.xjjk.agent.chat.service.summary.ChatSummaryTaskScheduler;
 import com.xjjk.agent.chat.stream.ChatStreamControl;
 import com.xjjk.agent.common.api.ApiErrorCode;
 import com.xjjk.agent.common.exception.BusinessException;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.concurrent.CancellationException;
@@ -24,7 +26,6 @@ import java.util.concurrent.CancellationException;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ChatContextPreparationService {
 
     private final ChatHistorySnapshotProvider snapshotProvider;
@@ -32,6 +33,42 @@ public class ChatContextPreparationService {
     private final ChatContextSelector contextSelector;
     private final ChatSummaryTaskScheduler summaryTaskScheduler;
     private final AiPromptProperties promptProperties;
+    private final RecentOrderReferenceProvider orderReferenceProvider;
+    private final ChatBusinessContextRenderer businessContextRenderer;
+
+    /** 生产构造器：由 Spring 注入完整的短期记忆、摘要和会话内业务引用能力。 */
+    @Autowired
+    public ChatContextPreparationService(
+            ChatHistorySnapshotProvider snapshotProvider,
+            ChatSummaryProvider summaryProvider,
+            ChatContextSelector contextSelector,
+            ChatSummaryTaskScheduler summaryTaskScheduler,
+            AiPromptProperties promptProperties,
+            RecentOrderReferenceProvider orderReferenceProvider,
+            ChatBusinessContextRenderer businessContextRenderer
+    ) {
+        this.snapshotProvider = snapshotProvider;
+        this.summaryProvider = summaryProvider;
+        this.contextSelector = contextSelector;
+        this.summaryTaskScheduler = summaryTaskScheduler;
+        this.promptProperties = promptProperties;
+        this.orderReferenceProvider = orderReferenceProvider;
+        this.businessContextRenderer = businessContextRenderer;
+    }
+
+    /**
+     * 兼容既有单元测试及不启用业务引用的纯记忆装配；生产环境使用完整构造器。
+     */
+    public ChatContextPreparationService(
+            ChatHistorySnapshotProvider snapshotProvider,
+            ChatSummaryProvider summaryProvider,
+            ChatContextSelector contextSelector,
+            ChatSummaryTaskScheduler summaryTaskScheduler,
+            AiPromptProperties promptProperties
+    ) {
+        this(snapshotProvider, summaryProvider, contextSelector,
+                summaryTaskScheduler, promptProperties, null, null);
+    }
 
     public ChatContextSelection prepare(
             ChatTurnContext turn,
@@ -53,16 +90,27 @@ public class ChatContextPreparationService {
         ChatSummarySnapshot summary = summaryProvider.load(cursor);
         checkStopped(control);
 
-        // 第三步：在统一 Token 预算内先保护最近原始轮次，再拼接低权限摘要和更早可容纳的原文。
+        // 第三步：只读取当前用户、当前会话、当前消息之前最新的一份结构化结果。
+        // 只有结果能够唯一确定订单时才生成低权限引用；它只能帮助理解“这个订单”，
+        // 不能作为订单状态、金额或物流信息的事实来源。
+        String businessContext = loadBusinessContextBestEffort(
+                turn, snapshot.beforeSequence());
+        checkStopped(control);
+
+        // 第四步：在统一 Token 预算内先保护最近原始轮次，再拼接低权限摘要和更早可容纳的原文。
         // Selector 同时计算摘要覆盖边界与原文起点，显式标记二者之间是否存在上下文空档。
+        // 业务引用的优先级最低：只有在不挤占已选摘要和原始历史时才会进入模型上下文。
         long startedAt = System.nanoTime();
-        ChatContextSelection selection =
-                contextSelector.select(
-                        promptProperties.system(), message, snapshot, summary);
+        ChatContextSelection selection = businessContext == null
+                ? contextSelector.select(
+                        promptProperties.system(), message, snapshot, summary)
+                : contextSelector.select(
+                        promptProperties.system(), message, snapshot, summary,
+                        businessContext);
         long durationMs = (System.nanoTime() - startedAt) / 1_000_000;
         checkStopped(control);
 
-        // 第四步：出现空档时只登记后台强制摘要信号；当前请求继续使用已经安全选中的上下文。
+        // 第五步：出现空档时只登记后台强制摘要信号；当前请求继续使用已经安全选中的上下文。
         requestContextPressureBestEffort(selection);
 
         // 表示选中结果将交给模型调用路径，不代表远端已经接收。
@@ -74,6 +122,29 @@ public class ChatContextPreparationService {
                 turn.requestId(), selection.strategyVersion(), promptProperties.version(),
                 selection.selectedTurns().size(), selection.estimatedInputTokens());
         return selection;
+    }
+
+    private String loadBusinessContextBestEffort(
+            ChatTurnContext turn,
+            long beforeSequence
+    ) {
+        if (orderReferenceProvider == null || businessContextRenderer == null) {
+            return null;
+        }
+        try {
+            return orderReferenceProvider.findUniqueBefore(turn, beforeSequence)
+                    .map(businessContextRenderer::render)
+                    .orElse(null);
+        } catch (SecurityException exception) {
+            // 身份或会话归属异常必须 fail-closed，不能降级为普通缓存未命中。
+            throw exception;
+        } catch (RuntimeException exception) {
+            // 会话内业务引用是辅助上下文，读取失败不能阻断基础对话。
+            log.warn("chat_business_reference_load_failed requestId={}, "
+                            + "exceptionType={}",
+                    turn.requestId(), exception.getClass().getSimpleName());
+            return null;
+        }
     }
 
     private void requestContextPressureBestEffort(

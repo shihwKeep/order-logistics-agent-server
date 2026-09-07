@@ -69,6 +69,20 @@ public class ChatContextSelector {
             ChatHistorySnapshot source,
             ChatSummarySnapshot summary
     ) {
+        return select(systemPrompt, currentMessage, source, summary, null);
+    }
+
+    /**
+     * 在统一预算中组合摘要、会话业务引用与原始历史。
+     * 业务引用优先级低于已经选中的摘要和原文，放不下时直接舍弃，不反向挤占它们。
+     */
+    public ChatContextSelection select(
+            String systemPrompt,
+            String currentMessage,
+            ChatHistorySnapshot source,
+            ChatSummarySnapshot summary,
+            String businessContext
+    ) {
         Objects.requireNonNull(source, "历史快照不能为空");
         Objects.requireNonNull(summary, "摘要快照不能为空");
         checkInterrupted();
@@ -180,6 +194,26 @@ public class ChatContextSelector {
 
         List<ChatHistoryTurn> selectedTurns =
                 candidates.subList(selectedStart, candidates.size());
+        String selectedBusinessContext = null;
+        long businessContextEstimatedTokens = 0L;
+        boolean businessContextBudgetTruncated = false;
+        if (businessContext != null && !businessContext.isBlank()) {
+            long withBusinessContext = tokenEstimator.estimate(
+                    systemPrompt,
+                    selectedSummary,
+                    businessContext,
+                    selectedTurns,
+                    currentMessage
+            );
+            if (withBusinessContext <= budget.usableInputTokens()) {
+                selectedBusinessContext = businessContext;
+                businessContextEstimatedTokens = Math.subtractExact(
+                        withBusinessContext, selectedEstimatedTokens);
+                selectedEstimatedTokens = withBusinessContext;
+            } else {
+                businessContextBudgetTruncated = true;
+            }
+        }
         long selectedFrom = selectedTurns.isEmpty()
                 ? 0L : selectedTurns.get(0).userSequence();
         long selectedUntil = selectedTurns.isEmpty()
@@ -205,6 +239,9 @@ public class ChatContextSelector {
                 summaryEstimatedTokens,
                 selectedSummaryVersion,
                 summaryBoundary,
+                selectedBusinessContext,
+                businessContextEstimatedTokens,
+                businessContextBudgetTruncated,
                 selectedFrom,
                 selectedUntil,
                 gapFrom > 0,

@@ -15,6 +15,9 @@ import java.util.Objects;
  * @param summaryEstimatedTokens 摘要消息相对固定输入增加的估算 Token
  * @param selectedSummaryVersion 已选摘要版本；无摘要时为 0
  * @param selectedSummaryCoveredUntilSequence 已选摘要覆盖边界；无摘要时为 0
+ * @param selectedBusinessReference 已选的低权限业务引用；未选中时为 null
+ * @param businessReferenceEstimatedTokens 业务引用相对既有输入增加的估算 Token
+ * @param businessReferenceBudgetTruncated 是否因预算不足放弃业务引用
  * @param selectedHistoryFromSequence 选中原文起始序号；无原文时为 0
  * @param selectedHistoryUntilSequence 选中原文结束序号；无原文时为 0
  * @param hasContextGap 摘要边界与选中原文之间是否存在未覆盖空档
@@ -32,6 +35,9 @@ public record ChatContextSelection(
         long summaryEstimatedTokens,
         long selectedSummaryVersion,
         long selectedSummaryCoveredUntilSequence,
+        String selectedBusinessReference,
+        long businessReferenceEstimatedTokens,
+        boolean businessReferenceBudgetTruncated,
         long selectedHistoryFromSequence,
         long selectedHistoryUntilSequence,
         boolean hasContextGap,
@@ -73,6 +79,20 @@ public record ChatContextSelection(
                 || selectedSummaryCoveredUntilSequence
                 > source.memoryUntilSequence()) {
             throw new IllegalArgumentException("已选摘要版本或覆盖边界不合法");
+        }
+
+        if ((selectedBusinessReference == null)
+                != (businessReferenceEstimatedTokens == 0)
+                || businessReferenceEstimatedTokens < 0) {
+            throw new IllegalArgumentException("业务引用选择结果与估算值不一致");
+        }
+        if (selectedBusinessReference != null
+                && selectedBusinessReference.isBlank()) {
+            throw new IllegalArgumentException("业务引用不能为空白文本");
+        }
+        if (selectedBusinessReference != null
+                && businessReferenceBudgetTruncated) {
+            throw new IllegalArgumentException("已选业务引用不能同时标记预算舍弃");
         }
 
         int sourceSize = source.turns().size();
@@ -139,6 +159,38 @@ public record ChatContextSelection(
         }
     }
 
+    /** 业务引用是否进入本次模型上下文。 */
+    public boolean hasBusinessReference() {
+        return selectedBusinessReference != null;
+    }
+
+    /** 兼容不包含业务引用的既有构造调用。 */
+    public ChatContextSelection(
+            ChatHistorySnapshot source,
+            List<ChatHistoryTurn> selectedTurns,
+            String selectedSummary,
+            long summaryEstimatedTokens,
+            long selectedSummaryVersion,
+            long selectedSummaryCoveredUntilSequence,
+            long selectedHistoryFromSequence,
+            long selectedHistoryUntilSequence,
+            boolean hasContextGap,
+            long gapFromSequence,
+            long gapUntilSequence,
+            ChatContextBudget budget,
+            long estimatedInputTokens,
+            boolean tokenBudgetTruncated,
+            String strategyVersion
+    ) {
+        this(source, selectedTurns, selectedSummary, summaryEstimatedTokens,
+                selectedSummaryVersion, selectedSummaryCoveredUntilSequence,
+                null, 0L, false,
+                selectedHistoryFromSequence, selectedHistoryUntilSequence,
+                hasContextGap, gapFromSequence, gapUntilSequence,
+                budget, estimatedInputTokens, tokenBudgetTruncated,
+                strategyVersion);
+    }
+
     /**
      * 只输出元信息，不输出历史正文。
      */
@@ -157,6 +209,11 @@ public record ChatContextSelection(
                 + ", selectedSummaryVersion=" + selectedSummaryVersion
                 + ", selectedSummaryCoveredUntilSequence="
                 + selectedSummaryCoveredUntilSequence
+                + ", hasBusinessReference=" + hasBusinessReference()
+                + ", businessReferenceEstimatedTokens="
+                + businessReferenceEstimatedTokens
+                + ", businessReferenceBudgetTruncated="
+                + businessReferenceBudgetTruncated
                 + ", selectedHistoryFromSequence="
                 + selectedHistoryFromSequence
                 + ", selectedHistoryUntilSequence="

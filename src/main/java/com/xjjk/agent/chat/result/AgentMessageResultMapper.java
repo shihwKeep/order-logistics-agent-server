@@ -68,4 +68,41 @@ public interface AgentMessageResultMapper extends BaseMapper<AgentMessageResultE
             @Param("userId") long userId,
             @Param("conversationId") String conversationId,
             @Param("messageIds") List<String> messageIds);
+
+    /**
+     * 读取当前用户消息之前最近的一条结构化结果。
+     * 必须先取最近结果再判断 kind，禁止跳过较新的其他业务结果去猜更早订单。
+     */
+    @Select("""
+        SELECT r.id,
+               r.tenant_id AS tenantId,
+               r.user_id AS userId,
+               r.conversation_id AS conversationId,
+               r.request_id AS requestId,
+               r.message_id AS messageId,
+               r.result_sequence AS resultSequence,
+               r.tool_name AS toolName,
+               r.kind,
+               r.schema_version AS schemaVersion,
+               r.payload_json AS payloadJson,
+               r.queried_at AS queriedAt,
+               r.created_at AS createdAt
+        FROM agent_message_result r
+        INNER JOIN agent_message m
+                ON m.message_id = r.message_id
+               AND m.tenant_id = r.tenant_id
+               AND m.user_id = r.user_id
+               AND m.conversation_id = r.conversation_id
+        WHERE r.tenant_id = #{tenantId}
+          AND r.user_id = #{userId}
+          AND r.conversation_id = #{conversationId}
+          AND m.message_sequence < #{beforeSequence}
+        ORDER BY m.message_sequence DESC, r.result_sequence DESC
+        LIMIT 1
+        """)
+    AgentMessageResultEntity selectLatestBefore(
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("conversationId") String conversationId,
+            @Param("beforeSequence") long beforeSequence);
 }
