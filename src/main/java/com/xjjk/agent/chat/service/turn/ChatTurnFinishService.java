@@ -8,6 +8,9 @@ import com.xjjk.agent.chat.persistence.entity.AgentConversationEntity;
 import com.xjjk.agent.chat.persistence.entity.AgentMessageEntity;
 import com.xjjk.agent.chat.persistence.mapper.AgentConversationMapper;
 import com.xjjk.agent.chat.persistence.mapper.AgentMessageMapper;
+import com.xjjk.agent.chat.result.AgentMessageResultEntity;
+import com.xjjk.agent.chat.result.AgentMessageResultMapper;
+import com.xjjk.agent.chat.result.PendingMessageResult;
 import com.xjjk.agent.chat.service.memory.ChatHistoryChangedEvent;
 import com.xjjk.agent.chat.service.summary.ChatSummaryTaskScheduler;
 import com.xjjk.agent.common.api.ApiErrorCode;
@@ -21,6 +24,8 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -35,6 +40,7 @@ public class ChatTurnFinishService {
 
     private final AgentConversationMapper conversationMapper;
     private final AgentMessageMapper messageMapper;
+    private final AgentMessageResultMapper resultMapper;
     private final ApplicationEventPublisher eventPublisher;
     private final ChatSummaryTaskScheduler summaryTaskScheduler;
 
@@ -46,6 +52,7 @@ public class ChatTurnFinishService {
      * @param content 已生成的正文，失败时允许保存部分内容
      * @param finishReason 模型结束原因，未知时为空
      * @param errorCode 安全的业务错误码，不传入原始异常内容
+     * @param results 已完成发布前校验的结构化结果不可变快照
      * @return true 表示本次完成收尾；
      *         false 表示本次没有写入，可能已收尾或已失去占用资格
      */
@@ -55,10 +62,12 @@ public class ChatTurnFinishService {
             MessageStatus status,
             String content,
             String finishReason,
-            String errorCode
+            String errorCode,
+            List<PendingMessageResult> results
     ) {
         Objects.requireNonNull(turn, "本轮上下文不能为空");
         Objects.requireNonNull(status, "消息状态不能为空");
+        List<PendingMessageResult> resultSnapshot = validateResults(results);
 
         if (status == MessageStatus.GENERATING) {
             throw new IllegalArgumentException("收尾状态不能为 GENERATING");
@@ -157,6 +166,19 @@ public class ChatTurnFinishService {
             throw new BusinessException(ApiErrorCode.INTERNAL_SERVER_ERROR);
         }
 
+        /*
+         * 助手消息终态、结构化结果、稳定历史游标和占用释放必须处于同一事务。
+         * 所有归属字段都从 ChatTurnContext 覆盖生成，绝不接受模型、工具参数或
+         * 前端传入 tenantId/userId/conversationId，避免伪造归属导致越权数据。
+         */
+        if (!resultSnapshot.isEmpty()) {
+            List<AgentMessageResultEntity> resultRows = toResultRows(
+                    turn, resultSnapshot, now);
+            if (resultMapper.insertBatch(resultRows) != resultRows.size()) {
+                throw new BusinessException(ApiErrorCode.INTERNAL_SERVER_ERROR);
+            }
+        }
+
         // 保存消息、推进稳定历史游标和释放占用属于同一个事务，不能只成功一部分。
         int conversationRows = conversationMapper.update(
                 null,
@@ -206,5 +228,52 @@ public class ChatTurnFinishService {
         ));
 
         return true;
+    }
+
+    private List<PendingMessageResult> validateResults(
+            List<PendingMessageResult> results) {
+        Objects.requireNonNull(results, "结构化结果集合不能为空");
+        List<PendingMessageResult> snapshot = List.copyOf(results);
+        for (int index = 0; index < snapshot.size(); index++) {
+            PendingMessageResult result = Objects.requireNonNull(
+                    snapshot.get(index), "结构化结果不能为空");
+            if (result.resultSequence() != index + 1
+                    || !StringUtils.hasText(result.toolName())
+                    || !StringUtils.hasText(result.kind())
+                    || result.schemaVersion() <= 0
+                    || !StringUtils.hasText(result.payloadJson())
+                    || result.payloadBytes() <= 0
+                    || result.queriedAt() == null) {
+                throw new IllegalArgumentException("结构化结果快照不合法");
+            }
+        }
+        return snapshot;
+    }
+
+    private List<AgentMessageResultEntity> toResultRows(
+            ChatTurnContext turn,
+            List<PendingMessageResult> results,
+            LocalDateTime createdAt) {
+        List<AgentMessageResultEntity> rows = new ArrayList<>(results.size());
+        for (PendingMessageResult result : results) {
+            AgentMessageResultEntity row = new AgentMessageResultEntity();
+            row.setTenantId(turn.tenantId());
+            row.setUserId(turn.userId());
+            row.setConversationId(turn.conversationId());
+            row.setRequestId(turn.requestId());
+            row.setMessageId(turn.assistantMessageId());
+            row.setResultSequence(result.resultSequence());
+            row.setToolName(result.toolName());
+            row.setKind(result.kind());
+            row.setSchemaVersion(result.schemaVersion());
+            row.setPayloadJson(result.payloadJson());
+            row.setQueriedAt(result.queriedAt()
+                    .withOffsetSameInstant(ZoneOffset.UTC)
+                    .toLocalDateTime()
+                    .truncatedTo(ChronoUnit.MILLIS));
+            row.setCreatedAt(createdAt);
+            rows.add(row);
+        }
+        return rows;
     }
 }

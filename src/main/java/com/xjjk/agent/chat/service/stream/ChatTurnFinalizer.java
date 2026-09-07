@@ -86,7 +86,8 @@ public class ChatTurnFinalizer {
                     execution.status,
                     execution.content.toString(),
                     execution.finishReason,
-                    execution.error == null ? null : execution.error.code()
+                    execution.error == null ? null : execution.error.code(),
+                    execution.resultSnapshot()
             );
             if (saved) {
                 return new PersistenceOutcome(true, null);

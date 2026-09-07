@@ -5,6 +5,7 @@ import com.xjjk.agent.chat.persistence.mapper.AgentConversationMapper;
 import com.xjjk.agent.chat.persistence.mapper.AgentMessageMapper;
 import com.xjjk.agent.chat.persistence.mapper.AgentConversationSummaryMapper;
 import com.xjjk.agent.chat.persistence.mapper.AgentSummaryTaskMapper;
+import com.xjjk.agent.chat.result.AgentMessageResultMapper;
 import com.xjjk.agent.chat.service.memory.ChatHistorySnapshotProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +33,9 @@ class OrderLogisticsAgentServerApplicationTests {
 
     @MockitoBean
     private AgentConversationSummaryMapper conversationSummaryMapper;
+
+    @MockitoBean
+    private AgentMessageResultMapper messageResultMapper;
 
     @Test
     void contextLoads() {

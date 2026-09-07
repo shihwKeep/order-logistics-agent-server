@@ -9,6 +9,7 @@ import com.xjjk.agent.chat.persistence.entity.AgentConversationEntity;
 import com.xjjk.agent.chat.persistence.entity.AgentMessageEntity;
 import com.xjjk.agent.chat.persistence.mapper.AgentConversationMapper;
 import com.xjjk.agent.chat.persistence.mapper.AgentMessageMapper;
+import com.xjjk.agent.chat.result.AgentMessageResultMapper;
 import com.xjjk.agent.chat.service.memory.ChatHistoryChangedEvent;
 import com.xjjk.agent.chat.service.summary.ChatSummaryTaskScheduler;
 import com.xjjk.agent.common.exception.BusinessException;
@@ -24,6 +25,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -41,6 +43,9 @@ class ChatHistoryChangedEventPublishingTest {
 
     @Mock
     private AgentMessageMapper messageMapper;
+
+    @Mock
+    private AgentMessageResultMapper resultMapper;
 
     @Mock
     private ApplicationEventPublisher eventPublisher;
@@ -104,6 +109,7 @@ class ChatHistoryChangedEventPublishingTest {
         ChatTurnFinishService service = new ChatTurnFinishService(
                 conversationMapper,
                 messageMapper,
+                resultMapper,
                 eventPublisher,
                 summaryTaskScheduler
         );
@@ -113,7 +119,8 @@ class ChatHistoryChangedEventPublishingTest {
                 MessageStatus.SUCCESS,
                 "answer",
                 "STOP",
-                null
+                null,
+                List.of()
         )).isTrue();
 
         ArgumentCaptor<ChatHistoryChangedEvent> event =
@@ -139,6 +146,7 @@ class ChatHistoryChangedEventPublishingTest {
         ChatTurnFinishService service = new ChatTurnFinishService(
                 conversationMapper,
                 messageMapper,
+                resultMapper,
                 eventPublisher,
                 summaryTaskScheduler
         );
@@ -148,7 +156,8 @@ class ChatHistoryChangedEventPublishingTest {
                 MessageStatus.SUCCESS,
                 "answer",
                 "STOP",
-                null
+                null,
+                List.of()
         )).isInstanceOf(BusinessException.class);
         verify(eventPublisher, never()).publishEvent(any());
         verify(summaryTaskScheduler, never()).requestStableHistory(

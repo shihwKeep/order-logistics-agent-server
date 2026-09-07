@@ -4,6 +4,8 @@ import com.xjjk.agent.chat.domain.MessageStatus;
 import com.xjjk.agent.chat.domain.memory.ChatContextSelection;
 import com.xjjk.agent.chat.service.memory.ChatContextPreparationService;
 import com.xjjk.agent.chat.service.model.AiChatService;
+import com.xjjk.agent.chat.result.ChatToolResultRecorder;
+import com.xjjk.agent.chat.result.PendingMessageResult;
 import com.xjjk.agent.chat.service.turn.ChatTurnPreparationService;
 import com.xjjk.agent.chat.stream.ChatSseSession;
 import com.xjjk.agent.chat.stream.ChatStreamControl;
@@ -36,6 +38,7 @@ public class ChatTurnRunner {
     private final ChatContextPreparationService contextService;
     private final AiChatService aiChatService;
     private final ChatTurnFinalizer finalizer;
+    private final ChatToolResultRecorder resultRecorder;
 
     public void run(
             String conversationId,
@@ -136,12 +139,23 @@ public class ChatTurnRunner {
                 execution.requestId,
                 identity,
                 result -> {
-                    try {
-                        // 完整业务数据只走 SSE result，不进入模型上下文；这里保留
-                        // schemaVersion 与 queriedAt，前端才能按版本解析并展示查询时点。
-                        session.result(result);
-                    } catch (IOException exception) {
-                        throw new UncheckedIOException(exception);
+                    synchronized (execution) {
+                        /*
+                         * 固定顺序不能调整：先完成字段、JSON 和 UTF-8 字节上限校验，
+                         * 再登记到本轮待落库集合，最后才向前端发送 SSE result。
+                         * 因此已经展示的正常卡片一定拥有可持久化快照；如果之后模型
+                         * 失败、取消或客户端断开，收尾事务仍会保存已经登记的结果。
+                         */
+                        PendingMessageResult pending = resultRecorder.prepare(
+                                result, execution.nextResultSequence());
+                        execution.addResult(pending);
+                        try {
+                            // 完整业务数据只走 SSE result，不进入模型上下文；这里保留
+                            // schemaVersion 与 queriedAt，前端才能按版本解析并展示查询时点。
+                            session.result(result);
+                        } catch (IOException exception) {
+                            throw new UncheckedIOException(exception);
+                        }
                     }
                 },
                 new ToolCallGuard(3));
