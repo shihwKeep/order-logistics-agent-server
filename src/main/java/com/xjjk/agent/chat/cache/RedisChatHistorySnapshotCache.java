@@ -43,6 +43,7 @@ public class RedisChatHistorySnapshotCache
         Objects.requireNonNull(cursor, "稳定历史游标不能为空");
 
         if (!cacheProperties.enabled()) {
+            // 关闭缓存时保持与“未命中”相同的调用语义，上层无需增加开关分支。
             return Optional.empty();
         }
 
@@ -50,8 +51,10 @@ public class RedisChatHistorySnapshotCache
         try {
             String json;
             try {
+                // Redis 读取放在数据库游标校验之后，缓存本身不承担鉴权和归属校验。
                 json = redis.opsForValue().get(keyFactory.create(cursor));
             } catch (RuntimeException exception) {
+                // Fail-Open：Redis 是加速层，连接超时等基础设施异常只触发 MySQL 回源。
                 metrics.error();
                 log.warn(
                         "chat_history_cache_read_failed "
@@ -68,6 +71,7 @@ public class RedisChatHistorySnapshotCache
             }
 
             try {
+                // 即使 Key 正确也不直接信任缓存正文，反序列化后仍校验身份、版本和容量。
                 ChatHistorySnapshot snapshot = objectMapper.readValue(
                         json,
                         CachedChatHistorySnapshot.class
@@ -105,6 +109,7 @@ public class RedisChatHistorySnapshotCache
         }
 
         try {
+            // 先验证再序列化，避免把身份串线或超过读取预算的快照写进 Redis。
             validate(cursor, snapshot);
             String json = objectMapper.writeValueAsString(
                     CachedChatHistorySnapshot.fromDomain(snapshot)
@@ -116,6 +121,7 @@ public class RedisChatHistorySnapshotCache
             );
             metrics.writeSuccess();
         } catch (JsonProcessingException | RuntimeException exception) {
+            // 写缓存失败不会抛给调用方：当前请求仍可使用刚从 MySQL 取得的历史继续执行。
             metrics.writeError();
             log.warn(
                     "chat_history_cache_write_failed "
@@ -132,6 +138,7 @@ public class RedisChatHistorySnapshotCache
             ChatHistoryCursor cursor,
             ChatHistorySnapshot snapshot
     ) {
+        // 缓存值必须与刚从 MySQL 取得的稳定游标完全一致，防止串租户、串用户或读到旧版本。
         if (snapshot.tenantId() != cursor.tenantId()
                 || snapshot.userId() != cursor.userId()
                 || !snapshot.conversationId().equals(
@@ -150,6 +157,7 @@ public class RedisChatHistorySnapshotCache
 
         long contentBytes = 0L;
         for (ChatHistoryTurn turn : snapshot.turns()) {
+            // 使用 UTF-8 实际字节数复核容量，而不是只按 Java 字符数量判断。
             contentBytes = Math.addExact(
                     contentBytes,
                     turn.userContent()
@@ -171,6 +179,7 @@ public class RedisChatHistorySnapshotCache
 
     private Duration nextTtl() {
         long jitterMillis = cacheProperties.ttlJitter().toMillis();
+        // 在基础 TTL 上增加随机抖动，避免大量会话在同一时刻失效并集中回源 MySQL。
         long additionalMillis = jitterMillis == 0
                 ? 0
                 : ThreadLocalRandom.current().nextLong(jitterMillis + 1);

@@ -8,6 +8,7 @@ import com.xjjk.agent.chat.persistence.entity.AgentMessageEntity;
 import com.xjjk.agent.chat.persistence.mapper.AgentConversationMapper;
 import com.xjjk.agent.chat.persistence.mapper.AgentMessageMapper;
 import com.xjjk.agent.chat.service.memory.ChatHistoryChangedEvent;
+import com.xjjk.agent.chat.service.summary.ChatSummaryTaskScheduler;
 import com.xjjk.agent.common.api.ApiErrorCode;
 import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.identity.domain.AgentIdentity;
@@ -37,6 +38,7 @@ public class ChatTurnRecoveryService {
     private final AgentConversationMapper conversationMapper;
     private final AgentMessageMapper messageMapper;
     private final ApplicationEventPublisher eventPublisher;
+    private final ChatSummaryTaskScheduler summaryTaskScheduler;
 
     /**
      * 尝试恢复当前用户会话中的过期占用。
@@ -170,6 +172,20 @@ public class ChatTurnRecoveryService {
             throw new BusinessException(ApiErrorCode.INTERNAL_SERVER_ERROR);
         }
 
+        /*
+         * 中断轮次不会把助手残缺正文作为可信摘要来源，但用户请求及失败终态仍需进入
+         * 后续摘要必要性判断，因此恢复事务同样推进持久化摘要目标。
+         */
+        summaryTaskScheduler.requestStableHistory(
+                identity.tenantId(),
+                identity.userId(),
+                conversationId,
+                nextMemoryVersion,
+                nextMemoryUntilSequence
+        );
+
+        // 过期请求恢复同样会形成新的稳定历史版本，因此也要发布历史推进事件。
+        // AFTER_COMMIT 监听器会在恢复事务提交后异步预热 Redis；事务回滚时不会执行。
         eventPublisher.publishEvent(new ChatHistoryChangedEvent(
                 identity.tenantId(),
                 identity.userId(),

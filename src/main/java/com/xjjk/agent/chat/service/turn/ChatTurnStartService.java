@@ -93,7 +93,6 @@ public class ChatTurnStartService {
         long userSequence =
                 Math.addExact(conversation.getLastMessageSequence(), 1L);
         long assistantSequence = Math.addExact(userSequence, 1L);
-
         // 创建已完整接收的用户消息。
         AgentMessageEntity userMessage =
                 newMessage(conversation, requestId, userSequence, now);
@@ -114,7 +113,7 @@ public class ChatTurnStartService {
             throw new BusinessException(ApiErrorCode.INTERNAL_SERVER_ERROR);
         }
 
-        // 更新已分配序号，并持久化本轮请求的占用信息。
+        // 在同一事务中更新消息序号、历史版本和本轮占用信息。
         int affectedRows = conversationMapper.update(
                 null,
                 Wrappers.<AgentConversationEntity>lambdaUpdate()

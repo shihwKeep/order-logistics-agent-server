@@ -33,6 +33,7 @@ public record ChatHistoryCacheProperties(
     private static final Duration MAX_TTL = Duration.ofDays(365);
 
     public ChatHistoryCacheProperties {
+        // 配置在应用启动阶段一次性校验，避免运行后才因非法 Key 或线程池参数失败。
         if (!StringUtils.hasText(keyPrefix)
                 || !keyPrefix.matches("[A-Za-z0-9:_-]+")
                 || keyPrefix.endsWith(":")) {
@@ -52,6 +53,7 @@ public record ChatHistoryCacheProperties(
 
         if (ttlJitter.isNegative()
                 || ttlJitter.compareTo(ttl) >= 0) {
+            // 抖动必须小于基础 TTL，保证过期策略仍有明确、可预测的主体范围。
             throw new IllegalArgumentException(
                     "历史缓存 TTL 抖动必须大于等于零且小于 TTL"
             );

@@ -23,6 +23,8 @@ public class ChatHistoryCacheKeyFactory {
     public String create(ChatHistoryCursor cursor) {
         Objects.requireNonNull(cursor, "稳定历史游标不能为空");
 
+        // 身份字段用于租户和用户隔离；memoryVersion 与消息边界用于隔离不同历史版本；
+        // 读取条数、字节预算也进入 Key，配置调整后不会误用旧策略生成的缓存。
         return cacheProperties.keyPrefix()
                 + ":" + cursor.tenantId()
                 + ":" + cursor.userId()

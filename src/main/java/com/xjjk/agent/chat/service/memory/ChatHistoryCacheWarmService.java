@@ -33,10 +33,12 @@ public class ChatHistoryCacheWarmService {
 
         Timer.Sample sample = metrics.startTimer();
         try {
+            // 异步任务可能排队，执行时必须重新查询 MySQL，不能直接相信事件产生时的版本。
             Optional<ChatHistoryCursor> cursor =
                     cursorLoader.loadForWarm(event);
 
             if (cursor.isEmpty()) {
+                // 会话已删除或数据库已推进到更高版本时，旧事件没有预热价值。
                 metrics.warmSkipped();
                 log.debug(
                         "chat_history_cache_warm_skipped "
@@ -47,6 +49,7 @@ public class ChatHistoryCacheWarmService {
                 return;
             }
 
+            // 事务外重新生成新版本的稳定快照，使下一轮请求能够直接命中对应 Key。
             ChatHistorySnapshot snapshot = historyLoader.load(
                     cursor.get()
             );
@@ -59,6 +62,7 @@ public class ChatHistoryCacheWarmService {
                     event.memoryVersion()
             );
         } catch (RuntimeException exception) {
+            // 预热属于性能优化，失败只记录指标；已经提交的消息和会话状态不能被回滚。
             metrics.warmError();
             log.warn(
                     "chat_history_cache_warm_failed "

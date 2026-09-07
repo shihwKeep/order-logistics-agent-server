@@ -36,6 +36,8 @@ public record CachedChatHistorySnapshot(
     ) {
         Objects.requireNonNull(snapshot, "历史快照不能为空");
 
+        // 缓存层使用独立 DTO，不把数据库实体或 Spring AI 对象的结构绑定到 Redis。
+        // 这样业务对象调整时可以通过 schemaVersion 显式处理缓存兼容性。
         List<CachedChatHistoryTurn> cachedTurns = snapshot.turns()
                 .stream()
                 .map(CachedChatHistoryTurn::fromDomain)
@@ -56,6 +58,7 @@ public record CachedChatHistorySnapshot(
     }
 
     public ChatHistorySnapshot toDomain() {
+        // 不尝试猜测旧结构；版本不匹配时把它当作无效缓存，由上层安全回源 MySQL。
         if (schemaVersion != CURRENT_SCHEMA_VERSION) {
             throw new IllegalArgumentException("缓存历史结构版本不受支持");
         }

@@ -22,6 +22,15 @@ public final class ChatStreamPayloads {
     ) {
     }
 
+    /**
+     * 工具产生的结构化展示结果；kind 用于前端选择具体卡片组件。
+     */
+    public record Result(
+            String kind,
+            Object data
+    ) {
+    }
+
     public record Done(
             String messageId
     ) {

@@ -9,6 +9,7 @@ import com.xjjk.agent.chat.persistence.entity.AgentMessageEntity;
 import com.xjjk.agent.chat.persistence.mapper.AgentConversationMapper;
 import com.xjjk.agent.chat.persistence.mapper.AgentMessageMapper;
 import com.xjjk.agent.chat.service.memory.ChatHistoryChangedEvent;
+import com.xjjk.agent.chat.service.summary.ChatSummaryTaskScheduler;
 import com.xjjk.agent.common.api.ApiErrorCode;
 import com.xjjk.agent.common.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +36,7 @@ public class ChatTurnFinishService {
     private final AgentConversationMapper conversationMapper;
     private final AgentMessageMapper messageMapper;
     private final ApplicationEventPublisher eventPublisher;
+    private final ChatSummaryTaskScheduler summaryTaskScheduler;
 
     /**
      * 尝试结束本轮问答。
@@ -178,6 +180,23 @@ public class ChatTurnFinishService {
             throw new BusinessException(ApiErrorCode.INTERNAL_SERVER_ERROR);
         }
 
+        /*
+         * 摘要这里只登记持久化目标，不调用模型。
+         * 登记与消息终态、稳定历史游标处于同一事务，任何一步失败都会整体回滚，
+         * 防止摘要任务看到数据库中并不存在的稳定历史版本。
+         */
+        summaryTaskScheduler.requestStableHistory(
+                turn.tenantId(),
+                turn.userId(),
+                turn.conversationId(),
+                nextMemoryVersion,
+                nextMemoryUntilSequence
+        );
+
+        // 回答消息和稳定历史游标已经在当前事务中更新完成，此处发布“历史已推进”事件。
+        // 事件监听器使用 AFTER_COMMIT：只有本方法事务真正提交成功后才会收到事件；
+        // 监听器随后把预热任务提交到专用线程池，异步重建并写入新版本 Redis 快照。
+        // 如果本方法后续抛出异常并回滚，监听器不会执行，也不会缓存未提交的数据。
         eventPublisher.publishEvent(new ChatHistoryChangedEvent(
                 turn.tenantId(),
                 turn.userId(),

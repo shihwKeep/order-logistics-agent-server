@@ -57,6 +57,7 @@ public class ChatHistoryCursorLoader {
                 turn.conversationId()
         );
 
+        // 会话查询始终携带 tenantId 和 userId。Redis Key 不能替代数据库层的归属校验。
         if (conversation == null) {
             throw new BusinessException(
                     ApiErrorCode.CONVERSATION_NOT_FOUND
@@ -65,6 +66,7 @@ public class ChatHistoryCursorLoader {
 
         if (!turn.requestId().equals(
                 conversation.getActiveRequestId())) {
+            // 只有当前占用该会话的请求才有资格读取上下文并继续调用模型。
             throw new BusinessException(
                     ApiErrorCode.CHAT_REQUEST_INACTIVE
             );
@@ -74,6 +76,7 @@ public class ChatHistoryCursorLoader {
         long memoryUntilSequence = requireMemoryBoundary(conversation);
         long beforeSequence = findCurrentUserSequence(turn);
 
+        // 新 USER 消息必须紧跟稳定历史边界；不连续说明开始事务或历史游标发生异常。
         if (beforeSequence
                 != Math.addExact(memoryUntilSequence, 1L)) {
             throw new IllegalStateException(
@@ -116,10 +119,12 @@ public class ChatHistoryCursorLoader {
         long databaseVersion = requireMemoryVersion(conversation);
         long databaseBoundary = requireMemoryBoundary(conversation);
 
+        // 数据库版本更高，说明较新的对话已经完成；当前异步事件过时，直接跳过即可。
         if (databaseVersion > event.memoryVersion()) {
             return Optional.empty();
         }
 
+        // 事件只会在事务提交后投递，正常情况下数据库不应落后于事件版本。
         if (databaseVersion < event.memoryVersion()) {
             throw new IllegalStateException(
                     "数据库稳定历史版本落后于预热事件"
@@ -127,6 +132,7 @@ public class ChatHistoryCursorLoader {
         }
 
         if (databaseBoundary != event.memoryUntilSequence()) {
+            // 相同版本必须对应唯一消息边界，否则不能构造可复用的稳定快照。
             throw new IllegalStateException(
                     "数据库稳定历史边界与预热事件不一致"
             );

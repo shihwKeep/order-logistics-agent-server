@@ -51,6 +51,25 @@ public class AgentConversationEntity {
     @TableField("last_message_sequence")
     private Long lastMessageSequence;
 
+    /**
+     * 已结束历史窗口版本。
+     *
+     * 开始新请求时保持不变；
+     * 助手消息进入最终状态，或恢复过期请求成功时递增。
+     * 用于选择 Redis 中对应版本的历史窗口。
+     */
+    @TableField("memory_version")
+    private Long memoryVersion;
+
+    /**
+     * 已结束历史的消息序号边界。
+     *
+     * 边界内仍然需要校验角色、状态和完整问答结构，
+     * 不能认为所有消息都可以进入模型上下文。
+     */
+    @TableField("memory_until_sequence")
+    private Long memoryUntilSequence;
+
     /** 当前占用会话的请求 ID；为空表示没有记录占用请求。 */
     @TableField("active_request_id")
     private String activeRequestId;

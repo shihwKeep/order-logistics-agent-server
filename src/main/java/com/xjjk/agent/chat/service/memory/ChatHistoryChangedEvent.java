@@ -22,6 +22,7 @@ public record ChatHistoryChangedEvent(
 ) {
 
     public ChatHistoryChangedEvent {
+        // 复用稳定游标的构造校验，保证非法身份、版本或边界不会进入异步队列。
         new ChatHistoryCursor(
                 tenantId,
                 userId,

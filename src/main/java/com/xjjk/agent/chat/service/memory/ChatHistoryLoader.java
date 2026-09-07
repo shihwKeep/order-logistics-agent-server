@@ -55,6 +55,8 @@ public class ChatHistoryLoader {
 
         int scanLimit = properties.maxScanMessages();
 
+        // 第一阶段只读取轻量元信息，并多取一行判断候选范围之前是否还有历史。
+        // 不在尚未筛选时把大量正文加载进 JVM。
         List<ChatHistoryMessageMetadata> rows =
                 messageMapper.selectHistoryMetadata(
                         cursor.tenantId(),
@@ -75,6 +77,7 @@ public class ChatHistoryLoader {
                 properties.maxReadBytes()
         );
 
+        // 第二阶段只回表读取筛选器最终保留的完整问答正文。
         List<ChatHistoryTurn> turns = readSelectedTurns(
                 cursor,
                 selection

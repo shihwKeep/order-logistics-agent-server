@@ -24,6 +24,8 @@
         <spring-cloud-alibaba.version>2025.0.0.0</spring-cloud-alibaba.version>
         <mybatis-plus.version>3.5.17</mybatis-plus.version>
         <spring-ai.version>1.1.8</spring-ai.version>
+        <!-- 本地分词器依赖版本，固定版本便于复现 -->
+        <djl.version>0.36.0</djl.version>
     </properties>
 
     <dependencyManagement>
@@ -117,6 +119,18 @@
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <scope>provided</scope>
+        </dependency>
+
+        <!-- Redis 数据访问，用于上下文快照缓存 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <!-- 加载本地 Hugging Face 分词资源，用于 Token 估算 -->
+        <dependency>
+            <groupId>ai.djl.huggingface</groupId>
+            <artifactId>tokenizers</artifactId>
+            <version>${djl.version}</version>
         </dependency>
     </dependencies>
 

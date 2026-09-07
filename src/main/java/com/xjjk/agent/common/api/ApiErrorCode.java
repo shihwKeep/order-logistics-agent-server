@@ -76,6 +76,24 @@ public enum ApiErrorCode {
             "当前会话仍有请求未结束，请稍后重试"
     ),
 
+    CHAT_REQUEST_INACTIVE(
+            HttpStatus.CONFLICT,
+            "CHAT_REQUEST_INACTIVE",
+            "本次请求已结束或不再有效"
+    ),
+
+    CHAT_HISTORY_LOAD_FAILED(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "CHAT_HISTORY_LOAD_FAILED",
+            "历史上下文加载失败，请稍后重试"
+    ),
+
+    CHAT_CONTEXT_TOO_LARGE(
+            HttpStatus.BAD_REQUEST,
+            "CHAT_CONTEXT_TOO_LARGE",
+            "当前请求上下文超过预算，请缩短输入或减少附加内容"
+    ),
+
     INTERNAL_SERVER_ERROR(
             HttpStatus.INTERNAL_SERVER_ERROR,
             "INTERNAL_SERVER_ERROR",

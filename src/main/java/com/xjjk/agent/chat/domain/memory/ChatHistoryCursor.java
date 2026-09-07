@@ -22,6 +22,7 @@ public record ChatHistoryCursor(
 ) {
 
     public ChatHistoryCursor {
+        // 该对象会进入缓存 Key，因此在领域边界统一拒绝空身份、负版本和负消息边界。
         if (tenantId <= 0
                 || userId <= 0
                 || !StringUtils.hasText(conversationId)
@@ -32,6 +33,7 @@ public record ChatHistoryCursor(
 
         long expectedBeforeSequence = nextSequence(memoryUntilSequence);
 
+        // 历史查询采用排他上界：稳定历史截至 N 时，查询边界必须严格等于 N + 1。
         if (beforeSequence != expectedBeforeSequence) {
             throw new IllegalArgumentException("稳定历史游标边界不连续");
         }

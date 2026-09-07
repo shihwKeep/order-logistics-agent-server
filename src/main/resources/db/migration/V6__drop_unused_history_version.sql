@@ -1,0 +1,2 @@
+ALTER TABLE agent_conversation
+DROP COLUMN history_version;

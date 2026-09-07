@@ -48,6 +48,8 @@ public class AgentConversationService {
         conversation.setOrgId(identity.orgId());
         conversation.setTitle("新对话");
         conversation.setLastMessageSequence(0L);
+        conversation.setMemoryVersion(0L);
+        conversation.setMemoryUntilSequence(0L);
         conversation.setCreatedAt(now);
         conversation.setUpdatedAt(now);
 

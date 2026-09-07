@@ -42,8 +42,10 @@ public class ChatHistoryCacheWarmListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void afterCommit(ChatHistoryChangedEvent event) {
         try {
+            // AFTER_COMMIT 保证数据库状态已经可见；监听线程只投递任务，不同步读取历史正文。
             executor.execute(() -> warmService.warm(event));
         } catch (TaskRejectedException exception) {
+            // 队列满时丢弃预热，不反向影响已成功提交的聊天；下次读取仍会回源并补写。
             metrics.warmRejected();
             log.warn(
                     "chat_history_cache_warm_rejected "
