@@ -22,10 +22,6 @@ public record OrderToolAvailability(
         customerOrder = customerOrder == null ? Capability.disabled() : customerOrder;
     }
 
-    public OrderToolAvailability(Capability order, Capability logistics) {
-        this(order, logistics, null);
-    }
-
     public boolean isOrderAvailable(AgentIdentity identity) {
         return available(order, identity);
     }

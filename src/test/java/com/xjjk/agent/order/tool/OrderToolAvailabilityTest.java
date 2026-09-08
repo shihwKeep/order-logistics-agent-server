@@ -75,7 +75,8 @@ class OrderToolAvailabilityTest {
                 new OrderToolAvailability.Capability(
                         orderEnabled, orderMode, orderAllowed),
                 new OrderToolAvailability.Capability(
-                        logisticsEnabled, logisticsMode, logisticsAllowed));
+                        logisticsEnabled, logisticsMode, logisticsAllowed),
+                null);
     }
 
     private OrderToolAvailability.Capability capability(

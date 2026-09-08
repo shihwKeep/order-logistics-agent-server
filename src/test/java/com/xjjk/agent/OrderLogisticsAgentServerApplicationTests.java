@@ -16,7 +16,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest
+@SpringBootTest(properties = {
+        "integration.customer.base-url=http://127.0.0.1:1",
+        "integration.customer.internal-token=test-internal-token"
+})
 class OrderLogisticsAgentServerApplicationTests {
 
     @Autowired
