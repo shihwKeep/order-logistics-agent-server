@@ -1,5 +1,11 @@
 package com.xjjk.agent.chat.service.model;
 
+import com.xjjk.agent.aftersale.domain.AfterSaleDetailResult;
+import com.xjjk.agent.aftersale.domain.AfterSaleIdentifierType;
+import com.xjjk.agent.aftersale.domain.AfterSaleSearchResult;
+import com.xjjk.agent.aftersale.service.AfterSaleQueryGateway;
+import com.xjjk.agent.aftersale.tool.AfterSaleQueryTools;
+import com.xjjk.agent.aftersale.tool.AfterSaleToolAvailability;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.customer.domain.CustomerMatchType;
 import com.xjjk.agent.customer.domain.CustomerSearchResult;
@@ -71,11 +77,34 @@ class AiChatServiceToolSelectionTest {
                 .containsExactly("search_products", "search_customers");
     }
 
+    @Test
+    void selectsAfterSaleSearchAndDetailIndependently() {
+        assertThat(toolNames(service(
+                capability(false, "OFF", Set.of()),
+                capability(false, "OFF", Set.of()),
+                capability(false, "OFF", Set.of()),
+                customerCapability(false, "OFF", Set.of()),
+                afterSaleCapability(true, "ALLOWLIST", Set.of(23L)),
+                afterSaleCapability(false, "ALL", Set.of()))))
+                .containsExactly("search_products", "search_after_sales");
+
+        assertThat(toolNames(service(
+                capability(false, "OFF", Set.of()),
+                capability(false, "OFF", Set.of()),
+                capability(false, "OFF", Set.of()),
+                customerCapability(false, "OFF", Set.of()),
+                afterSaleCapability(false, "OFF", Set.of()),
+                afterSaleCapability(true, "ALL", Set.of()))))
+                .containsExactly("search_products", "get_after_sale_detail");
+    }
+
     private AiChatService service(
             OrderToolAvailability.Capability order,
             OrderToolAvailability.Capability logistics) {
         return service(order, logistics, capability(false, "OFF", Set.of()),
-                customerCapability(false, "OFF", Set.of()));
+                customerCapability(false, "OFF", Set.of()),
+                afterSaleCapability(false, "OFF", Set.of()),
+                afterSaleCapability(false, "OFF", Set.of()));
     }
 
     private AiChatService service(
@@ -83,6 +112,18 @@ class AiChatServiceToolSelectionTest {
             OrderToolAvailability.Capability logistics,
             OrderToolAvailability.Capability customerOrder,
             CustomerToolAvailability.Capability customer) {
+        return service(order, logistics, customerOrder, customer,
+                afterSaleCapability(false, "OFF", Set.of()),
+                afterSaleCapability(false, "OFF", Set.of()));
+    }
+
+    private AiChatService service(
+            OrderToolAvailability.Capability order,
+            OrderToolAvailability.Capability logistics,
+            OrderToolAvailability.Capability customerOrder,
+            CustomerToolAvailability.Capability customer,
+            AfterSaleToolAvailability.Capability afterSaleSearch,
+            AfterSaleToolAvailability.Capability afterSaleDetail) {
         ProductQueryTools productTools = new ProductQueryTools(query -> {
             throw new AssertionError("工具选择测试不应执行商品查询");
         });
@@ -98,6 +139,10 @@ class AiChatServiceToolSelectionTest {
                                 CustomerMatchType.CUSTOMER_CODE, 0, false,
                                 OffsetDateTime.now(), List.of()),
                         orderGateway));
+        AfterSaleToolAvailability afterSaleAvailability =
+                new AfterSaleToolAvailability(afterSaleSearch, afterSaleDetail);
+        AfterSaleQueryTools afterSaleTools = new AfterSaleQueryTools(
+                new UnusedAfterSaleGateway(), afterSaleAvailability);
         return new AiChatService(
                 mock(ChatClient.class),
                 productTools,
@@ -105,7 +150,9 @@ class AiChatServiceToolSelectionTest {
                 new OrderToolAvailability(order, logistics, customerOrder),
                 customerTools,
                 customerOrderTools,
-                new CustomerToolAvailability(customer));
+                new CustomerToolAvailability(customer),
+                afterSaleTools,
+                afterSaleAvailability);
     }
 
     private CustomerToolAvailability.Capability customerCapability(
@@ -121,6 +168,14 @@ class AiChatServiceToolSelectionTest {
             String rolloutMode,
             Set<Long> allowedOrgIds) {
         return new OrderToolAvailability.Capability(
+                enabled, rolloutMode, allowedOrgIds);
+    }
+
+    private AfterSaleToolAvailability.Capability afterSaleCapability(
+            boolean enabled,
+            String rolloutMode,
+            Set<Long> allowedOrgIds) {
+        return new AfterSaleToolAvailability.Capability(
                 enabled, rolloutMode, allowedOrgIds);
     }
 
@@ -148,6 +203,27 @@ class AiChatServiceToolSelectionTest {
                 AgentIdentity identity,
                 String requestId) {
             throw new AssertionError("工具选择测试不应执行物流查询");
+        }
+    }
+
+    private static final class UnusedAfterSaleGateway implements AfterSaleQueryGateway {
+        @Override
+        public AfterSaleSearchResult search(
+                AfterSaleIdentifierType type,
+                String identifier,
+                OffsetDateTime startTime,
+                OffsetDateTime endTime,
+                AgentIdentity identity,
+                String requestId) {
+            throw new AssertionError("工具选择测试不应执行售后搜索");
+        }
+
+        @Override
+        public AfterSaleDetailResult detail(
+                String afterSaleCode,
+                AgentIdentity identity,
+                String requestId) {
+            throw new AssertionError("工具选择测试不应执行售后详情查询");
         }
     }
 }
