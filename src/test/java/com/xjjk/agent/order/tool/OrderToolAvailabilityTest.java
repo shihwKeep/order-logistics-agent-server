@@ -52,6 +52,18 @@ class OrderToolAvailabilityTest {
         assertThat(availability.isLogisticsAvailable(ORG_23)).isFalse();
     }
 
+    @Test
+    void customerOrderHasAnIndependentFailClosedSwitch() {
+        OrderToolAvailability availability = new OrderToolAvailability(
+                capability(false, "OFF", Set.of()),
+                capability(false, "OFF", Set.of()),
+                capability(true, "ALLOWLIST", Set.of(23L)));
+
+        assertThat(availability.isCustomerOrderAvailable(ORG_23)).isTrue();
+        assertThat(new OrderToolAvailability(null, null, null)
+                .isCustomerOrderAvailable(ORG_23)).isFalse();
+    }
+
     private OrderToolAvailability availability(
             boolean orderEnabled,
             String orderMode,
@@ -64,5 +76,10 @@ class OrderToolAvailabilityTest {
                         orderEnabled, orderMode, orderAllowed),
                 new OrderToolAvailability.Capability(
                         logisticsEnabled, logisticsMode, logisticsAllowed));
+    }
+
+    private OrderToolAvailability.Capability capability(
+            boolean enabled, String mode, Set<Long> allowed) {
+        return new OrderToolAvailability.Capability(enabled, mode, allowed);
     }
 }

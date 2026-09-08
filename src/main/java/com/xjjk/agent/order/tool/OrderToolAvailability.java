@@ -13,11 +13,17 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "agent.tool")
 public record OrderToolAvailability(
         Capability order,
-        Capability logistics) {
+        Capability logistics,
+        Capability customerOrder) {
 
     public OrderToolAvailability {
         order = order == null ? Capability.disabled() : order;
         logistics = logistics == null ? Capability.disabled() : logistics;
+        customerOrder = customerOrder == null ? Capability.disabled() : customerOrder;
+    }
+
+    public OrderToolAvailability(Capability order, Capability logistics) {
+        this(order, logistics, null);
     }
 
     public boolean isOrderAvailable(AgentIdentity identity) {
@@ -26,6 +32,10 @@ public record OrderToolAvailability(
 
     public boolean isLogisticsAvailable(AgentIdentity identity) {
         return available(logistics, identity);
+    }
+
+    public boolean isCustomerOrderAvailable(AgentIdentity identity) {
+        return available(customerOrder, identity);
     }
 
     private boolean available(Capability capability, AgentIdentity identity) {

@@ -1,6 +1,12 @@
 package com.xjjk.agent.chat.service.model;
 
 import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.customer.domain.CustomerMatchType;
+import com.xjjk.agent.customer.domain.CustomerSearchResult;
+import com.xjjk.agent.customer.service.CustomerOrderQueryService;
+import com.xjjk.agent.customer.tool.CustomerOrderQueryTools;
+import com.xjjk.agent.customer.tool.CustomerQueryTools;
+import com.xjjk.agent.customer.tool.CustomerToolAvailability;
 import com.xjjk.agent.order.domain.OrderIdentifierType;
 import com.xjjk.agent.order.domain.OrderLogisticsResult;
 import com.xjjk.agent.order.domain.OrderSearchResult;
@@ -14,6 +20,7 @@ import org.springframework.ai.tool.ToolCallback;
 
 import java.util.List;
 import java.util.Set;
+import java.time.OffsetDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -47,18 +54,66 @@ class AiChatServiceToolSelectionTest {
                         "search_products", "search_orders", "get_order_logistics");
     }
 
+    @Test
+    void selectsCustomerAndCustomerOrderToolsIndependently() {
+        assertThat(toolNames(service(
+                capability(false, "OFF", Set.of()),
+                capability(false, "OFF", Set.of()),
+                capability(true, "ALL", Set.of()),
+                customerCapability(false, "OFF", Set.of()))))
+                .containsExactly("search_products", "list_customer_orders");
+
+        assertThat(toolNames(service(
+                capability(false, "OFF", Set.of()),
+                capability(false, "OFF", Set.of()),
+                capability(false, "OFF", Set.of()),
+                customerCapability(true, "ALLOWLIST", Set.of(23L)))))
+                .containsExactly("search_products", "search_customers");
+    }
+
     private AiChatService service(
             OrderToolAvailability.Capability order,
             OrderToolAvailability.Capability logistics) {
+        return service(order, logistics, capability(false, "OFF", Set.of()),
+                customerCapability(false, "OFF", Set.of()));
+    }
+
+    private AiChatService service(
+            OrderToolAvailability.Capability order,
+            OrderToolAvailability.Capability logistics,
+            OrderToolAvailability.Capability customerOrder,
+            CustomerToolAvailability.Capability customer) {
         ProductQueryTools productTools = new ProductQueryTools(query -> {
             throw new AssertionError("工具选择测试不应执行商品查询");
         });
-        OrderQueryTools orderTools = new OrderQueryTools(new UnusedOrderGateway());
+        UnusedOrderGateway orderGateway = new UnusedOrderGateway();
+        OrderQueryTools orderTools = new OrderQueryTools(orderGateway);
+        CustomerQueryTools customerTools = new CustomerQueryTools(
+                (keyword, type, identity, requestId) -> new CustomerSearchResult(
+                        CustomerMatchType.CUSTOMER_CODE, 0, false,
+                        OffsetDateTime.now(), List.of()));
+        CustomerOrderQueryTools customerOrderTools = new CustomerOrderQueryTools(
+                new CustomerOrderQueryService(
+                        (keyword, type, identity, requestId) -> new CustomerSearchResult(
+                                CustomerMatchType.CUSTOMER_CODE, 0, false,
+                                OffsetDateTime.now(), List.of()),
+                        orderGateway));
         return new AiChatService(
                 mock(ChatClient.class),
                 productTools,
                 orderTools,
-                new OrderToolAvailability(order, logistics));
+                new OrderToolAvailability(order, logistics, customerOrder),
+                customerTools,
+                customerOrderTools,
+                new CustomerToolAvailability(customer));
+    }
+
+    private CustomerToolAvailability.Capability customerCapability(
+            boolean enabled,
+            String rolloutMode,
+            Set<Long> allowedOrgIds) {
+        return new CustomerToolAvailability.Capability(
+                enabled, rolloutMode, allowedOrgIds);
     }
 
     private OrderToolAvailability.Capability capability(

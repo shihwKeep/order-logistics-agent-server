@@ -74,6 +74,35 @@ class OrderServiceGatewayTest {
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 
+    @Test
+    void queriesCustomerOrdersWithTrustedInternalIdAndDoesNotPutItInLogsOrResult() {
+        AtomicReference<Long> capturedCustomerId = new AtomicReference<>();
+        AtomicReference<Headers> captured = new AtomicReference<>();
+        OrderCustomerClient customerClient = (token, tenant, user, org, requestId, request) -> {
+            captured.set(new Headers(token, tenant, user, org, requestId));
+            capturedCustomerId.set(request.customerId());
+            OrderSearchClient.OrderSearchData source = searchSuccess().data();
+            return new OrderServiceResponse<>(1000, "success",
+                    new OrderSearchClient.OrderSearchData(
+                            "CUSTOMER", source.total(), source.truncated(),
+                            source.queriedAt(), source.items()));
+        };
+        OrderServiceGateway gateway = new OrderServiceGateway(
+                unusedSearchClient(), unusedLogisticsClient(), customerClient, TOKEN);
+
+        OrderSearchResult result = gateway.searchByCustomerId(
+                80001L, IDENTITY, "request-customer");
+
+        assertThat(captured.get()).isEqualTo(
+                new Headers(TOKEN, 1L, 10567L, 10L, "request-customer"));
+        assertThat(capturedCustomerId).hasValue(80001L);
+        assertThat(result.matchedBy()).isEqualTo(OrderIdentifierType.CUSTOMER);
+        assertThat(result.items()).hasSize(1);
+        assertThat(result.getClass().getRecordComponents())
+                .extracting(component -> component.getName())
+                .doesNotContain("customerId");
+    }
+
     @ParameterizedTest(name = "message field {0} with envelope {1}/{2}")
     @MethodSource("orderEnvelopeVariants")
     void deserializesAllMessageAliasesAndEnvelopeCases(

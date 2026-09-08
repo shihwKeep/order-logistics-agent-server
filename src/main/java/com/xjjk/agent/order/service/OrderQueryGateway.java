@@ -14,6 +14,14 @@ public interface OrderQueryGateway {
             AgentIdentity identity,
             String requestId);
 
+    /** customerId 只能由可信客户解析服务提供，不能作为模型工具参数。 */
+    default OrderSearchResult searchByCustomerId(
+            long customerId,
+            AgentIdentity identity,
+            String requestId) {
+        throw new UnsupportedOperationException("当前订单网关不支持按客户查询");
+    }
+
     OrderLogisticsResult logistics(
             String identifier,
             OrderIdentifierType identifierType,

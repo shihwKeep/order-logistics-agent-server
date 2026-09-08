@@ -3,6 +3,9 @@ package com.xjjk.agent.chat.service.model;
 import com.xjjk.agent.chat.domain.memory.ChatContextSelection;
 import com.xjjk.agent.chat.service.memory.RequestChatMemory;
 import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.customer.tool.CustomerOrderQueryTools;
+import com.xjjk.agent.customer.tool.CustomerQueryTools;
+import com.xjjk.agent.customer.tool.CustomerToolAvailability;
 import com.xjjk.agent.order.tool.OrderQueryTools;
 import com.xjjk.agent.order.tool.OrderToolAvailability;
 import com.xjjk.agent.product.tool.ProductQueryTools;
@@ -32,13 +35,19 @@ public class AiChatService {
     private final ChatClient chatClient;
     private final List<ToolCallback> productToolCallbacks;
     private final Map<String, ToolCallback> orderToolCallbacks;
+    private final ToolCallback customerToolCallback;
+    private final ToolCallback customerOrderToolCallback;
     private final OrderToolAvailability orderToolAvailability;
+    private final CustomerToolAvailability customerToolAvailability;
 
     public AiChatService(
             @Qualifier("agentChatClient") ChatClient chatClient,
             ProductQueryTools productQueryTools,
             OrderQueryTools orderQueryTools,
-            OrderToolAvailability orderToolAvailability
+            OrderToolAvailability orderToolAvailability,
+            CustomerQueryTools customerQueryTools,
+            CustomerOrderQueryTools customerOrderQueryTools,
+            CustomerToolAvailability customerToolAvailability
     ) {
         this.chatClient = chatClient;
         this.productToolCallbacks = List.of(ToolCallbacks.from(productQueryTools));
@@ -47,6 +56,11 @@ public class AiChatService {
                         callback -> callback.getToolDefinition().name(),
                         Function.identity()));
         this.orderToolAvailability = orderToolAvailability;
+        this.customerToolAvailability = customerToolAvailability;
+        this.customerToolCallback = requireSingleCallback(
+                customerQueryTools, "search_customers");
+        this.customerOrderToolCallback = requireSingleCallback(
+                customerOrderQueryTools, "list_customer_orders");
 
         // 启动期即验证代码声明的工具名，避免注解改名后灰度选择静默失效。
         requireOrderCallback("search_orders");
@@ -116,7 +130,22 @@ public class AiChatService {
         if (orderToolAvailability.isLogisticsAvailable(identity)) {
             selected.add(requireOrderCallback("get_order_logistics"));
         }
+        if (customerToolAvailability.isAvailable(identity)) {
+            selected.add(customerToolCallback);
+        }
+        if (orderToolAvailability.isCustomerOrderAvailable(identity)) {
+            selected.add(customerOrderToolCallback);
+        }
         return List.copyOf(selected);
+    }
+
+    private ToolCallback requireSingleCallback(Object toolObject, String expectedName) {
+        ToolCallback[] callbacks = ToolCallbacks.from(toolObject);
+        if (callbacks.length != 1
+                || !expectedName.equals(callbacks[0].getToolDefinition().name())) {
+            throw new IllegalStateException("缺少工具定义: " + expectedName);
+        }
+        return callbacks[0];
     }
 
     private ToolCallback requireOrderCallback(String toolName) {

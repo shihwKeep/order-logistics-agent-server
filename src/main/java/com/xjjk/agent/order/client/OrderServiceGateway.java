@@ -53,6 +53,7 @@ public class OrderServiceGateway implements OrderQueryGateway {
 
     private final OrderSearchClient searchClient;
     private final OrderLogisticsClient logisticsClient;
+    private final OrderCustomerClient customerClient;
     private final String internalToken;
     private final CircuitBreaker searchCircuitBreaker;
     private final CircuitBreaker logisticsCircuitBreaker;
@@ -61,10 +62,12 @@ public class OrderServiceGateway implements OrderQueryGateway {
     public OrderServiceGateway(
             OrderSearchClient searchClient,
             OrderLogisticsClient logisticsClient,
+            OrderCustomerClient customerClient,
             @Value("${integration.order.internal-token}") String internalToken,
             CircuitBreakerFactory<?, ?> circuitBreakerFactory) {
         this.searchClient = Objects.requireNonNull(searchClient, "searchClient 不能为空");
         this.logisticsClient = Objects.requireNonNull(logisticsClient, "logisticsClient 不能为空");
+        this.customerClient = Objects.requireNonNull(customerClient, "customerClient 不能为空");
         if (internalToken == null || internalToken.isBlank()) {
             throw new IllegalArgumentException("integration.order.internal-token 不能为空");
         }
@@ -81,8 +84,21 @@ public class OrderServiceGateway implements OrderQueryGateway {
             OrderSearchClient searchClient,
             OrderLogisticsClient logisticsClient,
             String internalToken) {
+        this(searchClient, logisticsClient,
+                (token, tenant, user, org, requestId, request) -> {
+                    throw new AssertionError("unexpected customer order call");
+                }, internalToken);
+    }
+
+    /** 允许单元测试显式注入按客户查询客户端。 */
+    public OrderServiceGateway(
+            OrderSearchClient searchClient,
+            OrderLogisticsClient logisticsClient,
+            OrderCustomerClient customerClient,
+            String internalToken) {
         this.searchClient = Objects.requireNonNull(searchClient, "searchClient 不能为空");
         this.logisticsClient = Objects.requireNonNull(logisticsClient, "logisticsClient 不能为空");
+        this.customerClient = Objects.requireNonNull(customerClient, "customerClient 不能为空");
         if (internalToken == null || internalToken.isBlank()) {
             throw new IllegalArgumentException("integration.order.internal-token 不能为空");
         }
@@ -119,6 +135,39 @@ public class OrderServiceGateway implements OrderQueryGateway {
                 "order_gateway requestId={}, operation=order_search, identifierType={}, resultCount={}, durationMs={}, status=SUCCESS",
                 requestId,
                 identifierType,
+                result.items().size(),
+                elapsedMillis(startedAt));
+        return result;
+    }
+
+    @Override
+    public OrderSearchResult searchByCustomerId(
+            long customerId,
+            AgentIdentity identity,
+            String requestId) {
+        validateTrustedCustomerRequest(customerId, identity, requestId);
+        long startedAt = System.nanoTime();
+
+        // customerId 由上游可信解析链路产生；日志仍只记录查询类型和结果数量。
+        OrderSearchResult result = runProtected(
+                searchCircuitBreaker,
+                () -> mapSearchResponse(invokeWithRetry(
+                        "order_search_by_customer",
+                        OrderIdentifierType.CUSTOMER,
+                        requestId,
+                        () -> customerClient.searchByCustomer(
+                                internalToken,
+                                identity.tenantId(),
+                                identity.userId(),
+                                identity.orgId(),
+                                requestId,
+                                new OrderCustomerClient.CustomerOrderRequest(customerId)))));
+        if (result.matchedBy() != OrderIdentifierType.CUSTOMER) {
+            throw invalidResponse();
+        }
+        log.info(
+                "order_gateway requestId={}, operation=order_search_by_customer, identifierType=CUSTOMER, resultCount={}, durationMs={}, status=SUCCESS",
+                requestId,
                 result.items().size(),
                 elapsedMillis(startedAt));
         return result;
@@ -555,6 +604,15 @@ public class OrderServiceGateway implements OrderQueryGateway {
             String requestId) {
         if (isBlank(identifier) || identifierType == null || identity == null || isBlank(requestId)) {
             throw new IllegalArgumentException("订单查询参数不完整");
+        }
+    }
+
+    private void validateTrustedCustomerRequest(
+            long customerId,
+            AgentIdentity identity,
+            String requestId) {
+        if (customerId <= 0 || identity == null || isBlank(requestId)) {
+            throw new IllegalArgumentException("客户订单查询参数不完整");
         }
     }
 

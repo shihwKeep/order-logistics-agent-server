@@ -5,5 +5,6 @@ public enum OrderIdentifierType {
     AUTO,
     ORDER_CODE,
     OUTER_ORDER_CODE,
-    LOGISTICS_CODE
+    LOGISTICS_CODE,
+    CUSTOMER
 }
