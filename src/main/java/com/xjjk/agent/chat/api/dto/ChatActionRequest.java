@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Size;
  * @param type 白名单动作类型
  * @param orderCode 订单卡片携带的完整订单号，仅物流动作使用
  * @param customerCode 客户卡片携带的完整客户编号，仅客户订单动作使用
+ * @param afterSaleCode 售后卡片携带的完整售后工单号，仅售后详情动作使用
  */
 public record ChatActionRequest(
         @NotBlank(message = "动作类型不能为空")
@@ -19,10 +20,18 @@ public record ChatActionRequest(
         String orderCode,
 
         @Size(max = 128, message = "客户编号不能超过128个字符")
-        String customerCode
+        String customerCode,
+
+        @Size(max = 64, message = "售后工单号不能超过64个字符")
+        String afterSaleCode
 ) {
     /** 保持旧物流动作调用方的二参数构造方式。 */
     public ChatActionRequest(String type, String orderCode) {
-        this(type, orderCode, null);
+        this(type, orderCode, null, null);
+    }
+
+    /** 保持客户订单动作调用方的三参数构造方式。 */
+    public ChatActionRequest(String type, String orderCode, String customerCode) {
+        this(type, orderCode, customerCode, null);
     }
 }

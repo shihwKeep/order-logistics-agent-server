@@ -148,6 +148,7 @@ public class ChatTurnRunner {
         switch (ChatActionType.parse(request.action().type())) {
             case QUERY_ORDER_LOGISTICS -> session.queryingLogistics();
             case QUERY_CUSTOMER_ORDERS -> session.queryingCustomerOrders();
+            case QUERY_AFTER_SALE_DETAIL -> session.queryingAfterSaleDetail();
         }
         ChatActionDispatcher.DispatchResult dispatched = actionDispatcher.dispatch(
                 request.action(), identity, execution.requestId);

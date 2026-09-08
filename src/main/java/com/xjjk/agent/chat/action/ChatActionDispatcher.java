@@ -1,5 +1,9 @@
 package com.xjjk.agent.chat.action;
 
+import com.xjjk.agent.aftersale.domain.AfterSaleDetailResult;
+import com.xjjk.agent.aftersale.service.AfterSaleQueryGateway;
+import com.xjjk.agent.aftersale.service.AfterSaleServiceUnavailableException;
+import com.xjjk.agent.aftersale.tool.AfterSaleToolAvailability;
 import com.xjjk.agent.chat.api.dto.ChatActionRequest;
 import com.xjjk.agent.common.api.ApiErrorCode;
 import com.xjjk.agent.common.exception.BusinessException;
@@ -32,6 +36,8 @@ public class ChatActionDispatcher {
     private final OrderQueryGateway orderGateway;
     private final CustomerOrderQueryService customerOrderQueryService;
     private final OrderToolAvailability availability;
+    private final AfterSaleQueryGateway afterSaleGateway;
+    private final AfterSaleToolAvailability afterSaleAvailability;
 
     public DispatchResult dispatch(
             ChatActionRequest action,
@@ -45,7 +51,40 @@ public class ChatActionDispatcher {
                     action.orderCode(), identity, requestId);
             case QUERY_CUSTOMER_ORDERS -> queryCustomerOrders(
                     action.customerCode(), identity, requestId);
+            case QUERY_AFTER_SALE_DETAIL -> queryAfterSaleDetail(
+                    action.afterSaleCode(), identity, requestId);
         };
+    }
+
+    private DispatchResult queryAfterSaleDetail(
+            String afterSaleCode,
+            AgentIdentity identity,
+            String requestId) {
+        if (!afterSaleAvailability.isDetailAvailable(identity)) {
+            throw new BusinessException(ApiErrorCode.CHAT_ACTION_UNAVAILABLE);
+        }
+        String normalizedAfterSaleCode = normalizeAfterSaleCode(afterSaleCode);
+        try {
+            // 卡片动作仍从 Gateway 进入可信请求头、组织权限、熔断与响应校验链路。
+            AfterSaleDetailResult result = afterSaleGateway.detail(
+                    normalizedAfterSaleCode, identity, requestId);
+            return new DispatchResult(
+                    new ToolUiResult(
+                            "get_after_sale_detail",
+                            "after-sale-detail",
+                            1,
+                            result.queriedAt(),
+                            result),
+                    "已为你查询售后工单 " + normalizedAfterSaleCode
+                            + " 的详情，详细信息已展示。");
+        } catch (AfterSaleServiceUnavailableException exception) {
+            log.warn(
+                    "chat_action_failed requestId={}, action={}, exceptionType={}",
+                    requestId,
+                    ChatActionType.QUERY_AFTER_SALE_DETAIL,
+                    exception.getClass().getSimpleName());
+            throw new BusinessException(ApiErrorCode.CHAT_ACTION_UNAVAILABLE);
+        }
     }
 
     private DispatchResult queryCustomerOrders(
@@ -140,6 +179,19 @@ public class ChatActionDispatcher {
         String normalized = customerCode.strip();
         if (normalized.isEmpty()
                 || normalized.length() > 128
+                || normalized.codePoints().anyMatch(Character::isISOControl)) {
+            throw new BusinessException(ApiErrorCode.VALIDATION_ERROR);
+        }
+        return normalized;
+    }
+
+    private String normalizeAfterSaleCode(String afterSaleCode) {
+        if (afterSaleCode == null) {
+            throw new BusinessException(ApiErrorCode.VALIDATION_ERROR);
+        }
+        String normalized = afterSaleCode.strip();
+        if (normalized.isEmpty()
+                || normalized.length() > 64
                 || normalized.codePoints().anyMatch(Character::isISOControl)) {
             throw new BusinessException(ApiErrorCode.VALIDATION_ERROR);
         }

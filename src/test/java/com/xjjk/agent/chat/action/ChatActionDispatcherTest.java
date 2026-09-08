@@ -1,5 +1,8 @@
 package com.xjjk.agent.chat.action;
 
+import com.xjjk.agent.aftersale.domain.AfterSaleDetailResult;
+import com.xjjk.agent.aftersale.service.AfterSaleQueryGateway;
+import com.xjjk.agent.aftersale.tool.AfterSaleToolAvailability;
 import com.xjjk.agent.chat.api.dto.ChatActionRequest;
 import com.xjjk.agent.chat.api.dto.ChatStreamRequest;
 import com.xjjk.agent.chat.domain.ChatTurnContext;
@@ -57,6 +60,10 @@ class ChatActionDispatcherTest {
     @Mock
     private CustomerOrderQueryService customerOrderQueryService;
     @Mock
+    private AfterSaleQueryGateway afterSaleGateway;
+    @Mock
+    private AfterSaleToolAvailability afterSaleAvailability;
+    @Mock
     private ChatSseSession session;
 
     @Test
@@ -89,7 +96,8 @@ class ChatActionDispatcherTest {
         when(resultRecorder.prepare(any(ToolUiResult.class), eq(1)))
                 .thenReturn(pending);
         ChatActionDispatcher dispatcher = new ChatActionDispatcher(
-                orderGateway, customerOrderQueryService, availability);
+                orderGateway, customerOrderQueryService, availability,
+                afterSaleGateway, afterSaleAvailability);
         ChatTurnRunner runner = new ChatTurnRunner(
                 preparationService, contextService, aiChatService,
                 finalizer, resultRecorder, dispatcher);
@@ -136,7 +144,8 @@ class ChatActionDispatcherTest {
         when(resultRecorder.prepare(any(ToolUiResult.class), eq(1)))
                 .thenReturn(pending);
         ChatActionDispatcher dispatcher = new ChatActionDispatcher(
-                orderGateway, customerOrderQueryService, availability);
+                orderGateway, customerOrderQueryService, availability,
+                afterSaleGateway, afterSaleAvailability);
         ChatTurnRunner runner = new ChatTurnRunner(
                 preparationService, contextService, aiChatService,
                 finalizer, resultRecorder, dispatcher);
@@ -147,6 +156,53 @@ class ChatActionDispatcherTest {
         verify(session).queryingCustomerOrders();
         verify(session).result(any(ToolUiResult.class));
         verify(session).delta("已为你查询客户 C001 的订单，订单卡片已展示。");
+        verify(contextService, never()).prepare(any(), any(), any());
+        verifyNoInteractions(aiChatService);
+    }
+
+    @Test
+    void queryAfterSaleDetailPublishesNewAssistantResultAndBypassesModel()
+            throws Exception {
+        AgentIdentity identity = new AgentIdentity(
+                10567, "account", "name", 3673, 1);
+        ChatTurnContext turn = new ChatTurnContext(
+                1, 10567, "conversation-1", "request-3",
+                "user-message-3", "assistant-message-3", "prompt-v1");
+        ChatActionRequest action = new ChatActionRequest(
+                "QUERY_AFTER_SALE_DETAIL", null, null, "AS202609080001");
+        ChatStreamRequest request = new ChatStreamRequest(
+                "conversation-1", "查看售后工单 AS202609080001 的详情", action);
+        OffsetDateTime queriedAt = OffsetDateTime.parse("2026-09-08T18:00:00+08:00");
+        AfterSaleDetailResult detail = new AfterSaleDetailResult(
+                "AS202609080001", 1, "处理中", queriedAt, false, null,
+                "张*", "C001", "XJTS01", null, null, null,
+                List.of(), List.of(),
+                new AfterSaleDetailResult.RefundSummary(0L, 0L, 0L, 0L, 0L),
+                false, false, queriedAt);
+        PendingMessageResult pending = new PendingMessageResult(
+                1, "get_after_sale_detail", "after-sale-detail", 1,
+                "{\"afterSaleCode\":\"AS202609080001\"}", 42, queriedAt);
+        when(preparationService.prepare(
+                "conversation-1", identity, "查看售后工单 AS202609080001 的详情"))
+                .thenReturn(turn);
+        when(afterSaleAvailability.isDetailAvailable(identity)).thenReturn(true);
+        when(afterSaleGateway.detail("AS202609080001", identity, "request-3"))
+                .thenReturn(detail);
+        when(resultRecorder.prepare(any(ToolUiResult.class), eq(1)))
+                .thenReturn(pending);
+        ChatActionDispatcher dispatcher = new ChatActionDispatcher(
+                orderGateway, customerOrderQueryService, availability,
+                afterSaleGateway, afterSaleAvailability);
+        ChatTurnRunner runner = new ChatTurnRunner(
+                preparationService, contextService, aiChatService,
+                finalizer, resultRecorder, dispatcher);
+
+        runner.run(request, identity, new ChatStreamControl(), session, "fallback");
+
+        verify(afterSaleGateway).detail("AS202609080001", identity, "request-3");
+        verify(session).queryingAfterSaleDetail();
+        verify(session).result(any(ToolUiResult.class));
+        verify(session).delta("已为你查询售后工单 AS202609080001 的详情，详细信息已展示。");
         verify(contextService, never()).prepare(any(), any(), any());
         verifyNoInteractions(aiChatService);
     }

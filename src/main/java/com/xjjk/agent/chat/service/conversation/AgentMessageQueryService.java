@@ -51,7 +51,9 @@ public class AgentMessageQueryService {
             "product-list", Set.of(1),
             "customer-list", Set.of(1),
             "order-list", Set.of(1),
-            "logistics-timeline", Set.of(1));
+            "logistics-timeline", Set.of(1),
+            "after-sale-list", Set.of(1),
+            "after-sale-detail", Set.of(1));
 
     /** 会话归属校验服务。 */
     private final AgentConversationService conversationService;
