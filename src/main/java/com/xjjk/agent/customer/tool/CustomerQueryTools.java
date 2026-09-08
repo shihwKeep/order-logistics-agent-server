@@ -15,6 +15,8 @@ import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 import java.util.Locale;
+import java.time.OffsetDateTime;
+import java.util.List;
 
 /** 暴露给模型的客户只读工具。 */
 @Slf4j
@@ -42,7 +44,8 @@ public class CustomerQueryTools {
                     CustomerSearchResult result = gateway.search(parsed.keyword(), parsed.type(),
                             context.identity(), context.requestId());
                     context.outputPublisher().publish(new ToolUiResult(
-                            "search_customers", "customer-list", 1, result.queriedAt(), result));
+                            "search_customers", "customer-list", 1, result.queriedAt(),
+                            toUiPayload(result)));
                     return modelText(result);
                 } catch (CustomerServiceUnavailableException exception) {
                     log.warn("customer_tool_failed requestId={}, exceptionType={}",
@@ -92,6 +95,20 @@ public class CustomerQueryTools {
                 : value.substring(0, MAX_MODEL_TEXT - 1) + "…";
     }
 
+    private CustomerListPayload toUiPayload(CustomerSearchResult result) {
+        // customerId 只服务于后端可信解析链路，SSE 与历史快照都只保留可再次解析的客户编号。
+        List<CustomerCardPayload> items = result.items().stream()
+                .map(item -> new CustomerCardPayload(
+                        item.customerCode(),
+                        item.displayName(),
+                        item.gradeName(),
+                        item.assetTypeName(),
+                        item.customerTypeName()))
+                .toList();
+        return new CustomerListPayload(
+                result.matchedBy(), result.total(), result.truncated(), result.queriedAt(), items);
+    }
+
     private AgentToolRequestContext requestContext(ToolContext context) {
         if (context == null) {
             throw new IllegalStateException("客户工具缺少请求上下文");
@@ -107,5 +124,22 @@ public class CustomerQueryTools {
         static Parsed error(String value) {
             return new Parsed(null, null, null, value);
         }
+    }
+
+
+    private record CustomerListPayload(
+            CustomerMatchType matchedBy,
+            long total,
+            boolean truncated,
+            OffsetDateTime queriedAt,
+            List<CustomerCardPayload> items) {
+    }
+
+    private record CustomerCardPayload(
+            String customerCode,
+            String displayName,
+            String gradeName,
+            String assetTypeName,
+            String customerTypeName) {
     }
 }

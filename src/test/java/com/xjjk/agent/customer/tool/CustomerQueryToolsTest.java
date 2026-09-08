@@ -35,6 +35,7 @@ class CustomerQueryToolsTest {
         assertThat(published.get().toolName()).isEqualTo("search_customers");
         assertThat(published.get().kind()).isEqualTo("customer-list");
         assertThat(published.get().schemaVersion()).isEqualTo(1);
+        assertThat(published.get().data().toString()).doesNotContain("80001", "customerId");
         assertThat(modelText).contains("C001", "张*")
                 .doesNotContain("customerId", "80001");
     }
