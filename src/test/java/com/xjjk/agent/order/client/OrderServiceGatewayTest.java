@@ -103,6 +103,19 @@ class OrderServiceGatewayTest {
                 .doesNotContain("customerId");
     }
 
+    @Test
+    void rejectsCustomerOrderResponseThatUsesARegularIdentifierType() {
+        OrderCustomerClient customerClient = (token, tenant, user, org, requestId, request) ->
+                searchSuccess();
+        OrderServiceGateway gateway = new OrderServiceGateway(
+                unusedSearchClient(), unusedLogisticsClient(), customerClient, TOKEN);
+
+        assertThatThrownBy(() -> gateway.searchByCustomerId(
+                80001L, IDENTITY, "request-customer"))
+                .isInstanceOf(OrderServiceUnavailableException.class)
+                .hasMessage("订单服务响应不可用");
+    }
+
     @ParameterizedTest(name = "message field {0} with envelope {1}/{2}")
     @MethodSource("orderEnvelopeVariants")
     void deserializesAllMessageAliasesAndEnvelopeCases(

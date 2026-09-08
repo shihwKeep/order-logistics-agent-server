@@ -1,5 +1,6 @@
 package com.xjjk.agent.customer.tool;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xjjk.agent.customer.domain.CustomerMatchType;
 import com.xjjk.agent.customer.domain.CustomerSearchItem;
 import com.xjjk.agent.customer.domain.CustomerSearchResult;
@@ -20,7 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CustomerQueryToolsTest {
 
     @Test
-    void publishesCustomerCardButDoesNotExposeInternalIdToModel() {
+    void publishesCustomerCardButDoesNotExposeInternalIdToModelOrSseJson() throws Exception {
         CustomerSearchResult result = new CustomerSearchResult(
                 CustomerMatchType.CUSTOMER_CODE, 1, false, OffsetDateTime.now(),
                 List.of(new CustomerSearchItem(80001L, "C001", "张*",
@@ -36,6 +37,10 @@ class CustomerQueryToolsTest {
         assertThat(published.get().kind()).isEqualTo("customer-list");
         assertThat(published.get().schemaVersion()).isEqualTo(1);
         assertThat(published.get().data().toString()).doesNotContain("80001", "customerId");
+        String sseJson = new ObjectMapper().findAndRegisterModules()
+                .writeValueAsString(published.get().data());
+        assertThat(sseJson).contains("\"customerCode\":\"C001\"")
+                .doesNotContain("customerId", "80001");
         assertThat(modelText).contains("C001", "张*")
                 .doesNotContain("customerId", "80001");
     }

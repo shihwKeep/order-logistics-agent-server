@@ -130,6 +130,8 @@ class OrderQueryToolsTest {
 
         assertThat(tools.searchOrders("ORDER-1", "FUZZY", context))
                 .contains("匹配类型");
+        assertThat(tools.searchOrders("ORDER-1", "CUSTOMER", context))
+                .contains("匹配类型");
         assertThat(tools.searchOrders("ORDER\n1", "AUTO", context))
                 .contains("编号");
         assertThat(tools.getOrderLogistics("X".repeat(129), null, context))

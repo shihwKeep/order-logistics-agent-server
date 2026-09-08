@@ -151,25 +151,30 @@ public class OrderServiceGateway implements OrderQueryGateway {
         // customerId 由上游可信解析链路产生；日志仍只记录查询类型和结果数量。
         OrderSearchResult result = runProtected(
                 searchCircuitBreaker,
-                () -> mapSearchResponse(invokeWithRetry(
-                        "order_search_by_customer",
-                        OrderIdentifierType.CUSTOMER,
-                        requestId,
-                        () -> customerClient.searchByCustomer(
-                                internalToken,
-                                identity.tenantId(),
-                                identity.userId(),
-                                identity.orgId(),
+                () -> requireCustomerSearchResult(mapSearchResponse(invokeWithRetry(
+                                "order_search_by_customer",
+                                OrderIdentifierType.CUSTOMER,
                                 requestId,
-                                new OrderCustomerClient.CustomerOrderRequest(customerId)))));
-        if (result.matchedBy() != OrderIdentifierType.CUSTOMER) {
-            throw invalidResponse();
-        }
+                                () -> customerClient.searchByCustomer(
+                                        internalToken,
+                                        identity.tenantId(),
+                                        identity.userId(),
+                                        identity.orgId(),
+                                        requestId,
+                                        new OrderCustomerClient.CustomerOrderRequest(customerId))))));
         log.info(
                 "order_gateway requestId={}, operation=order_search_by_customer, identifierType=CUSTOMER, resultCount={}, durationMs={}, status=SUCCESS",
                 requestId,
                 result.items().size(),
                 elapsedMillis(startedAt));
+        return result;
+    }
+
+    /** 客户订单专用端点必须回显 CUSTOMER，防止路由或下游契约漂移被当成正常结果。 */
+    private OrderSearchResult requireCustomerSearchResult(OrderSearchResult result) {
+        if (result.matchedBy() != OrderIdentifierType.CUSTOMER) {
+            throw invalidResponse();
+        }
         return result;
     }
 

@@ -141,6 +141,11 @@ public class OrderQueryTools {
             return ParsedArguments.error(
                     "匹配类型不支持，请使用 AUTO、ORDER_CODE、OUTER_ORDER_CODE 或 LOGISTICS_CODE。");
         }
+        // CUSTOMER 只允许由服务端“客户编码 -> 可信客户 ID”链路内部使用，绝不能成为模型可传参数。
+        if (type == OrderIdentifierType.CUSTOMER) {
+            return ParsedArguments.error(
+                    "匹配类型不支持，请使用 AUTO、ORDER_CODE、OUTER_ORDER_CODE 或 LOGISTICS_CODE。");
+        }
         // 去重键和真正传给 Gateway 的编号共用同一规范化结果，防止缓存语义与真实查询分叉。
         return ParsedArguments.valid(
                 normalizedIdentifier, type,
