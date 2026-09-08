@@ -610,6 +610,9 @@ public class OrderServiceGateway implements OrderQueryGateway {
         if (isBlank(identifier) || identifierType == null || identity == null || isBlank(requestId)) {
             throw new IllegalArgumentException("订单查询参数不完整");
         }
+        if (identifierType == OrderIdentifierType.CUSTOMER) {
+            throw new IllegalArgumentException("CUSTOMER 仅允许可信客户订单链路使用");
+        }
     }
 
     private void validateTrustedCustomerRequest(

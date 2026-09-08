@@ -75,6 +75,15 @@ class OrderServiceGatewayTest {
     }
 
     @Test
+    void rejectsInternalCustomerTypeOnTheRegularOrderSearchMethod() {
+        OrderServiceGateway gateway = gateway(unusedSearchClient(), unusedLogisticsClient());
+
+        assertThatThrownBy(() -> gateway.search(
+                "80001", OrderIdentifierType.CUSTOMER, IDENTITY, "request-1"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void queriesCustomerOrdersWithTrustedInternalIdAndDoesNotPutItInLogsOrResult() {
         AtomicReference<Long> capturedCustomerId = new AtomicReference<>();
         AtomicReference<Headers> captured = new AtomicReference<>();

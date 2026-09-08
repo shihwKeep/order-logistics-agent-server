@@ -84,7 +84,7 @@ public class CustomerQueryTools {
         StringBuilder text = new StringBuilder("前端已展示")
                 .append(result.items().size()).append("条客户卡片。请简洁回答，不要猜测客户敏感信息：");
         for (CustomerSearchItem item : result.items()) {
-            // 内部 customerId 只留在卡片结构中，绝不进入模型文本和日志。
+            // 内部 customerId 仅存在于后端领域结果，绝不进入模型文本、SSE 或历史消息。
             text.append(" 客户编号=").append(item.customerCode())
                     .append("，客户名称=").append(item.displayName())
                     .append("，等级=").append(item.gradeName())

@@ -35,6 +35,10 @@ public class CustomerOrderQueryService {
                 CustomerMatchType.CUSTOMER_CODE,
                 identity,
                 requestId);
+        if (customerResult.matchedBy() != CustomerMatchType.CUSTOMER_CODE) {
+            // 专用链路只接受“按编号命中”，避免下游契约漂移把同名客户误当成目标客户。
+            throw new CustomerServiceUnavailableException("客户服务响应不可用");
+        }
         List<CustomerSearchItem> matches = customerResult.items();
         if (matches.isEmpty() && customerResult.total() == 0) {
             return new CustomerOrderQueryResult(
@@ -48,6 +52,9 @@ public class CustomerOrderQueryService {
         }
 
         CustomerSearchItem customer = matches.getFirst();
+        if (!normalizedCode.equalsIgnoreCase(customer.customerCode())) {
+            throw new CustomerServiceUnavailableException("客户服务响应不可用");
+        }
         // 只在可信服务边界内短暂使用内部 ID；订单服务仍会叠加自己的组织权限条件。
         OrderSearchResult orders = orderGateway.searchByCustomerId(
                 customer.customerId(), identity, requestId);

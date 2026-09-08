@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CustomerOrderQueryServiceTest {
     private static final AgentIdentity IDENTITY =
@@ -63,6 +64,30 @@ class CustomerOrderQueryServiceTest {
         assertThat(new CustomerOrderQueryService(ambiguous, orders)
                 .query("C001", IDENTITY, "request-2").resolution())
                 .isEqualTo(CustomerOrderResolution.AMBIGUOUS);
+
+        assertThat(queriedCustomerId).hasValue(0L);
+    }
+
+    @Test
+    void rejectsCustomerResolutionThatDoesNotConfirmTheRequestedCode() {
+        AtomicLong queriedCustomerId = new AtomicLong();
+        OrderQueryGateway orders = new RecordingOrderGateway(queriedCustomerId, null);
+        CustomerSearchItem customer = new CustomerSearchItem(
+                80001L, "C002", "张*", "金卡", "自有", "普通客户");
+
+        CustomerQueryGateway wrongMatchType = (keyword, type, identity, requestId) ->
+                new CustomerSearchResult(CustomerMatchType.CUSTOMER_NAME, 1, false,
+                        OffsetDateTime.now(), List.of(customer));
+        assertThatThrownBy(() -> new CustomerOrderQueryService(wrongMatchType, orders)
+                .query("C001", IDENTITY, "request-1"))
+                .isInstanceOf(CustomerServiceUnavailableException.class);
+
+        CustomerQueryGateway wrongCode = (keyword, type, identity, requestId) ->
+                new CustomerSearchResult(CustomerMatchType.CUSTOMER_CODE, 1, false,
+                        OffsetDateTime.now(), List.of(customer));
+        assertThatThrownBy(() -> new CustomerOrderQueryService(wrongCode, orders)
+                .query("C001", IDENTITY, "request-2"))
+                .isInstanceOf(CustomerServiceUnavailableException.class);
 
         assertThat(queriedCustomerId).hasValue(0L);
     }
