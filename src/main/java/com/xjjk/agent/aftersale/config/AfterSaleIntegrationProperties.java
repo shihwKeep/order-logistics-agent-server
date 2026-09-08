@@ -21,10 +21,10 @@ import java.time.Duration;
 @ConfigurationProperties(prefix = "integration.aftersale")
 public class AfterSaleIntegrationProperties {
     @NotBlank
-    private String baseUrl;
+    private String baseUrl = "http://127.0.0.1:9";
 
     @NotBlank
-    private String internalToken;
+    private String internalToken = "disabled-after-sale-integration";
 
     @Valid
     @NotNull

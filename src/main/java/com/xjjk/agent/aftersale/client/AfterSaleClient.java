@@ -12,7 +12,8 @@ import java.util.List;
 
 @FeignClient(
         name = "agent-after-sale",
-        url = "${integration.aftersale.base-url}",
+        // 未下发 Nacos 配置时指向不可用端口，保证默认关闭的工具不会阻塞应用启动。
+        url = "${integration.aftersale.base-url:http://127.0.0.1:9}",
         configuration = AfterSaleFeignConfiguration.class)
 public interface AfterSaleClient {
     @PostMapping("/internal/agent/after-sales/search")

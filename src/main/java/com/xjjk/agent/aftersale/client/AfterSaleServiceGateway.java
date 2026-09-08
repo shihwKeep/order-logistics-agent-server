@@ -49,7 +49,8 @@ public class AfterSaleServiceGateway implements AfterSaleQueryGateway {
     @Autowired
     public AfterSaleServiceGateway(
             AfterSaleClient client,
-            @Value("${integration.aftersale.internal-token}") String internalToken,
+            // 售后工具默认关闭；缺少 Nacos 配置时使用不可用于服务端鉴权的哨兵值。
+            @Value("${integration.aftersale.internal-token:disabled-after-sale-integration}") String internalToken,
             CircuitBreakerFactory<?, ?> factory) {
         this(client, internalToken,
                 Objects.requireNonNull(factory, "熔断器工厂不能为空")
