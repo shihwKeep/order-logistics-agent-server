@@ -37,6 +37,12 @@ public final class ChatSseSession {
                 "QUERYING_LOGISTICS", "正在查询物流"));
     }
 
+    /** 客户卡片动作正在确定性查询订单，不表示模型正在生成。 */
+    public void queryingCustomerOrders() throws IOException {
+        send("status", new ChatStreamPayloads.Status(
+                "QUERYING_CUSTOMER_ORDERS", "正在查询客户订单"));
+    }
+
     public void delta(String text) throws IOException {
         send("delta", new ChatStreamPayloads.Delta(text));
     }

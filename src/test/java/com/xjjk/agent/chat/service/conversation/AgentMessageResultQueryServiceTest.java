@@ -47,6 +47,8 @@ class AgentMessageResultQueryServiceTest {
                         result("assistant-1", 1, "order-list", 1,
                                 "{\"items\":[]}"),
                         result("assistant-1", 2, "order-list", 1, "{"),
+                        result("assistant-1", 4, "customer-list", 1,
+                                "{\"items\":[]}"),
                         result("assistant-1", 3, "future-card", 2, "{}")));
         AgentMessageQueryService service = new AgentMessageQueryService(
                 conversationService, messageMapper, resultMapper,
@@ -58,12 +60,15 @@ class AgentMessageResultQueryServiceTest {
         assertThat(page.items()).extracting(ChatMessageResponse::messageId)
                 .containsExactly("user-1", "assistant-1");
         assertThat(page.items().get(0).results()).isEmpty();
-        assertThat(page.items().get(1).results()).singleElement().satisfies(item -> {
+        assertThat(page.items().get(1).results()).hasSize(2);
+        assertThat(page.items().get(1).results().get(0)).satisfies(item -> {
             assertThat(item.resultSequence()).isEqualTo(1);
             assertThat(item.kind()).isEqualTo("order-list");
             assertThat(item.schemaVersion()).isEqualTo(1);
             assertThat(item.data().path("items").isArray()).isTrue();
         });
+        assertThat(page.items().get(1).results().get(1).kind())
+                .isEqualTo("customer-list");
         verify(resultMapper).selectByMessageIds(
                 1, 10567, "conversation-1", List.of("user-1", "assistant-1"));
     }

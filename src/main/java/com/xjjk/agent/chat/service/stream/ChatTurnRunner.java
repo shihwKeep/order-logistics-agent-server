@@ -1,6 +1,7 @@
 package com.xjjk.agent.chat.service.stream;
 
 import com.xjjk.agent.chat.action.ChatActionDispatcher;
+import com.xjjk.agent.chat.action.ChatActionType;
 import com.xjjk.agent.chat.api.dto.ChatStreamRequest;
 import com.xjjk.agent.chat.domain.MessageStatus;
 import com.xjjk.agent.chat.domain.memory.ChatContextSelection;
@@ -143,10 +144,17 @@ public class ChatTurnRunner {
          * 但它仍使用开始事务产生的可信身份和 requestId，并由同一个 finalizer
          * 原子保存用户消息、固定助手正文、结构化结果和稳定历史游标。
          */
-        session.queryingLogistics();
+        // 动作状态由后端白名单类型决定，不能由前端提交任意状态文案。
+        switch (ChatActionType.parse(request.action().type())) {
+            case QUERY_ORDER_LOGISTICS -> session.queryingLogistics();
+            case QUERY_CUSTOMER_ORDERS -> session.queryingCustomerOrders();
+        }
         ChatActionDispatcher.DispatchResult dispatched = actionDispatcher.dispatch(
                 request.action(), identity, execution.requestId);
-        publishToolResult(dispatched.uiResult(), session, execution);
+        // 客户卡片可能已经过期；无法解析时仍保存固定回答，但不会伪造空订单结果。
+        if (dispatched.uiResult() != null) {
+            publishToolResult(dispatched.uiResult(), session, execution);
+        }
 
         execution.content.append(dispatched.assistantText());
         session.delta(dispatched.assistantText());

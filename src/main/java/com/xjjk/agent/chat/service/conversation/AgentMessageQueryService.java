@@ -49,6 +49,7 @@ public class AgentMessageQueryService {
     /** 第一版前端明确支持的结构化结果协议，未知类型或版本必须失败关闭。 */
     private static final Map<String, Set<Integer>> SUPPORTED_RESULT_SCHEMAS = Map.of(
             "product-list", Set.of(1),
+            "customer-list", Set.of(1),
             "order-list", Set.of(1),
             "logistics-timeline", Set.of(1));
 
