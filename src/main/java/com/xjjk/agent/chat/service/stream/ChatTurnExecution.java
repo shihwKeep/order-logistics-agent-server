@@ -4,7 +4,9 @@ import com.xjjk.agent.chat.domain.ChatTurnContext;
 import com.xjjk.agent.chat.domain.MessageStatus;
 import com.xjjk.agent.chat.observation.ChatCallMetricsCollector;
 import com.xjjk.agent.chat.result.PendingMessageResult;
+import com.xjjk.agent.chat.routing.BusinessQueryPlan;
 import com.xjjk.agent.chat.stream.ChatStreamError;
+import com.xjjk.agent.tool.ToolUiResult;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -27,6 +29,10 @@ final class ChatTurnExecution {
     final StringBuilder content = new StringBuilder();
     /** 工具已经生成并通过序列化、大小校验的结构化结果。 */
     private final List<PendingMessageResult> results = new ArrayList<>();
+    /** 模型实时查询产生、尚未通过本轮结果类型校验的结构化结果。 */
+    private final List<StagedToolResult> stagedResults = new ArrayList<>();
+    /** 当前消息的业务查询计划；普通问答不暂存输出。 */
+    BusinessQueryPlan queryPlan = BusinessQueryPlan.general();
     String finishReason;
     MessageStatus status = MessageStatus.FAILED;
     ChatStreamError error = ChatStreamError.preparationFailed();
@@ -45,7 +51,7 @@ final class ChatTurnExecution {
 
     /** 返回下一条结果序号；调用方必须在同一个 execution 锁内完成登记和发布。 */
     int nextResultSequence() {
-        return results.size() + 1;
+        return results.size() + stagedResults.size() + 1;
     }
 
     /**
@@ -58,6 +64,46 @@ final class ChatTurnExecution {
             throw new IllegalArgumentException("结构化结果序号必须连续递增");
         }
         results.add(value);
+    }
+
+    void queryPlan(BusinessQueryPlan plan) {
+        queryPlan = Objects.requireNonNull(plan, "业务查询计划不能为空");
+    }
+
+    boolean buffersModelOutput() {
+        return queryPlan.buffersModelOutput();
+    }
+
+    /** 暂存已经通过序列化和大小校验、但尚未允许发布的模型工具结果。 */
+    void stageResult(PendingMessageResult pending, ToolUiResult uiResult) {
+        PendingMessageResult value = Objects.requireNonNull(
+                pending, "待持久化结果不能为空");
+        if (value.resultSequence() != nextResultSequence()) {
+            throw new IllegalArgumentException("结构化结果序号必须连续递增");
+        }
+        stagedResults.add(new StagedToolResult(value, uiResult));
+    }
+
+    List<StagedToolResult> stagedResultSnapshot() {
+        return List.copyOf(stagedResults);
+    }
+
+    /** 校验通过后才把暂存结果提升为 finalizer 可持久化的结果。 */
+    void promoteStagedResults() {
+        List<StagedToolResult> values = List.copyOf(stagedResults);
+        stagedResults.clear();
+        for (StagedToolResult result : values) {
+            addResult(result.pending());
+        }
+    }
+
+    void discardStagedResults() {
+        stagedResults.clear();
+    }
+
+    void replaceContent(String value) {
+        content.setLength(0);
+        content.append(Objects.requireNonNull(value, "替换正文不能为空"));
     }
 
     /** 收尾只能读取不可变快照，避免事务执行时集合继续变化。 */
