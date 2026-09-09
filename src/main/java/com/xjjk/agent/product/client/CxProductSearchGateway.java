@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class CxProductSearchGateway implements ProductSearchGateway {
+    /** cxservice 内部接口约定的成功业务码。 */
     private static final int CX_SUCCESS_CODE = 1000;
 
     private final CxProductClient client;
@@ -33,6 +34,7 @@ public class CxProductSearchGateway implements ProductSearchGateway {
     public ProductSearchResult search(ProductSearchQuery query) {
         CxProductResponse<CxProductSearchData> response;
         try {
+            // 内部 Token 只在适配器边界注入，模型工具与前端均无法读取或覆盖。
             response = client.search(
                     internalToken,
                     new CxProductSearchRequest(
@@ -45,6 +47,7 @@ public class CxProductSearchGateway implements ProductSearchGateway {
             throw new ProductSearchUnavailableException("商品服务响应不合法");
         }
 
+        // 下游业务失败和协议缺失统一转换为领域不可用异常，不向模型暴露原始响应。
         CxProductSearchData data = response.data();
         List<ProductSearchItem> items = data.items() == null
                 ? List.of()
@@ -58,6 +61,7 @@ public class CxProductSearchGateway implements ProductSearchGateway {
                 items);
     }
 
+    /** 把下游 DTO 映射为 Agent 内部稳定领域协议，隔离 cxservice 字段变化。 */
     private ProductSearchItem toDomain(CxProductSearchItem item) {
         return new ProductSearchItem(
                 item.goodsId(), item.spuCode(), item.skuCode(),

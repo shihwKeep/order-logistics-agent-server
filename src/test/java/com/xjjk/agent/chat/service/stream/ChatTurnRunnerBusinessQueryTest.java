@@ -24,6 +24,7 @@ import com.xjjk.agent.order.tool.OrderToolAvailability;
 import com.xjjk.agent.tool.ToolUiResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -44,6 +45,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThat;
 
 @ExtendWith(MockitoExtension.class)
 class ChatTurnRunnerBusinessQueryTest {
@@ -134,6 +136,31 @@ class ChatTurnRunnerBusinessQueryTest {
         verify(sessionOne, never()).result(any());
     }
 
+    @Test
+    void outputLimitCannotPersistUnverifiedBufferedClaim() throws Exception {
+        String hallucinated = "订单已经发货";
+        ChatTurnContext turn = turn("request-4", "user-4", "assistant-4");
+        when(preparationService.prepare(null, IDENTITY, MESSAGE)).thenReturn(turn);
+        when(planner.plan(MESSAGE)).thenReturn(
+                BusinessQueryPlan.modelRequired(Set.of("order-list")));
+        when(contextService.prepare(eq(turn), eq(MESSAGE), any(ChatStreamControl.class)))
+                .thenReturn(org.mockito.Mockito.mock(ChatContextSelection.class));
+        when(aiChatService.stream(eq(MESSAGE), any(), any()))
+                .thenReturn(Flux.just(response(hallucinated, "length")));
+
+        ChatStreamControl control = new ChatStreamControl();
+        runner().run(new ChatStreamRequest(null, MESSAGE, null),
+                IDENTITY, control, sessionOne, "fallback-4");
+
+        ArgumentCaptor<ChatTurnExecution> executionCaptor =
+                ArgumentCaptor.forClass(ChatTurnExecution.class);
+        verify(finalizer).finish(executionCaptor.capture(), eq(control), eq(sessionOne));
+        assertThat(executionCaptor.getValue().content.toString())
+                .isEqualTo(FreshBusinessResultGate.MISSING_RESULT_MESSAGE);
+        assertThat(executionCaptor.getValue().resultSnapshot()).isEmpty();
+        verify(sessionOne, never()).delta(hallucinated);
+    }
+
     private ChatTurnRunner runner() {
         ChatActionDispatcher dispatcher = new ChatActionDispatcher(
                 orderGateway,
@@ -199,8 +226,12 @@ class ChatTurnRunnerBusinessQueryTest {
     }
 
     private ChatResponse response(String text) {
+        return response(text, "stop");
+    }
+
+    private ChatResponse response(String text, String finishReason) {
         return new ChatResponse(List.of(new Generation(
                 new AssistantMessage(text),
-                ChatGenerationMetadata.builder().finishReason("stop").build())));
+                ChatGenerationMetadata.builder().finishReason(finishReason).build())));
     }
 }

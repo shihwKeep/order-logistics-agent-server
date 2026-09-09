@@ -85,6 +85,9 @@ public class ChatTurnRunner {
         } finally {
             // 无论正常完成、模型失败、SSE 断开还是任务取消，都只能从这里进入统一收尾。
             // 这样可以避免某个异常分支遗漏会话占用释放或消息状态落库。
+            // MODEL_REQUIRED 的正文若未走完证据门禁，先替换为安全文案，禁止猜测性
+            // 查询结果通过异常、截断或取消分支写入历史消息。
+            freshBusinessResultGate.sanitizeForPersistence(execution);
             finalizer.finish(execution, control, session);
         }
     }

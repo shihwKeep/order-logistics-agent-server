@@ -8,6 +8,7 @@ import com.xjjk.agent.order.domain.OrderSearchResult;
 /** Agent 对订单服务的只读查询边界。 */
 public interface OrderQueryGateway {
 
+    /** 按外部可见业务编号查询订单，并叠加当前坐席的租户和组织权限。 */
     OrderSearchResult search(
             String identifier,
             OrderIdentifierType identifierType,
@@ -22,6 +23,7 @@ public interface OrderQueryGateway {
         throw new UnsupportedOperationException("当前订单网关不支持按客户查询");
     }
 
+    /** 按外部可见业务编号查询订单及其多运单物流时间线。 */
     OrderLogisticsResult logistics(
             String identifier,
             OrderIdentifierType identifierType,

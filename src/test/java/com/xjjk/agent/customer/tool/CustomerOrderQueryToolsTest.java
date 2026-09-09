@@ -6,6 +6,7 @@ import com.xjjk.agent.customer.domain.CustomerSearchResult;
 import com.xjjk.agent.customer.service.CustomerOrderQueryService;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.order.domain.OrderIdentifierType;
+import com.xjjk.agent.order.domain.OrderCard;
 import com.xjjk.agent.order.domain.OrderLogisticsResult;
 import com.xjjk.agent.order.domain.OrderSearchResult;
 import com.xjjk.agent.order.service.OrderQueryGateway;
@@ -19,6 +20,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -48,6 +50,32 @@ class CustomerOrderQueryToolsTest {
         assertThat(published.get().data()).isSameAs(orders);
         assertThat(modelText).contains("C001", "张*", "未查询到订单")
                 .doesNotContain("80001", "customerId");
+    }
+
+    @Test
+    void tellsTheModelExactTotalAndCurrentDisplayedCardCountSeparately() {
+        CustomerSearchResult customer = new CustomerSearchResult(
+                CustomerMatchType.CUSTOMER_CODE, 1, false, OffsetDateTime.now(),
+                List.of(new CustomerSearchItem(80001L, "C001", "张*",
+                        "金卡", "自有", "普通客户")));
+        List<OrderCard> cards = IntStream.rangeClosed(1, 5)
+                .mapToObj(index -> new OrderCard(
+                        "O-" + index, null, 10, "待发货", "2026-09-08 10:00:00",
+                        "张*", 1000L, index, List.of(), null, List.of()))
+                .toList();
+        OrderSearchResult orders = new OrderSearchResult(
+                OrderIdentifierType.CUSTOMER, 38, true,
+                OffsetDateTime.parse("2026-09-08T10:00:00+08:00"), cards);
+        CustomerOrderQueryService service = new CustomerOrderQueryService(
+                (keyword, type, identity, requestId) -> customer,
+                new CustomerOrdersGateway(orders));
+
+        String modelText = new CustomerOrderQueryTools(service).listCustomerOrders(
+                "C001", context(new AtomicReference<>()));
+
+        assertThat(modelText)
+                .contains("共38笔订单", "当前展示最近5笔订单卡片", "其余33笔未展示")
+                .doesNotContain("匹配总数=38");
     }
 
     private ToolContext context(AtomicReference<ToolUiResult> published) {

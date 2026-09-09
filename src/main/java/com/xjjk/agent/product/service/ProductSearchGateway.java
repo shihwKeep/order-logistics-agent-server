@@ -8,5 +8,6 @@ import com.xjjk.agent.product.domain.ProductSearchResult;
  */
 @FunctionalInterface
 public interface ProductSearchGateway {
+    /** 使用已经规范化的分页条件查询当前 Agent 可见的商品。 */
     ProductSearchResult search(ProductSearchQuery query);
 }

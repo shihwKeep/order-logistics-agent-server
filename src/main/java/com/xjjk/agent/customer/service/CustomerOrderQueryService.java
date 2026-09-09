@@ -19,6 +19,12 @@ public class CustomerOrderQueryService {
     private final CustomerQueryGateway customerGateway;
     private final OrderQueryGateway orderGateway;
 
+    /**
+     * 使用外部客户编号完成“可信客户解析 → 内部 ID 订单查询”。
+     *
+     * <p>内部 customerId 从客户服务响应中取得，只在服务端调用链内短暂流转，
+     * 不进入模型工具参数、前端卡片动作或聊天历史。</p>
+     */
     public CustomerOrderQueryResult query(
             String customerCode,
             AgentIdentity identity,
@@ -41,12 +47,14 @@ public class CustomerOrderQueryService {
         }
         List<CustomerSearchItem> matches = customerResult.items();
         if (matches.isEmpty() && customerResult.total() == 0) {
+            // 明确的零结果与下游异常分开表达，调用方可以给出“客户不存在”的确定回复。
             return new CustomerOrderQueryResult(
                     CustomerOrderResolution.NOT_FOUND, normalizedCode, null, null);
         }
         if (customerResult.truncated()
                 || customerResult.total() != 1
                 || matches.size() != 1) {
+            // 无法唯一定位时不猜测客户，也不把任意一条 customerId 交给订单服务。
             return new CustomerOrderQueryResult(
                     CustomerOrderResolution.AMBIGUOUS, normalizedCode, null, null);
         }

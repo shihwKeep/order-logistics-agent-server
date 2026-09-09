@@ -4,8 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.xjjk.agent.chat.stream.ChatSseSession;
+import com.xjjk.agent.order.domain.OrderAmount;
+import com.xjjk.agent.order.domain.OrderCard;
+import com.xjjk.agent.order.domain.OrderGoodsSummary;
 import com.xjjk.agent.order.domain.OrderIdentifierType;
+import com.xjjk.agent.order.domain.OrderRecipient;
 import com.xjjk.agent.order.domain.OrderSearchResult;
+import com.xjjk.agent.order.domain.OrderShipmentSummary;
 import com.xjjk.agent.tool.ToolUiResult;
 import java.io.IOException;
 import java.time.OffsetDateTime;
@@ -27,7 +32,18 @@ class ChatStreamBusinessResultContractTest {
     void serializesCompleteResultMetadataAndKeepsEventSequenceIncreasing() throws Exception {
         OffsetDateTime queriedAt = OffsetDateTime.parse("2026-09-07T10:15:30+08:00");
         OrderSearchResult result = new OrderSearchResult(
-                OrderIdentifierType.AUTO, 0, false, queriedAt, List.of());
+                OrderIdentifierType.AUTO, 1, false, queriedAt, List.of(new OrderCard(
+                "O123", "OUT123", 80, "在途", "2026-09-07 12:00:00",
+                "石**", 6000L, 6,
+                List.of(new OrderGoodsSummary(
+                        "商品名称", "SKU001", "50g/袋", 1000L, 6, 6000L, false)),
+                "德邦", List.of("MASKED-WAYBILL"),
+                194L, "款到发货",
+                new OrderAmount(6000L, 0L, 0L, 0L, 6000L),
+                new OrderRecipient("石**", "138****1234", "湖南省 常德市 鼎城区"),
+                1, false, 1, false,
+                List.of(new OrderShipmentSummary(
+                        "德邦", "MASKED-WAYBILL", "2026-09-07 12:10:00")))));
         CapturingEmitter emitter = new CapturingEmitter();
         ChatSseSession session = new ChatSseSession(emitter);
 
@@ -47,6 +63,12 @@ class ChatStreamBusinessResultContractTest {
                 .isEqualTo("2026-09-07T10:15:30+08:00");
         assertThat(resultJson.path("payload").path("data").path("matchedBy").asText())
                 .isEqualTo("AUTO");
+        JsonNode card = resultJson.path("payload").path("data").path("items").get(0);
+        assertThat(card.path("amount").path("goodsTotalInFen").asLong()).isEqualTo(6000L);
+        assertThat(card.path("recipient").path("nameMasked").asText()).isEqualTo("石**");
+        assertThat(card.path("goods").get(0).path("subtotalInFen").asLong()).isEqualTo(6000L);
+        assertThat(card.path("shipments").get(0).path("deliveryTime").asText())
+                .isEqualTo("2026-09-07 12:10:00");
         assertThat(resultJson.path("payload").has("toolName")).isFalse();
         assertThat(resultJson.toString()).doesNotContain("search_orders");
     }

@@ -30,15 +30,28 @@ public class BusinessQueryPlanner {
 
     private final BusinessQueryEnforcementProperties properties;
 
+    /**
+     * 把当前用户原文分类为普通问答、确定性直查或模型工具查询。
+     *
+     * <p>这里只做执行安全分流，不承担完整语义理解。规则不能唯一确定参数时，
+     * 仍由模型依据工具描述选择工具，但结果必须经过本轮新鲜性门禁。</p>
+     */
     public BusinessQueryPlan plan(String rawMessage) {
-        if (!properties.enabled() || rawMessage == null || rawMessage.isBlank()) {
+        if (rawMessage == null || rawMessage.isBlank()) {
             return BusinessQueryPlan.general();
         }
         String message = rawMessage.strip();
         if (isKnowledgeQuestion(message)) {
+            // “订单状态有哪些”是在问租户业务知识，不代表要求读取某一笔实时订单。
+            // 进入缓冲路径后，只有本轮知识检索返回可靠证据才允许模型正文流出。
+            return BusinessQueryPlan.modelRequired(Set.of("knowledge-citations"));
+        }
+        // 业务实时查询总开关不关闭知识回答的证据门禁。
+        if (!properties.enabled()) {
             return BusinessQueryPlan.general();
         }
 
+        // 关键词只用于判断涉及哪些业务域，不直接作为下游查询参数。
         boolean product = containsAny(message, "商品", "SKU", "sku", "库存", "上下架");
         boolean customer = message.contains("客户");
         boolean order = message.contains("订单");
@@ -55,6 +68,7 @@ public class BusinessQueryPlanner {
         }
 
         int domains = count(product, customer, logistics, afterSale);
+        // 单一物流意图且能提取完整订单号时，直接执行固定物流动作，减少一次模型决策。
         if (domains == 1 && logistics) {
             String code = find(ORDER_CODE, message);
             if (code != null) {
@@ -63,6 +77,7 @@ public class BusinessQueryPlanner {
                         "logistics-timeline");
             }
         }
+        // “客户 + 订单”且客户编号唯一可提取时，直接走客户订单白名单动作。
         if (domains == 1 && customer && order) {
             String code = find(CUSTOMER_CODE, message);
             if (code != null) {
@@ -71,6 +86,7 @@ public class BusinessQueryPlanner {
                         "order-list");
             }
         }
+        // 明确售后工单详情且只出现售后域时，允许从当前消息提取工单号直接查询。
         if (domains == 1 && afterSale
                 && containsAny(message, "售后单", "售后工单")
                 && !message.contains("客户") && !message.contains("订单")) {
@@ -83,6 +99,7 @@ public class BusinessQueryPlanner {
             }
         }
 
+        // 无法安全直查时只声明允许出现的结果类型，具体工具及参数交给模型选择。
         Set<String> acceptedKinds = acceptedKinds(
                 product, customer, order, logistics, afterSale, message);
         return acceptedKinds.isEmpty()
@@ -90,6 +107,7 @@ public class BusinessQueryPlanner {
                 : BusinessQueryPlan.modelRequired(acceptedKinds);
     }
 
+    /** 根据本轮涉及的业务域生成结构化结果类型白名单。 */
     private Set<String> acceptedKinds(
             boolean product,
             boolean customer,
@@ -120,12 +138,39 @@ public class BusinessQueryPlanner {
         return Set.copyOf(kinds);
     }
 
+    /** 排除只解释概念和规则、不需要访问实时业务系统的问题。 */
     private boolean isKnowledgeQuestion(String message) {
-        return containsAny(
+        // 带完整业务编号的“当前状态/详情”问题属于实时查询，不能因为包含“状态”
+        // 等词被误送到知识库；商品库存和价格同理。
+        boolean identifiedRealtimeQuery = (find(ORDER_CODE, message) != null
+                || find(CUSTOMER_CODE, message) != null
+                || find(AFTER_SALE_CODE, message) != null)
+                && containsAny(message, "查询", "查看", "查下", "查一下", "帮我查",
+                "帮忙查", "当前", "现在", "详情", "状态", "物流", "轨迹", "进度");
+        boolean productRealtimeQuery = containsAny(message, "商品", "SKU", "sku", "库存", "上下架")
+                && containsAny(message, "查询", "查看", "查下", "查一下", "帮我查",
+                "帮忙查", "还有", "多少", "有没有", "价格", "多少钱", "吗");
+        if (identifiedRealtimeQuery || productRealtimeQuery) {
+            return false;
+        }
+
+        boolean explicitKnowledgeQuestion = containsAny(
                 message, "是什么意思", "什么含义", "怎么理解", "介绍一下",
-                "解释一下", "有哪些状态", "规则是什么");
+                "解释一下", "有哪些状态", "规则是什么", "规定是什么",
+                "政策", "制度", "操作规范", "处理规范", "什么流程", "如何处理");
+        boolean knowledgeDomain = containsAny(
+                message, "退款", "退货", "换货", "售后", "签收", "发货", "配送",
+                "物流", "订单", "商品", "库存", "客户", "会员", "支付", "收款",
+                "运费", "发票");
+        boolean asksRuleOrBoundary = containsAny(
+                message, "期限", "多久", "几天", "条件", "情况", "是否可以", "能不能",
+                "可以吗", "怎么办", "怎么", "怎样", "怎么算", "如何", "哪些", "为什么", "要求",
+                "标准", "规则", "规定", "政策", "制度", "流程", "规范", "含义", "意思");
+        // “介绍一下你自己”等普通对话不能仅因问句样式被送入企业知识库。
+        return knowledgeDomain && (explicitKnowledgeQuestion || asksRuleOrBoundary);
     }
 
+    /** 从当前用户消息中提取第一个符合严格边界的完整业务编号。 */
     private String find(Pattern pattern, String message) {
         Matcher matcher = pattern.matcher(message);
         return matcher.find() ? matcher.group(1).toUpperCase(Locale.ROOT) : null;

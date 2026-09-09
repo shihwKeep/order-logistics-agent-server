@@ -23,7 +23,9 @@ import java.util.Locale;
 @Component
 @RequiredArgsConstructor
 public class AfterSaleQueryTools {
+    /** 售后工单号、订单号、客户编号或姓名统一使用的输入长度上限。 */
     private static final int MAX_IDENTIFIER_LENGTH = 128;
+    /** 只限制模型可见摘要；完整售后卡片使用独立结构化结果通道。 */
     private static final int MAX_MODEL_TEXT_LENGTH = 1900;
 
     private final AfterSaleQueryGateway gateway;
@@ -41,15 +43,18 @@ public class AfterSaleQueryTools {
             @ToolParam(description = "可选结束时间，ISO-8601", required = false)
             String endTime,
             ToolContext toolContext) {
+        // 先统一校验匹配类型、查询值和可选时间范围，错误参数不会访问下游。
         ParsedSearch arguments = parseSearch(identifierType, identifier, startTime, endTime);
         if (arguments.error() != null) {
             return arguments.error();
         }
         AgentToolRequestContext context = requestContext(toolContext);
+        // 即使回调因配置漂移被意外注册，工具内部仍做一次可信身份下的能力校验。
         if (!availability.isSearchAvailable(context.identity())) {
             return "当前组织暂未开放售后查询能力。";
         }
         try {
+            // 匹配类型、规范化标识和时间范围共同组成单轮幂等键。
             return context.callGuard().execute(
                     "search_after_sales", arguments.key(),
                     () -> executeSearch(arguments, context));
@@ -63,6 +68,7 @@ public class AfterSaleQueryTools {
     public String getAfterSaleDetail(
             @ToolParam(description = "完整售后工单号") String afterSaleCode,
             ToolContext toolContext) {
+        // 详情只接受单一完整工单号，不允许模型传递售后内部主键。
         String normalized = normalizeCode(afterSaleCode);
         if (normalized == null) {
             return "请提供不超过128个字符且不含控制字符的完整售后工单号。";
@@ -82,6 +88,7 @@ public class AfterSaleQueryTools {
 
     private String executeSearch(ParsedSearch arguments, AgentToolRequestContext context) {
         try {
+            // 可信身份和 requestId 均来自 ToolContext；Gateway 负责下游鉴权和防腐转换。
             AfterSaleSearchResult result = gateway.search(
                     arguments.type(), arguments.identifier(),
                     arguments.startTime(), arguments.endTime(),
@@ -100,6 +107,7 @@ public class AfterSaleQueryTools {
 
     private String executeDetail(String afterSaleCode, AgentToolRequestContext context) {
         try {
+            // 完整详情先发布为前端结构化结果，模型只接收下方生成的最小概括文本。
             AfterSaleDetailResult result = gateway.detail(
                     afterSaleCode, context.identity(), context.requestId());
             context.outputPublisher().publish(new ToolUiResult(
@@ -145,6 +153,11 @@ public class AfterSaleQueryTools {
                 + "。前端已展示详情，请简洁概括，不要复述售后说明、商品原因或退款明细。");
     }
 
+    /**
+     * 规范化售后查询参数并构造稳定去重键。
+     *
+     * <p>时间必须是带时区的 ISO-8601，且开始时间不能晚于结束时间。</p>
+     */
     private ParsedSearch parseSearch(
             String rawType, String rawIdentifier, String rawStartTime, String rawEndTime) {
         String identifier = normalizeCode(rawIdentifier);
@@ -179,10 +192,12 @@ public class AfterSaleQueryTools {
         return new ParsedSearch(type, identifier, startTime, endTime, key, null);
     }
 
+    /** 解析可选时间；空文本表示该侧时间范围不设限。 */
     private OffsetDateTime parseTime(String value) {
         return value == null || value.isBlank() ? null : OffsetDateTime.parse(value.strip());
     }
 
+    /** 清理并限制通用查询标识，控制字符在进入下游前被拒绝。 */
     private String normalizeCode(String value) {
         if (value == null) {
             return null;
@@ -195,6 +210,7 @@ public class AfterSaleQueryTools {
         return normalized;
     }
 
+    /** 从非提示词 ToolContext 中提取服务端可信工具上下文。 */
     private AgentToolRequestContext requestContext(ToolContext context) {
         if (context == null) {
             throw new IllegalStateException("售后工具缺少请求上下文");
@@ -206,11 +222,13 @@ public class AfterSaleQueryTools {
         return requestContext;
     }
 
+    /** 对模型可见的售后摘要施加总长度上限。 */
     private String bounded(String value) {
         return value.length() <= MAX_MODEL_TEXT_LENGTH
                 ? value : value.substring(0, MAX_MODEL_TEXT_LENGTH - 1) + "…";
     }
 
+    /** 清理控制字符并缩短单个字段，避免异常下游文本污染模型上下文。 */
     private String abbreviate(String value, int maxLength) {
         if (value == null || value.isBlank()) {
             return "未提供";
@@ -220,6 +238,7 @@ public class AfterSaleQueryTools {
                 ? normalized : normalized.substring(0, maxLength - 1) + "…";
     }
 
+    /** 已校验的售后搜索参数；错误对象只携带安全提示。 */
     private record ParsedSearch(
             AfterSaleIdentifierType type,
             String identifier,

@@ -10,9 +10,11 @@ import java.util.Set;
 @ConfigurationProperties(prefix = "agent.tool")
 public record CustomerToolAvailability(Capability customer) {
     public CustomerToolAvailability {
+        // Nacos 未配置客户能力时采用安全关闭默认值。
         customer = customer == null ? Capability.disabled() : customer;
     }
 
+    /** 基于当前认证组织判断客户工具是否应注册到本轮模型请求。 */
     public boolean isAvailable(AgentIdentity identity) {
         if (identity == null || !customer.enabled()) {
             return false;
@@ -23,6 +25,7 @@ public record CustomerToolAvailability(Capability customer) {
                 && customer.allowedOrgIds().contains(identity.orgId()));
     }
 
+    /** 客户工具的总开关、发布模式和组织白名单。 */
     public record Capability(boolean enabled, String rolloutMode, Set<Long> allowedOrgIds) {
         public Capability {
             allowedOrgIds = allowedOrgIds == null ? Set.of() : Set.copyOf(allowedOrgIds);
@@ -34,8 +37,10 @@ public record CustomerToolAvailability(Capability customer) {
     }
 
     private enum RolloutMode {
+        /** 关闭、组织白名单和全量开放三种灰度模式。 */
         OFF, ALLOWLIST, ALL;
 
+        /** 配置为空或拼写未知时安全降级为 OFF。 */
         static RolloutMode parse(String value) {
             if (value == null || value.isBlank()) {
                 return OFF;

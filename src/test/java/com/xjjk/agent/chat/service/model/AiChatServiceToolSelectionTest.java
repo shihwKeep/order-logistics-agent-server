@@ -20,6 +20,9 @@ import com.xjjk.agent.order.service.OrderQueryGateway;
 import com.xjjk.agent.order.tool.OrderQueryTools;
 import com.xjjk.agent.order.tool.OrderToolAvailability;
 import com.xjjk.agent.product.tool.ProductQueryTools;
+import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
+import com.xjjk.agent.knowledge.tool.KnowledgeQueryTools;
+import com.xjjk.agent.knowledge.tool.KnowledgeToolAvailability;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.tool.ToolCallback;
@@ -98,6 +101,22 @@ class AiChatServiceToolSelectionTest {
                 .containsExactly("search_products", "get_after_sale_detail");
     }
 
+    @Test
+    void registersKnowledgeOnlyForEnabledOrganizations() {
+        KnowledgeToolAvailability enabled = new KnowledgeToolAvailability(
+                true, "ALLOWLIST", Set.of(23L));
+        AiChatService withKnowledge = service(
+                capability(false, "OFF", Set.of()),
+                capability(false, "OFF", Set.of()),
+                capability(false, "OFF", Set.of()),
+                customerCapability(false, "OFF", Set.of()),
+                afterSaleCapability(false, "OFF", Set.of()),
+                afterSaleCapability(false, "OFF", Set.of()),
+                enabled);
+
+        assertThat(toolNames(withKnowledge)).contains("search_knowledge");
+    }
+
     private AiChatService service(
             OrderToolAvailability.Capability order,
             OrderToolAvailability.Capability logistics) {
@@ -124,6 +143,19 @@ class AiChatServiceToolSelectionTest {
             CustomerToolAvailability.Capability customer,
             AfterSaleToolAvailability.Capability afterSaleSearch,
             AfterSaleToolAvailability.Capability afterSaleDetail) {
+        return service(order, logistics, customerOrder, customer,
+                afterSaleSearch, afterSaleDetail,
+                new KnowledgeToolAvailability(false, "OFF", Set.of()));
+    }
+
+    private AiChatService service(
+            OrderToolAvailability.Capability order,
+            OrderToolAvailability.Capability logistics,
+            OrderToolAvailability.Capability customerOrder,
+            CustomerToolAvailability.Capability customer,
+            AfterSaleToolAvailability.Capability afterSaleSearch,
+            AfterSaleToolAvailability.Capability afterSaleDetail,
+            KnowledgeToolAvailability knowledgeAvailability) {
         ProductQueryTools productTools = new ProductQueryTools(query -> {
             throw new AssertionError("工具选择测试不应执行商品查询");
         });
@@ -143,6 +175,10 @@ class AiChatServiceToolSelectionTest {
                 new AfterSaleToolAvailability(afterSaleSearch, afterSaleDetail);
         AfterSaleQueryTools afterSaleTools = new AfterSaleQueryTools(
                 new UnusedAfterSaleGateway(), afterSaleAvailability);
+        KnowledgeQueryTools knowledgeTools = new KnowledgeQueryTools(
+                (question, ids, identity, requestId) -> new KnowledgeRetrievalResult(
+                        false, List.of(), "v1", "NONE", "EMPTY", OffsetDateTime.now()),
+                knowledgeAvailability);
         return new AiChatService(
                 mock(ChatClient.class),
                 productTools,
@@ -152,7 +188,9 @@ class AiChatServiceToolSelectionTest {
                 customerOrderTools,
                 new CustomerToolAvailability(customer),
                 afterSaleTools,
-                afterSaleAvailability);
+                afterSaleAvailability,
+                knowledgeTools,
+                knowledgeAvailability);
     }
 
     private CustomerToolAvailability.Capability customerCapability(

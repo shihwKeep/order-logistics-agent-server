@@ -85,6 +85,7 @@ public class AfterSaleServiceGateway implements AfterSaleQueryGateway {
             OffsetDateTime endTime,
             AgentIdentity identity,
             String requestId) {
+        // 先校验可信身份、查询标识和时间范围，再组装受熔断器保护的完整调用。
         validateSearch(type, identifier, startTime, endTime, identity, requestId);
         Supplier<AfterSaleSearchResult> invocation = () -> mapSearchResponse(
                 invokeWithRetry("search", requestId,
@@ -101,6 +102,7 @@ public class AfterSaleServiceGateway implements AfterSaleQueryGateway {
             String afterSaleCode,
             AgentIdentity identity,
             String requestId) {
+        // 详情与列表使用独立熔断器，某一路开路不会直接关闭另一项能力。
         validateCommon(identity, requestId);
         if (blank(afterSaleCode) || afterSaleCode.length() > 128 || unsafe(afterSaleCode)) {
             throw new IllegalArgumentException("售后单号不合法");
@@ -114,6 +116,7 @@ public class AfterSaleServiceGateway implements AfterSaleQueryGateway {
         return run(detailCircuitBreaker, invocation);
     }
 
+    /** 执行受保护的下游调用；测试构造器未注入熔断器时直接执行。 */
     private <T> T run(CircuitBreaker circuitBreaker, Supplier<T> invocation) {
         if (circuitBreaker == null) {
             return invocation.get();
@@ -146,6 +149,7 @@ public class AfterSaleServiceGateway implements AfterSaleQueryGateway {
         throw new IllegalStateException("unreachable");
     }
 
+    /** 区分可短暂恢复的网络故障与 DNS、TLS、协议和业务错误。 */
     private boolean transientFailure(RuntimeException exception) {
         if (exception instanceof FeignException feign && feign.status() > 0) {
             return feign.status() == 502 || feign.status() == 503 || feign.status() == 504;
@@ -176,6 +180,7 @@ public class AfterSaleServiceGateway implements AfterSaleQueryGateway {
         return transientFailure(exception) ? "TRANSIENT_NETWORK" : "NON_RETRYABLE";
     }
 
+    /** 校验列表总数、截断标记、条数上限和匹配类型后再映射为领域结果。 */
     private AfterSaleSearchResult mapSearchResponse(
             AfterSaleServiceResponse<AfterSaleClient.SearchData> response) {
         AfterSaleClient.SearchData data = successfulData(response);
@@ -215,6 +220,7 @@ public class AfterSaleServiceGateway implements AfterSaleQueryGateway {
                 cleanOptional(item.assigneeDisplayName()));
     }
 
+    /** 严格验证售后详情及明细数量边界，任何半结构响应都按不可用处理。 */
     private AfterSaleDetailResult mapDetailResponse(
             AfterSaleServiceResponse<AfterSaleClient.DetailData> response) {
         AfterSaleClient.DetailData data = successfulData(response);
@@ -306,6 +312,7 @@ public class AfterSaleServiceGateway implements AfterSaleQueryGateway {
         }
     }
 
+    /** 公共可信参数校验：身份字段必须完整，requestId 必须是服务端 UUID。 */
     private void validateCommon(AgentIdentity identity, String requestId) {
         if (identity == null || identity.userId() <= 0 || identity.orgId() <= 0
                 || identity.tenantId() <= 0 || blank(requestId)) {

@@ -39,6 +39,12 @@ public class ChatActionDispatcher {
     private final AfterSaleQueryGateway afterSaleGateway;
     private final AfterSaleToolAvailability afterSaleAvailability;
 
+    /**
+     * 解析并执行前端提交的白名单动作。
+     *
+     * <p>动作类型和业务编号来自前端卡片，但租户、用户和组织始终来自已认证身份；
+     * 未知动作在进入任何下游调用前失败。</p>
+     */
     public DispatchResult dispatch(
             ChatActionRequest action,
             AgentIdentity identity,
@@ -56,6 +62,7 @@ public class ChatActionDispatcher {
         };
     }
 
+    /** 查询售后详情，并把完整领域结果转换成前端卡片协议。 */
     private DispatchResult queryAfterSaleDetail(
             String afterSaleCode,
             AgentIdentity identity,
@@ -87,6 +94,7 @@ public class ChatActionDispatcher {
         }
     }
 
+    /** 先以客户编号解析可信客户，再查询该客户有权访问的订单。 */
     private DispatchResult queryCustomerOrders(
             String customerCode,
             AgentIdentity identity,
@@ -126,6 +134,7 @@ public class ChatActionDispatcher {
         }
     }
 
+    /** 使用卡片携带的完整订单号查询实时物流，不允许前端直接传内部 orderId。 */
     private DispatchResult queryOrderLogistics(
             String orderCode,
             AgentIdentity identity,
@@ -159,6 +168,7 @@ public class ChatActionDispatcher {
         }
     }
 
+    /** 清理并限制订单号，控制字符或超长值在访问下游前被拒绝。 */
     private String normalizeOrderCode(String orderCode) {
         if (orderCode == null) {
             throw new BusinessException(ApiErrorCode.VALIDATION_ERROR);
@@ -172,6 +182,7 @@ public class ChatActionDispatcher {
         return normalized;
     }
 
+    /** 清理并限制客户编号；客户内部主键不属于前端动作协议。 */
     private String normalizeCustomerCode(String customerCode) {
         if (customerCode == null) {
             throw new BusinessException(ApiErrorCode.VALIDATION_ERROR);
@@ -185,6 +196,7 @@ public class ChatActionDispatcher {
         return normalized;
     }
 
+    /** 清理并限制售后工单号，保证固定回答和下游参数使用同一规范化值。 */
     private String normalizeAfterSaleCode(String afterSaleCode) {
         if (afterSaleCode == null) {
             throw new BusinessException(ApiErrorCode.VALIDATION_ERROR);

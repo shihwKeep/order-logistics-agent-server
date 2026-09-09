@@ -14,6 +14,7 @@ import java.util.regex.Pattern;
 @Component
 public class ChatToolResultRecorder {
 
+    /** 工具名和结果类型最终会进入数据库列及 SSE 协议，必须使用有限安全字符集。 */
     private static final int MAX_TOOL_NAME_LENGTH = 64;
     private static final int MAX_KIND_LENGTH = 32;
     private static final Pattern SAFE_NAME = Pattern.compile("[A-Za-z0-9_-]+");
@@ -40,12 +41,14 @@ public class ChatToolResultRecorder {
 
         String payloadJson;
         try {
+            // 只序列化 data，外围协议字段由服务端单独保存，前端不能用载荷覆盖它们。
             payloadJson = objectMapper.writeValueAsString(result.data());
         } catch (JsonProcessingException | RuntimeException exception) {
             // Jackson 异常可能携带业务对象路径或正文，跨边界时只暴露固定安全语义。
             throw new ToolResultSerializationException();
         }
 
+        // 长度按 UTF-8 字节计算，与数据库及网络真实占用口径保持一致。
         int payloadBytes = payloadJson.getBytes(StandardCharsets.UTF_8).length;
         if (payloadBytes > properties.maxPayloadBytes()) {
             throw new ToolResultTooLargeException(
@@ -61,6 +64,7 @@ public class ChatToolResultRecorder {
                 result.queriedAt());
     }
 
+    /** 在 JSON 序列化前验证外围协议，拒绝不可持久化或无法审计的结果。 */
     private void validate(ToolUiResult result, int resultSequence) {
         if (result == null) {
             throw new IllegalArgumentException("工具结果不能为空");
@@ -81,6 +85,7 @@ public class ChatToolResultRecorder {
         }
     }
 
+    /** 工具名和 kind 只允许稳定协议字符，禁止空白、控制符和路径式名称。 */
     private void validateName(String value, int maxLength, String fieldName) {
         if (value == null || value.isBlank() || value.length() > maxLength
                 || !SAFE_NAME.matcher(value).matches()) {

@@ -10,18 +10,22 @@ import java.util.Set;
 @ConfigurationProperties(prefix = "agent.tool.after-sale")
 public record AfterSaleToolAvailability(Capability search, Capability detail) {
     public AfterSaleToolAvailability {
+        // 搜索和详情独立默认关闭，允许分阶段灰度发布。
         search = search == null ? Capability.disabled() : search;
         detail = detail == null ? Capability.disabled() : detail;
     }
 
+    /** 判断当前组织是否可以使用售后列表搜索。 */
     public boolean isSearchAvailable(AgentIdentity identity) {
         return available(search, identity);
     }
 
+    /** 判断当前组织是否可以使用售后详情查询。 */
     public boolean isDetailAvailable(AgentIdentity identity) {
         return available(detail, identity);
     }
 
+    /** 统一执行开关、模式和组织白名单判断。 */
     private boolean available(Capability capability, AgentIdentity identity) {
         if (!capability.enabled() || identity == null) {
             return false;
@@ -32,6 +36,7 @@ public record AfterSaleToolAvailability(Capability search, Capability detail) {
                 && capability.allowedOrgIds().contains(identity.orgId()));
     }
 
+    /** 单项售后能力的灰度配置。 */
     public record Capability(boolean enabled, String rolloutMode, Set<Long> allowedOrgIds) {
         public Capability {
             allowedOrgIds = allowedOrgIds == null ? Set.of() : Set.copyOf(allowedOrgIds);
@@ -43,8 +48,11 @@ public record AfterSaleToolAvailability(Capability search, Capability detail) {
     }
 
     private enum RolloutMode {
+        /** 完全关闭。 */
         OFF,
+        /** 只允许指定组织。 */
         ALLOWLIST,
+        /** 允许所有已认证组织。 */
         ALL;
 
         private static RolloutMode parse(String value) {

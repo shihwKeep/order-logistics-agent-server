@@ -39,6 +39,7 @@ public class OrderQueryTools {
             @ToolParam(description = "匹配类型：AUTO、ORDER_CODE、OUTER_ORDER_CODE、LOGISTICS_CODE；不确定时用AUTO", required = false)
             String identifierType,
             ToolContext toolContext) {
+        // 先规范化模型参数，错误参数直接返回可理解提示，不访问下游也不占用调用额度。
         ParsedArguments arguments = parseArguments(identifier, identifierType);
         if (arguments.errorMessage() != null) {
             // 参数错误不进入 Guard，也不消耗单轮工具额度，更不会访问下游。
@@ -46,6 +47,7 @@ public class OrderQueryTools {
         }
         AgentToolRequestContext requestContext = requestContext(toolContext);
         try {
+            // 工具名和规范化参数共同组成单轮幂等键，避免模型并发重复查询同一订单。
             return requestContext.callGuard().execute(
                     "search_orders",
                     arguments.canonicalKey(),
@@ -63,6 +65,7 @@ public class OrderQueryTools {
             @ToolParam(description = "匹配类型：AUTO、ORDER_CODE、OUTER_ORDER_CODE、LOGISTICS_CODE；不确定时用AUTO", required = false)
             String identifierType,
             ToolContext toolContext) {
+        // 订单查询与物流查询使用相同的编号规范，但使用不同工具名形成不同幂等键。
         ParsedArguments arguments = parseArguments(identifier, identifierType);
         if (arguments.errorMessage() != null) {
             return arguments.errorMessage();
@@ -82,6 +85,7 @@ public class OrderQueryTools {
             ParsedArguments arguments,
             AgentToolRequestContext requestContext) {
         try {
+            // 认证身份和 requestId 只从服务端 ToolContext 获取，模型参数不能覆盖可信请求头。
             OrderSearchResult result = gateway.search(
                     arguments.identifier(),
                     arguments.type(),
@@ -103,6 +107,7 @@ public class OrderQueryTools {
             ParsedArguments arguments,
             AgentToolRequestContext requestContext) {
         try {
+            // Gateway 负责下游鉴权、重试、熔断和响应校验，返回已脱敏的物流领域结果。
             OrderLogisticsResult result = gateway.logistics(
                     arguments.identifier(),
                     arguments.type(),
@@ -120,6 +125,12 @@ public class OrderQueryTools {
         }
     }
 
+    /**
+     * 校验并规范化模型提供的业务编号及匹配类型。
+     *
+     * <p>返回对象同时携带真实查询参数、单轮去重键和安全错误文案，防止三者使用
+     * 不同规范化规则。内部的 CUSTOMER 类型不会暴露给模型调用。</p>
+     */
     private ParsedArguments parseArguments(String identifier, String identifierType) {
         if (identifier == null) {
             return ParsedArguments.error("请提供完整的订单号、外部订单号或运单号。");
@@ -152,6 +163,7 @@ public class OrderQueryTools {
                 type.name() + "|" + normalizedIdentifier);
     }
 
+    /** 提取服务端注入的本轮身份和输出通道，缺失时严格失败而不是匿名调用。 */
     private AgentToolRequestContext requestContext(ToolContext context) {
         if (context == null) {
             throw new IllegalStateException("订单工具缺少请求上下文");
@@ -163,6 +175,7 @@ public class OrderQueryTools {
         return requestContext;
     }
 
+    /** 生成供模型概括的订单最小事实；完整金额、商品和收货信息只走前端卡片。 */
     private String toSearchModelText(OrderSearchResult result) {
         String queriedAt = String.valueOf(result.queriedAt());
         if (result.items().isEmpty()) {
@@ -187,6 +200,7 @@ public class OrderQueryTools {
         return bounded(text.toString());
     }
 
+    /** 生成供模型回答最新状态的物流摘要，完整轨迹仍由结构化卡片展示。 */
     private String toLogisticsModelText(OrderLogisticsResult result) {
         StringBuilder text = new StringBuilder("查询时间=")
                 .append(result.queriedAt())
@@ -209,12 +223,14 @@ public class OrderQueryTools {
         return bounded(text.toString());
     }
 
+    /** 对整个模型可见文本施加硬上限，避免异常下游数据放大上下文。 */
     private String bounded(String value) {
         return value.length() < MAX_MODEL_TEXT_LENGTH
                 ? value
                 : value.substring(0, MAX_MODEL_TEXT_LENGTH - 1) + "…";
     }
 
+    /** 清理控制字符并限制单个字段长度，日志和模型都不会接收无界业务文本。 */
     private String abbreviate(String value, int maxLength) {
         if (value == null || value.isBlank()) {
             return "未提供";
@@ -225,6 +241,7 @@ public class OrderQueryTools {
                 : normalized.substring(0, maxLength - 1) + "…";
     }
 
+    /** 已规范化的工具参数和值对象，错误结果不会携带可执行字段。 */
     private record ParsedArguments(
             String identifier,
             OrderIdentifierType type,

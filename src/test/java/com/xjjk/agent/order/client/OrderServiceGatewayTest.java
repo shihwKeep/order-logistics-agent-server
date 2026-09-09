@@ -61,9 +61,18 @@ class OrderServiceGatewayTest {
         assertThat(result.total()).isEqualTo(1);
         assertThat(result.items()).singleElement().satisfies(item -> {
             assertThat(item.orderCode()).isEqualTo("O123");
-            assertThat(item.payAmountInFen()).isEqualTo(12900L);
+            assertThat(item.payAmountInFen()).isEqualTo(6000L);
+            assertThat(item.paymentMethodText()).isEqualTo("款到发货");
+            assertThat(item.amount().goodsTotalInFen()).isEqualTo(6000L);
+            assertThat(item.recipient().phoneMasked()).isEqualTo("138****1234");
+            assertThat(item.shipments()).singleElement()
+                    .satisfies(shipment -> assertThat(shipment.deliveryTime())
+                            .isEqualTo("2026-09-07 12:10:00"));
             assertThat(item.goods()).singleElement()
-                    .satisfies(goods -> assertThat(goods.skuCode()).isEqualTo("SKU001"));
+                    .satisfies(goods -> {
+                        assertThat(goods.skuCode()).isEqualTo("SKU001");
+                        assertThat(goods.subtotalInFen()).isEqualTo(6000L);
+                    });
         });
         assertThat(result.items().getFirst().getClass().getRecordComponents())
                 .extracting(component -> component.getName())
@@ -230,7 +239,8 @@ class OrderServiceGatewayTest {
                     "ORDER_CODE", 1L, false, OffsetDateTime.now(), List.of(
                     new OrderSearchClient.OrderCardData(
                             " ", "OUT123", 80, "在途", "2026-09-07 12:00:00",
-                            "石**", 12900L, 0, List.of(), "顺丰", List.of()))));
+                            "石**", 12900L, 0, List.of(), "顺丰", List.of(),
+                            null, null, null, null, null, null, null, null, null))));
         };
 
         assertThatThrownBy(() -> gateway(client, unusedLogisticsClient()).search(
@@ -292,6 +302,96 @@ class OrderServiceGatewayTest {
         assertThat(result.total()).isEqualTo(1L);
         assertThat(result.truncated()).isTrue();
         assertThat(result.items()).isEmpty();
+    }
+
+    @Test
+    void keepsLegacyOrderCardsReadable() {
+        OrderSearchClient client = (token, tenant, user, org, requestId, request) ->
+                new OrderServiceResponse<>(1000, "success", searchData(
+                        1L, false, List.of(orderCard(
+                                1, List.of(orderGoods()), List.of("SF123456")))));
+
+        OrderSearchResult result = gateway(client, unusedLogisticsClient()).search(
+                "O123", OrderIdentifierType.AUTO, IDENTITY, "request-legacy");
+
+        assertThat(result.items()).singleElement().satisfies(card -> {
+            assertThat(card.payAmountInFen()).isEqualTo(12900L);
+            assertThat(card.amount()).isNull();
+            assertThat(card.recipient()).isNull();
+            assertThat(card.shipments()).isNull();
+        });
+    }
+
+    @ParameterizedTest(name = "reject invalid rich order card: {0}")
+    @MethodSource("invalidRichOrderCards")
+    void rejectsInvalidRichCardWithoutRetry(
+            String caseName,
+            OrderSearchClient.OrderCardData invalidCard) {
+        AtomicInteger attempts = new AtomicInteger();
+        OrderSearchClient client = (token, tenant, user, org, requestId, request) -> {
+            attempts.incrementAndGet();
+            return new OrderServiceResponse<>(1000, "success", searchData(
+                    1L, false, List.of(invalidCard)));
+        };
+
+        assertThatThrownBy(() -> gateway(client, unusedLogisticsClient()).search(
+                "O123", OrderIdentifierType.AUTO, IDENTITY, "request-invalid-rich"))
+                .isInstanceOf(OrderServiceUnavailableException.class)
+                .hasMessage("订单服务响应不可用");
+        assertThat(attempts).hasValue(1);
+    }
+
+    private static Stream<Arguments> invalidRichOrderCards() {
+        OrderSearchClient.OrderGoodsData goods = new OrderSearchClient.OrderGoodsData(
+                "商品名称", "SKU001", "50g/袋", 1000L, 1, 1000L, false);
+        OrderSearchClient.OrderShipmentData shipment =
+                new OrderSearchClient.OrderShipmentData(
+                        "德邦", "MASKED-WAYBILL", "2026-09-07 12:10:00");
+        OrderSearchClient.OrderAmountData validAmount =
+                new OrderSearchClient.OrderAmountData(1000L, 0L, 0L, 0L, 1000L);
+        OrderSearchClient.OrderRecipientData validRecipient =
+                new OrderSearchClient.OrderRecipientData(
+                        "石**", "138****1234", "湖南省 常德市 鼎城区");
+        return Stream.of(
+                Arguments.of("negative-money", richOrderCard(
+                        new OrderSearchClient.OrderAmountData(1000L, -1L, 0L, 0L, 1000L),
+                        validRecipient, 1, false, List.of(goods), 1, false, List.of(shipment))),
+                Arguments.of("goods-over-limit", richOrderCard(
+                        validAmount, validRecipient, 21, true,
+                        Stream.generate(() -> goods).limit(21).toList(),
+                        1, false, List.of(shipment))),
+                Arguments.of("goods-null-element", richOrderCard(
+                        validAmount, validRecipient, 1, false,
+                        Arrays.asList((OrderSearchClient.OrderGoodsData) null),
+                        1, false, List.of(shipment))),
+                Arguments.of("goods-count-smaller", richOrderCard(
+                        validAmount, validRecipient, 0, true, List.of(goods),
+                        1, false, List.of(shipment))),
+                Arguments.of("goods-untruncated-mismatch", richOrderCard(
+                        validAmount, validRecipient, 2, false, List.of(goods),
+                        1, false, List.of(shipment))),
+                Arguments.of("shipments-over-limit", richOrderCard(
+                        validAmount, validRecipient, 1, false, List.of(goods),
+                        11, true, Stream.generate(() -> shipment).limit(11).toList())),
+                Arguments.of("shipment-blank-waybill", richOrderCard(
+                        validAmount, validRecipient, 1, false, List.of(goods),
+                        1, false, List.of(new OrderSearchClient.OrderShipmentData(
+                                "德邦", " ", "2026-09-07 12:10:00")))),
+                Arguments.of("shipment-count-smaller", richOrderCard(
+                        validAmount, validRecipient, 1, false, List.of(goods),
+                        0, true, List.of(shipment))),
+                Arguments.of("shipments-untruncated-mismatch", richOrderCard(
+                        validAmount, validRecipient, 1, false, List.of(goods),
+                        2, false, List.of(shipment))),
+                Arguments.of("unmasked-full-phone", richOrderCard(
+                        validAmount, new OrderSearchClient.OrderRecipientData(
+                                "石**", "13812345678", "湖南省 常德市 鼎城区"),
+                        1, false, List.of(goods), 1, false, List.of(shipment))),
+                Arguments.of("partial-rich-structure", new OrderSearchClient.OrderCardData(
+                        "O123", "OUT123", 80, "在途", "2026-09-07 12:00:00",
+                        "石**", 1000L, 1, List.of(orderGoods()), "德邦",
+                        List.of("MASKED-WAYBILL"), null, null, null,
+                        validRecipient, null, null, null, null, null)));
     }
 
     @ParameterizedTest(name = "reject invalid logistics collection contract: {0}")
@@ -525,7 +625,7 @@ class OrderServiceGatewayTest {
     private static OrderServiceResponse<OrderSearchClient.OrderSearchData> searchSuccess() {
         return new OrderServiceResponse<>(1000, "success", new OrderSearchClient.OrderSearchData(
                 "ORDER_CODE", 1L, false, OffsetDateTime.parse("2026-09-07T14:30:00+08:00"),
-                List.of(orderCard(1, List.of(orderGoods()), List.of("SF123456")))));
+                List.of(richOrderCard())));
     }
 
     private static OrderSearchClient.OrderSearchData searchData(
@@ -546,11 +646,46 @@ class OrderServiceGatewayTest {
             List<String> logisticsCodes) {
         return new OrderSearchClient.OrderCardData(
                 "O123", "OUT123", 80, "在途", "2026-09-07 12:00:00", "石**",
-                12900L, goodsTotalCount, goods, "顺丰速运", logisticsCodes);
+                12900L, goodsTotalCount, goods, "顺丰速运", logisticsCodes,
+                null, null, null, null, null, null, null, null, null);
     }
 
     private static OrderSearchClient.OrderGoodsData orderGoods() {
-        return new OrderSearchClient.OrderGoodsData("商品名称", "SKU001", "规格", 2);
+        return new OrderSearchClient.OrderGoodsData(
+                "商品名称", "SKU001", "规格", null, 2, null, null);
+    }
+
+    private static OrderSearchClient.OrderCardData richOrderCard() {
+        return richOrderCard(
+                new OrderSearchClient.OrderAmountData(6000L, 0L, 0L, 0L, 6000L),
+                new OrderSearchClient.OrderRecipientData(
+                        "石**", "138****1234", "湖南省 常德市 鼎城区"),
+                1,
+                false,
+                List.of(new OrderSearchClient.OrderGoodsData(
+                        "商品名称", "SKU001", "50g/袋", 1000L, 6, 6000L, false)),
+                1,
+                false,
+                List.of(new OrderSearchClient.OrderShipmentData(
+                        "德邦", "MASKED-WAYBILL", "2026-09-07 12:10:00")));
+    }
+
+    private static OrderSearchClient.OrderCardData richOrderCard(
+            OrderSearchClient.OrderAmountData amount,
+            OrderSearchClient.OrderRecipientData recipient,
+            Integer goodsLineCount,
+            Boolean goodsTruncated,
+            List<OrderSearchClient.OrderGoodsData> goods,
+            Integer shipmentCount,
+            Boolean shipmentsTruncated,
+            List<OrderSearchClient.OrderShipmentData> shipments) {
+        return new OrderSearchClient.OrderCardData(
+                "O123", "OUT123", 80, "在途", "2026-09-07 12:00:00",
+                "石**", 6000L, goods == null ? 0 : goods.size(), goods,
+                "德邦", List.of("MASKED-WAYBILL"),
+                194L, "款到发货",
+                amount, recipient, goodsLineCount, goodsTruncated,
+                shipmentCount, shipmentsTruncated, shipments);
     }
 
     private static OrderServiceResponse<OrderLogisticsClient.OrderLogisticsData> logisticsSuccess() {

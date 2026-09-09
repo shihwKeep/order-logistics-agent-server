@@ -33,6 +33,7 @@ import java.util.function.Supplier;
 @Slf4j
 @Component
 public class CustomerServiceGateway implements CustomerQueryGateway {
+    /** 客户内部接口成功码、单次显式调用次数和最大结果数量边界。 */
     private static final int SUCCESS_CODE = 1000;
     private static final int MAX_ATTEMPTS = 2;
     private static final int MAX_ITEMS = 10;
@@ -70,7 +71,9 @@ public class CustomerServiceGateway implements CustomerQueryGateway {
                                        CustomerMatchType matchType,
                                        AgentIdentity identity,
                                        String requestId) {
+        // 在发送 Feign 请求前验证业务参数和完整可信身份，避免产生匿名下游调用。
         validateRequest(keyword, matchType, identity, requestId);
+        // Supplier 包含完整的“调用、响应校验、领域映射”过程，统一交给熔断器保护。
         Supplier<CustomerSearchResult> invocation = () -> mapResponse(invokeWithRetry(
                 matchType, requestId,
                 () -> client.search(internalToken, identity.tenantId(), identity.userId(),
@@ -80,10 +83,12 @@ public class CustomerServiceGateway implements CustomerQueryGateway {
             return invocation.get();
         }
         return circuitBreaker.run(invocation, failure -> {
+            // 熔断器失败回调切断原始异常链，工具层只能看到固定的领域不可用语义。
             throw new CustomerServiceUnavailableException("客户服务调用失败");
         });
     }
 
+    /** 仅对明确的瞬时网络故障进行至多一次重试。 */
     private CustomerServiceResponse<CustomerSearchClient.SearchData> invokeWithRetry(
             CustomerMatchType type,
             String requestId,
@@ -105,6 +110,7 @@ public class CustomerServiceGateway implements CustomerQueryGateway {
         throw new IllegalStateException("unreachable");
     }
 
+    /** 判断异常是否属于可能通过立即重试恢复的 502/503/504 或连接超时。 */
     private boolean transientFailure(RuntimeException exception) {
         if (exception instanceof FeignException feignException) {
             int status = feignException.status();
@@ -128,6 +134,7 @@ public class CustomerServiceGateway implements CustomerQueryGateway {
         return false;
     }
 
+    /** 严格校验下游分页契约并映射为不可变的客户领域结果。 */
     private CustomerSearchResult mapResponse(
             CustomerServiceResponse<CustomerSearchClient.SearchData> response) {
         if (response == null || response.code() == null || response.code() != SUCCESS_CODE
@@ -158,6 +165,7 @@ public class CustomerServiceGateway implements CustomerQueryGateway {
                 data.queriedAt(), items);
     }
 
+    /** 校验单个客户必填字段及姓名脱敏约束，再允许其进入模型和前端链路。 */
     private CustomerSearchItem mapItem(CustomerSearchClient.CustomerData item) {
         if (item == null || item.customerId() == null || item.customerId() <= 0
                 || blank(item.customerCode()) || blank(item.displayName())
@@ -175,6 +183,7 @@ public class CustomerServiceGateway implements CustomerQueryGateway {
                 item.assetTypeName().strip(), item.customerTypeName().strip());
     }
 
+    /** 客户查询必须同时具备合法关键词、匹配类型、坐席身份和请求标识。 */
     private void validateRequest(String keyword, CustomerMatchType type,
                                  AgentIdentity identity, String requestId) {
         if (blank(keyword) || keyword.length() > 128 || unsafe(keyword)

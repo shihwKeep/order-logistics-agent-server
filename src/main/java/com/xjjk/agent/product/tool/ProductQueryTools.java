@@ -36,14 +36,17 @@ public class ProductQueryTools {
             @ToolParam(description = "商品名称、SPU编码、SKU编码或条码") String keyword,
             @ToolParam(description = "页码，从1开始", required = false) Integer pageIndex,
             ToolContext toolContext) {
+        // ToolContext 由服务端在本轮模型请求中注入，先恢复可信身份、输出器和调用保护器。
         AgentToolRequestContext requestContext = requestContext(toolContext);
         ProductSearchQuery query;
         try {
+            // 统一完成空值、页码和固定分页大小校验，后续去重键与真实请求复用该对象。
             query = ProductSearchQuery.of(keyword, pageIndex, DEFAULT_PAGE_SIZE);
         } catch (IllegalArgumentException exception) {
             return "商品查询参数不完整，请让用户提供商品名称或商品编码。";
         }
 
+        // 规范化参数作为单轮幂等键；模型重复调用同一页时复用第一次成功结果。
         String canonicalArguments = query.keyword()
                 + "|" + query.pageIndex()
                 + "|" + DEFAULT_PAGE_SIZE;
@@ -63,6 +66,7 @@ public class ProductQueryTools {
             AgentToolRequestContext requestContext
     ) {
         try {
+            // Gateway 隐藏下游协议、内部 Token 和异常细节，工具层只处理领域结果。
             ProductSearchResult result = gateway.search(query);
             // 完整结果只走服务端注入的发布器；成功结果由 Guard 缓存，
             // 因而同参重复工具调用不会再次查询下游或重复发布 SSE。
@@ -82,6 +86,7 @@ public class ProductQueryTools {
         }
     }
 
+    /** 从 Spring AI 的非提示词上下文中提取本轮可信工具上下文。 */
     private AgentToolRequestContext requestContext(ToolContext context) {
         if (context == null) {
             throw new IllegalStateException("商品工具缺少请求上下文");
@@ -93,6 +98,11 @@ public class ProductQueryTools {
         return requestContext;
     }
 
+    /**
+     * 将完整商品结果压缩为给模型阅读的有界文本。
+     *
+     * <p>图片地址等 UI 专用字段不进入模型；模型只负责概括，前端卡片负责展示明细。</p>
+     */
     private String toModelResult(ProductSearchResult result) {
         if (result.items().isEmpty()) {
             return "未查询到匹配商品。";
@@ -119,6 +129,7 @@ public class ProductQueryTools {
         return text.toString();
     }
 
+    /** 用固定占位值处理下游缺失文本，避免模型把空字段理解成真实业务值。 */
     private String safe(String value) {
         return value == null || value.isBlank() ? "未提供" : value;
     }

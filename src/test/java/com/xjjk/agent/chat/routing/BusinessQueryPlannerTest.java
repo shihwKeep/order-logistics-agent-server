@@ -43,11 +43,47 @@ class BusinessQueryPlannerTest {
     void leavesGeneralConversationStreamingAndDoesNotGuessAmbiguousDirectCommands() {
         assertThat(planner.plan("你好").mode()).isEqualTo(BusinessQueryMode.GENERAL);
         assertThat(planner.plan("介绍一下订单状态是什么意思").mode())
-                .isEqualTo(BusinessQueryMode.GENERAL);
+                .isEqualTo(BusinessQueryMode.MODEL_REQUIRED);
+        assertThat(planner.plan("介绍一下订单状态是什么意思").acceptedResultKinds())
+                .containsExactly("knowledge-citations");
         assertThat(planner.plan("查一下客户 C1 的订单").mode())
                 .isEqualTo(BusinessQueryMode.MODEL_REQUIRED);
         assertThat(planner.plan("查询订单 XJTS0120260820000011 和售后").mode())
                 .isEqualTo(BusinessQueryMode.MODEL_REQUIRED);
+    }
+
+    @Test
+    void requiresGroundedKnowledgeForRulesPoliciesAndProcesses() {
+        assertThat(planner.plan("售后退款规则是什么").acceptedResultKinds())
+                .containsExactly("knowledge-citations");
+        assertThat(planner.plan("物流异常应该按什么流程处理").acceptedResultKinds())
+                .containsExactly("knowledge-citations");
+        assertThat(planner.plan("公司的发货政策有哪些").acceptedResultKinds())
+                .containsExactly("knowledge-citations");
+        assertThat(planner.plan("退款期限是几天").acceptedResultKinds())
+                .containsExactly("knowledge-citations");
+        assertThat(planner.plan("签收后多久可以退货").acceptedResultKinds())
+                .containsExactly("knowledge-citations");
+        assertThat(planner.plan("哪些情况不能退款").acceptedResultKinds())
+                .containsExactly("knowledge-citations");
+        assertThat(planner.plan("发票怎么开").acceptedResultKinds())
+                .containsExactly("knowledge-citations");
+        assertThat(planner.plan("运费怎么算").acceptedResultKinds())
+                .containsExactly("knowledge-citations");
+        assertThat(planner.plan("商品怎么上架").acceptedResultKinds())
+                .containsExactly("knowledge-citations");
+        assertThat(planner.plan("介绍一下你自己"))
+                .isEqualTo(BusinessQueryPlan.general());
+    }
+
+    @Test
+    void keepsIdentifiedRealtimeQueriesOutOfTheKnowledgePath() {
+        assertThat(planner.plan("订单 XJTS0120260820000011 现在什么状态")
+                .acceptedResultKinds()).containsExactly("order-list");
+        assertDirect("查看订单 XJTS0120260820000011 的物流",
+                "QUERY_ORDER_LOGISTICS", "logistics-timeline");
+        assertThat(planner.plan("鱼油还有库存吗").acceptedResultKinds())
+                .containsExactly("product-list");
     }
 
     @Test
@@ -56,6 +92,8 @@ class BusinessQueryPlannerTest {
                 new BusinessQueryEnforcementProperties(false));
         assertThat(disabled.plan("查看售后工单 HH20260414_00002"))
                 .isEqualTo(BusinessQueryPlan.general());
+        assertThat(disabled.plan("售后退款规则是什么").acceptedResultKinds())
+                .containsExactly("knowledge-citations");
     }
 
     private void assertDirect(

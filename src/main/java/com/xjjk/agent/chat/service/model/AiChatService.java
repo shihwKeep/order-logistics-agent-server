@@ -11,6 +11,8 @@ import com.xjjk.agent.customer.tool.CustomerToolAvailability;
 import com.xjjk.agent.order.tool.OrderQueryTools;
 import com.xjjk.agent.order.tool.OrderToolAvailability;
 import com.xjjk.agent.product.tool.ProductQueryTools;
+import com.xjjk.agent.knowledge.tool.KnowledgeQueryTools;
+import com.xjjk.agent.knowledge.tool.KnowledgeToolAvailability;
 import com.xjjk.agent.tool.AgentToolRequestContext;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
@@ -31,6 +33,13 @@ import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+/**
+ * Spring AI 对话模型适配层。
+ *
+ * <p>该服务只负责把已筛选的会话上下文、当前用户消息和当前组织可用的工具
+ * 注册到一次模型请求中。工具是否对某个坐席开放在这里完成筛选，模型只能看到
+ * 本次请求真正注册的工具定义，不能通过猜测工具名绕过灰度配置。</p>
+ */
 @Service
 public class AiChatService {
 
@@ -40,9 +49,11 @@ public class AiChatService {
     private final ToolCallback customerToolCallback;
     private final ToolCallback customerOrderToolCallback;
     private final Map<String, ToolCallback> afterSaleToolCallbacks;
+    private final ToolCallback knowledgeToolCallback;
     private final OrderToolAvailability orderToolAvailability;
     private final CustomerToolAvailability customerToolAvailability;
     private final AfterSaleToolAvailability afterSaleToolAvailability;
+    private final KnowledgeToolAvailability knowledgeToolAvailability;
 
     public AiChatService(
             @Qualifier("agentChatClient") ChatClient chatClient,
@@ -53,10 +64,15 @@ public class AiChatService {
             CustomerOrderQueryTools customerOrderQueryTools,
             CustomerToolAvailability customerToolAvailability,
             AfterSaleQueryTools afterSaleQueryTools,
-            AfterSaleToolAvailability afterSaleToolAvailability
+            AfterSaleToolAvailability afterSaleToolAvailability,
+            KnowledgeQueryTools knowledgeQueryTools,
+            KnowledgeToolAvailability knowledgeToolAvailability
     ) {
         this.chatClient = chatClient;
+        // Spring AI 根据 @Tool 方法生成 ToolCallback；商品能力当前始终注册。
         this.productToolCallbacks = List.of(ToolCallbacks.from(productQueryTools));
+        // 一个工具对象可能声明多个 @Tool 方法，按工具名建立只读索引，
+        // 后续才能分别控制订单查询和物流查询的组织级可见性。
         this.orderToolCallbacks = Arrays.stream(ToolCallbacks.from(orderQueryTools))
                 .collect(Collectors.toUnmodifiableMap(
                         callback -> callback.getToolDefinition().name(),
@@ -64,6 +80,7 @@ public class AiChatService {
         this.orderToolAvailability = orderToolAvailability;
         this.customerToolAvailability = customerToolAvailability;
         this.afterSaleToolAvailability = afterSaleToolAvailability;
+        this.knowledgeToolAvailability = knowledgeToolAvailability;
         this.customerToolCallback = requireSingleCallback(
                 customerQueryTools, "search_customers");
         this.customerOrderToolCallback = requireSingleCallback(
@@ -72,6 +89,8 @@ public class AiChatService {
                 .collect(Collectors.toUnmodifiableMap(
                         callback -> callback.getToolDefinition().name(),
                         Function.identity()));
+        this.knowledgeToolCallback = requireSingleCallback(
+                knowledgeQueryTools, "search_knowledge");
 
         // 启动期即验证代码声明的工具名，避免注解改名后灰度选择静默失效。
         requireOrderCallback("search_orders");
@@ -134,9 +153,15 @@ public class AiChatService {
         });
     }
 
-    /** 每次请求基于可信身份生成精确工具清单；商品工具保持始终注册。 */
+    /**
+     * 每次请求基于服务端认证身份生成精确工具清单。
+     *
+     * <p>可用性判断只接受 {@link AgentIdentity}，不读取模型参数。返回不可变副本，
+     * 防止构建完模型请求后又被其他线程修改。</p>
+     */
     List<ToolCallback> selectToolCallbacks(AgentIdentity identity) {
         List<ToolCallback> selected = new ArrayList<>(productToolCallbacks);
+        // 订单、物流、客户订单虽然来自相关业务域，但分别拥有独立的能力开关。
         if (orderToolAvailability.isOrderAvailable(identity)) {
             selected.add(requireOrderCallback("search_orders"));
         }
@@ -155,9 +180,13 @@ public class AiChatService {
         if (afterSaleToolAvailability.isDetailAvailable(identity)) {
             selected.add(requireAfterSaleCallback("get_after_sale_detail"));
         }
+        if (knowledgeToolAvailability.isAvailable(identity)) {
+            selected.add(knowledgeToolCallback);
+        }
         return List.copyOf(selected);
     }
 
+    /** 将只允许声明一个方法的工具对象转换为回调，并在启动阶段核对工具名。 */
     private ToolCallback requireSingleCallback(Object toolObject, String expectedName) {
         ToolCallback[] callbacks = ToolCallbacks.from(toolObject);
         if (callbacks.length != 1
@@ -167,6 +196,7 @@ public class AiChatService {
         return callbacks[0];
     }
 
+    /** 从订单工具索引中取得指定回调；缺失说明代码声明与注册清单已经漂移。 */
     private ToolCallback requireOrderCallback(String toolName) {
         ToolCallback callback = orderToolCallbacks.get(toolName);
         if (callback == null) {
@@ -175,6 +205,7 @@ public class AiChatService {
         return callback;
     }
 
+    /** 从售后工具索引中取得指定回调；缺失时直接阻止应用带着残缺工具集运行。 */
     private ToolCallback requireAfterSaleCallback(String toolName) {
         ToolCallback callback = afterSaleToolCallbacks.get(toolName);
         if (callback == null) {

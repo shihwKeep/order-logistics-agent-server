@@ -45,10 +45,25 @@ class AgentMessageResultQueryServiceTest {
                 1, 10567, "conversation-1", List.of("user-1", "assistant-1")))
                 .thenReturn(List.of(
                         result("assistant-1", 1, "order-list", 1,
-                                "{\"items\":[]}"),
+                                "{\"items\":[{\"orderCode\":\"O123\","
+                                        + "\"amount\":{\"goodsTotalInFen\":6000},"
+                                        + "\"recipient\":{\"nameMasked\":\"石**\"},"
+                                        + "\"goods\":[{\"subtotalInFen\":6000}],"
+                                        + "\"shipments\":[{\"deliveryTime\":"
+                                        + "\"2026-09-07 12:10:00\"}]}]}"),
                         result("assistant-1", 2, "order-list", 1, "{"),
                         result("assistant-1", 4, "customer-list", 1,
                                 "{\"items\":[]}"),
+                        result("assistant-1", 5, "knowledge-citations", 1,
+                                "{\"answerable\":true,\"evidences\":[{"
+                                        + "\"documentId\":12,\"documentVersionId\":3,"
+                                        + "\"chunkId\":99,\"documentTitle\":\"退款规则\","
+                                        + "\"titlePath\":\"售后/退款\",\"text\":\"签收后七天内\","
+                                        + "\"score\":0.91,\"sources\":[\"VECTOR\"]}],"
+                                        + "\"retrievalVersion\":\"hybrid-v1\","
+                                        + "\"decision\":\"ANSWERABLE\","
+                                        + "\"reasonCode\":\"ENOUGH_EVIDENCE\","
+                                        + "\"queriedAt\":\"2026-09-09T12:00:00+08:00\"}"),
                         result("assistant-1", 3, "future-card", 2, "{}")));
         AgentMessageQueryService service = new AgentMessageQueryService(
                 conversationService, messageMapper, resultMapper,
@@ -60,15 +75,24 @@ class AgentMessageResultQueryServiceTest {
         assertThat(page.items()).extracting(ChatMessageResponse::messageId)
                 .containsExactly("user-1", "assistant-1");
         assertThat(page.items().get(0).results()).isEmpty();
-        assertThat(page.items().get(1).results()).hasSize(2);
+        assertThat(page.items().get(1).results()).hasSize(3);
         assertThat(page.items().get(1).results().get(0)).satisfies(item -> {
             assertThat(item.resultSequence()).isEqualTo(1);
             assertThat(item.kind()).isEqualTo("order-list");
             assertThat(item.schemaVersion()).isEqualTo(1);
             assertThat(item.data().path("items").isArray()).isTrue();
+            assertThat(item.data().path("items").get(0)
+                    .path("amount").path("goodsTotalInFen").asLong()).isEqualTo(6000L);
+            assertThat(item.data().path("items").get(0)
+                    .path("recipient").path("nameMasked").asText()).isEqualTo("石**");
+            assertThat(item.data().path("items").get(0)
+                    .path("shipments").get(0).path("deliveryTime").asText())
+                    .isEqualTo("2026-09-07 12:10:00");
         });
         assertThat(page.items().get(1).results().get(1).kind())
                 .isEqualTo("customer-list");
+        assertThat(page.items().get(1).results().get(2).kind())
+                .isEqualTo("knowledge-citations");
         verify(resultMapper).selectByMessageIds(
                 1, 10567, "conversation-1", List.of("user-1", "assistant-1"));
     }

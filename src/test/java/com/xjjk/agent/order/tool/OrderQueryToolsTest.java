@@ -2,10 +2,13 @@ package com.xjjk.agent.order.tool;
 
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.order.domain.OrderCard;
+import com.xjjk.agent.order.domain.OrderAmount;
 import com.xjjk.agent.order.domain.OrderGoodsSummary;
 import com.xjjk.agent.order.domain.OrderIdentifierType;
 import com.xjjk.agent.order.domain.OrderLogisticsResult;
+import com.xjjk.agent.order.domain.OrderRecipient;
 import com.xjjk.agent.order.domain.OrderSearchResult;
+import com.xjjk.agent.order.domain.OrderShipmentSummary;
 import com.xjjk.agent.order.domain.ShipmentTimeline;
 import com.xjjk.agent.order.domain.TrackNode;
 import com.xjjk.agent.order.service.OrderQueryGateway;
@@ -18,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ToolContext;
 
@@ -31,6 +35,15 @@ class OrderQueryToolsTest {
     @Test
     void searchPublishesFullResultButReturnsBoundedSafeModelText() {
         OffsetDateTime queriedAt = OffsetDateTime.parse("2026-09-07T10:15:30+08:00");
+        List<OrderGoodsSummary> goods = IntStream.rangeClosed(1, 20)
+                .mapToObj(index -> new OrderGoodsSummary(
+                        "测试商品" + index, "SENSITIVE-SKU-" + index, "红色",
+                        995L, 1, 995L, false))
+                .toList();
+        List<OrderShipmentSummary> shipments = IntStream.rangeClosed(1, 10)
+                .mapToObj(index -> new OrderShipmentSummary(
+                        "顺丰", "SENSITIVE-WAYBILL-" + index, "2026-09-07 09:00:00"))
+                .toList();
         OrderSearchResult result = new OrderSearchResult(
                 OrderIdentifierType.ORDER_CODE,
                 1,
@@ -44,10 +57,20 @@ class OrderQueryToolsTest {
                         "2026-09-07 09:00:00",
                         "不应进入模型的客户名",
                         19900L,
-                        2,
-                        List.of(new OrderGoodsSummary("测试商品", "SKU-1", "红色", 2)),
+                        20,
+                        goods,
                         "顺丰",
-                        List.of("SF1001"))));
+                        List.of("SENSITIVE-WAYBILL-1"),
+                        194L,
+                        "款到发货",
+                        new OrderAmount(19900L, 0L, 0L, 0L, 19900L),
+                        new OrderRecipient(
+                                "不应进入模型的客户名", "138****1234", "湖南省 常德市 鼎城区"),
+                        20,
+                        false,
+                        10,
+                        false,
+                        shipments)));
         AtomicReference<ToolUiResult> published = new AtomicReference<>();
         RecordingGateway gateway = new RecordingGateway(result, null);
         OrderQueryTools tools = new OrderQueryTools(gateway);
@@ -64,9 +87,12 @@ class OrderQueryToolsTest {
         assertThat(published.get()).isEqualTo(new ToolUiResult(
                 "search_orders", "order-list", 1, queriedAt, result));
         assertThat(modelText).contains(
-                "查询时间", "ORDER-1001", "已发货", "商品数量=2", "前端已展示");
+                "查询时间", "ORDER-1001", "已发货", "商品数量=20", "前端已展示");
         assertThat(modelText)
-                .doesNotContain("不应进入模型的客户名", "OUTER-SECRET", "|---", "Markdown")
+                .doesNotContain(
+                        "不应进入模型的客户名", "138****1234", "湖南省 常德市 鼎城区",
+                        "SENSITIVE-SKU", "SENSITIVE-WAYBILL", "19900",
+                        "OUTER-SECRET", "|---", "Markdown")
                 .hasSizeLessThan(2000);
     }
 

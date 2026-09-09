@@ -33,6 +33,8 @@ final class ChatTurnExecution {
     private final List<StagedToolResult> stagedResults = new ArrayList<>();
     /** 当前消息的业务查询计划；普通问答不暂存输出。 */
     BusinessQueryPlan queryPlan = BusinessQueryPlan.general();
+    /** 缓冲正文是否已经通过结果门禁或被替换为安全答复。 */
+    private boolean bufferedOutputResolved;
     String finishReason;
     MessageStatus status = MessageStatus.FAILED;
     ChatStreamError error = ChatStreamError.preparationFailed();
@@ -104,6 +106,15 @@ final class ChatTurnExecution {
     void replaceContent(String value) {
         content.setLength(0);
         content.append(Objects.requireNonNull(value, "替换正文不能为空"));
+    }
+
+    /** 标记缓冲正文已完成证据校验，统一收尾不得再次覆盖。 */
+    void resolveBufferedOutput() {
+        bufferedOutputResolved = true;
+    }
+
+    boolean isBufferedOutputResolved() {
+        return bufferedOutputResolved;
     }
 
     /** 收尾只能读取不可变快照，避免事务执行时集合继续变化。 */

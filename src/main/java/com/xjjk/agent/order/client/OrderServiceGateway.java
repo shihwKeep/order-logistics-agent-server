@@ -107,6 +107,7 @@ public class OrderServiceGateway implements OrderQueryGateway {
         this.logisticsCircuitBreaker = null;
     }
 
+    /** 按模型或白名单动作提供的外部业务编号查询订单。 */
     @Override
     public OrderSearchResult search(
             String identifier,
@@ -140,6 +141,7 @@ public class OrderServiceGateway implements OrderQueryGateway {
         return result;
     }
 
+    /** 使用客户服务解析出的内部 ID 查询订单，该入口不会暴露为模型工具参数。 */
     @Override
     public OrderSearchResult searchByCustomerId(
             long customerId,
@@ -178,6 +180,7 @@ public class OrderServiceGateway implements OrderQueryGateway {
         return result;
     }
 
+    /** 按外部业务编号查询订单及多运单轨迹。 */
     @Override
     public OrderLogisticsResult logistics(
             String identifier,

@@ -4,6 +4,7 @@ import com.xjjk.agent.chat.domain.ChatTurnContext;
 import com.xjjk.agent.chat.result.PendingMessageResult;
 import com.xjjk.agent.chat.routing.BusinessQueryPlan;
 import com.xjjk.agent.chat.stream.ChatSseSession;
+import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
 import com.xjjk.agent.tool.ToolUiResult;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -11,6 +12,7 @@ import org.mockito.InOrder;
 import java.time.OffsetDateTime;
 import java.util.Map;
 import java.util.Set;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -69,6 +71,70 @@ class FreshBusinessResultGateTest {
         verify(session).delta(FreshBusinessResultGate.MISSING_RESULT_MESSAGE);
         assertThat(execution.resultSnapshot()).isEmpty();
         assertThat(execution.stagedResultSnapshot()).isEmpty();
+    }
+
+    @Test
+    void replacesModelConclusionWhenKnowledgeServiceCannotAnswer() throws Exception {
+        ChatTurnExecution execution = execution(
+                BusinessQueryPlan.modelRequired(Set.of("knowledge-citations")));
+        KnowledgeRetrievalResult noEvidence = new KnowledgeRetrievalResult(
+                false, List.of(), "hybrid-v1", "NONE", "LOW_RELEVANCE",
+                OffsetDateTime.parse("2026-09-09T12:00:00+08:00"));
+        ToolUiResult ui = new ToolUiResult(
+                "search_knowledge", "knowledge-citations", 1,
+                noEvidence.queriedAt(), noEvidence);
+        execution.stageResult(pending(1, "knowledge-citations"), ui);
+        execution.content.append("根据经验可以退款");
+
+        gate.flush(execution, session);
+
+        verify(session, never()).result(any());
+        verify(session).delta(FreshBusinessResultGate.NO_KNOWLEDGE_MESSAGE);
+        assertThat(execution.content.toString())
+                .isEqualTo(FreshBusinessResultGate.NO_KNOWLEDGE_MESSAGE);
+        assertThat(execution.resultSnapshot()).isEmpty();
+    }
+
+    @Test
+    void sanitizesUnverifiedBusinessOutputBeforePersistence() {
+        ChatTurnExecution execution = execution(
+                BusinessQueryPlan.modelRequired(Set.of("order-list")));
+        execution.content.append("订单已经发货");
+        execution.stageResult(pending(1, "order-list"), uiResult("order-list"));
+
+        gate.sanitizeForPersistence(execution);
+
+        assertThat(execution.content.toString())
+                .isEqualTo(FreshBusinessResultGate.MISSING_RESULT_MESSAGE);
+        assertThat(execution.resultSnapshot()).isEmpty();
+        assertThat(execution.stagedResultSnapshot()).isEmpty();
+    }
+
+    @Test
+    void sanitizesUnverifiedKnowledgeOutputWithKnowledgeSafeMessage() {
+        ChatTurnExecution execution = execution(
+                BusinessQueryPlan.modelRequired(Set.of("knowledge-citations")));
+        execution.content.append("凭经验可以退货");
+
+        gate.sanitizeForPersistence(execution);
+
+        assertThat(execution.content.toString())
+                .isEqualTo(FreshBusinessResultGate.NO_KNOWLEDGE_MESSAGE);
+    }
+
+    @Test
+    void doesNotOverwriteOutputThatAlreadyPassedTheGate() throws Exception {
+        ChatTurnExecution execution = execution(
+                BusinessQueryPlan.modelRequired(Set.of("after-sale-detail")));
+        ToolUiResult ui = uiResult("after-sale-detail");
+        execution.stageResult(pending(1, "after-sale-detail"), ui);
+        execution.content.append("详情卡片已展示");
+
+        gate.flush(execution, session);
+        gate.sanitizeForPersistence(execution);
+
+        assertThat(execution.content.toString()).isEqualTo("详情卡片已展示");
+        assertThat(execution.resultSnapshot()).hasSize(1);
     }
 
     private ChatTurnExecution execution(BusinessQueryPlan plan) {

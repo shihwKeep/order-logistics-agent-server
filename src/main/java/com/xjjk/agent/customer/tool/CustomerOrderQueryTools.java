@@ -20,7 +20,9 @@ import org.springframework.stereotype.Component;
 @Component
 @RequiredArgsConstructor
 public class CustomerOrderQueryTools {
+    /** 同时约束模型参数和下游请求，避免异常长客户编号放大日志及请求体。 */
     private static final int MAX_CUSTOMER_CODE_LENGTH = 128;
+    /** 模型只接收有限摘要，完整订单信息通过结构化卡片输出。 */
     private static final int MAX_MODEL_TEXT_LENGTH = 1900;
 
     private final CustomerOrderQueryService service;
@@ -30,6 +32,7 @@ public class CustomerOrderQueryTools {
     public String listCustomerOrders(
             @ToolParam(description = "完整客户编号") String customerCode,
             ToolContext toolContext) {
+        // 先拒绝空值、控制字符和超长编号，参数错误不消耗单轮调用额度。
         String validationError = validate(customerCode);
         if (validationError != null) {
             return validationError;
@@ -37,6 +40,7 @@ public class CustomerOrderQueryTools {
         String normalizedCode = customerCode.strip();
         AgentToolRequestContext context = requestContext(toolContext);
         try {
+            // 客户编号经过 strip 后同时用于真实查询和幂等键，避免等价参数重复访问下游。
             return context.callGuard().execute(
                     "list_customer_orders",
                     normalizedCode,
@@ -46,10 +50,12 @@ public class CustomerOrderQueryTools {
         }
     }
 
+    /** 先解析客户编号对应的可信客户身份，再按内部 customerId 查询订单。 */
     private String execute(String customerCode, AgentToolRequestContext context) {
         try {
             CustomerOrderQueryResult result = service.query(
                     customerCode, context.identity(), context.requestId());
+            // 没有唯一客户时绝不尝试模糊查询订单，避免串查到其他客户数据。
             return switch (result.resolution()) {
                 case NOT_FOUND -> "未查询到客户编号=" + customerCode
                         + " 的客户，请让用户核对完整客户编号。";
@@ -76,15 +82,21 @@ public class CustomerOrderQueryTools {
                     + "，客户名称=" + safe(result.customerDisplayName(), 64)
                     + "。未查询到订单，前端已展示空结果。");
         }
+        // total 表示真实匹配总数，items 只是当前卡片页；两者必须分开描述。
         StringBuilder text = new StringBuilder("客户编号=")
                 .append(result.customerCode())
                 .append("，客户名称=")
                 .append(safe(result.customerDisplayName(), 64))
-                .append("。前端已展示")
-                .append(orders.items().size())
-                .append("条订单卡片（匹配总数=")
+                .append("。共")
                 .append(orders.total())
-                .append("）。请简洁概括，不要逐条复述卡片：");
+                .append("笔订单，前端当前展示最近")
+                .append(orders.items().size())
+                .append("笔订单卡片");
+        long undisplayed = orders.total() - orders.items().size();
+        if (undisplayed > 0) {
+            text.append("，其余").append(undisplayed).append("笔未展示");
+        }
+        text.append("。请简洁概括，不要逐条复述卡片：");
         for (OrderCard item : orders.items()) {
             text.append(" 订单号=").append(safe(item.orderCode(), 96))
                     .append("，状态=").append(safe(item.statusText(), 48))
@@ -93,6 +105,7 @@ public class CustomerOrderQueryTools {
         return bounded(text.toString());
     }
 
+    /** 校验模型提供的客户编号；合法值的规范化在调用方统一完成。 */
     private String validate(String customerCode) {
         if (customerCode == null || customerCode.isBlank()) {
             return "请提供完整客户编号。";
@@ -105,6 +118,7 @@ public class CustomerOrderQueryTools {
         return null;
     }
 
+    /** 提取服务端注入的可信工具上下文，禁止模型构造租户、用户或组织身份。 */
     private AgentToolRequestContext requestContext(ToolContext toolContext) {
         if (toolContext == null) {
             throw new IllegalStateException("客户订单工具缺少请求上下文");
@@ -116,6 +130,7 @@ public class CustomerOrderQueryTools {
         return context;
     }
 
+    /** 清理控制字符并限制单个模型可见字段的长度。 */
     private String safe(String value, int maxLength) {
         if (value == null || value.isBlank()) {
             return "未提供";
@@ -125,6 +140,7 @@ public class CustomerOrderQueryTools {
                 ? normalized : normalized.substring(0, maxLength - 1) + "…";
     }
 
+    /** 限制整个模型工具返回文本，结构化 UI 结果仍保留经过协议校验的完整字段。 */
     private String bounded(String value) {
         return value.length() <= MAX_MODEL_TEXT_LENGTH
                 ? value : value.substring(0, MAX_MODEL_TEXT_LENGTH - 1) + "…";
