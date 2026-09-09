@@ -8,8 +8,10 @@ import com.xjjk.agent.chat.api.dto.ChatStreamRequest;
 import com.xjjk.agent.chat.domain.ChatTurnContext;
 import com.xjjk.agent.chat.result.ChatToolResultRecorder;
 import com.xjjk.agent.chat.result.PendingMessageResult;
+import com.xjjk.agent.chat.routing.BusinessQueryPlanner;
 import com.xjjk.agent.chat.service.memory.ChatContextPreparationService;
 import com.xjjk.agent.chat.service.model.AiChatService;
+import com.xjjk.agent.chat.service.stream.FreshBusinessResultGate;
 import com.xjjk.agent.chat.service.stream.ChatTurnFinalizer;
 import com.xjjk.agent.chat.service.stream.ChatTurnRunner;
 import com.xjjk.agent.chat.service.turn.ChatTurnPreparationService;
@@ -64,6 +66,8 @@ class ChatActionDispatcherTest {
     @Mock
     private AfterSaleToolAvailability afterSaleAvailability;
     @Mock
+    private BusinessQueryPlanner businessQueryPlanner;
+    @Mock
     private ChatSseSession session;
 
     @Test
@@ -100,7 +104,8 @@ class ChatActionDispatcherTest {
                 afterSaleGateway, afterSaleAvailability);
         ChatTurnRunner runner = new ChatTurnRunner(
                 preparationService, contextService, aiChatService,
-                finalizer, resultRecorder, dispatcher);
+                finalizer, resultRecorder, dispatcher,
+                businessQueryPlanner, new FreshBusinessResultGate());
 
         runner.run(request, identity, new ChatStreamControl(), session, "fallback");
 
@@ -148,7 +153,8 @@ class ChatActionDispatcherTest {
                 afterSaleGateway, afterSaleAvailability);
         ChatTurnRunner runner = new ChatTurnRunner(
                 preparationService, contextService, aiChatService,
-                finalizer, resultRecorder, dispatcher);
+                finalizer, resultRecorder, dispatcher,
+                businessQueryPlanner, new FreshBusinessResultGate());
 
         runner.run(request, identity, new ChatStreamControl(), session, "fallback");
 
@@ -195,7 +201,8 @@ class ChatActionDispatcherTest {
                 afterSaleGateway, afterSaleAvailability);
         ChatTurnRunner runner = new ChatTurnRunner(
                 preparationService, contextService, aiChatService,
-                finalizer, resultRecorder, dispatcher);
+                finalizer, resultRecorder, dispatcher,
+                businessQueryPlanner, new FreshBusinessResultGate());
 
         runner.run(request, identity, new ChatStreamControl(), session, "fallback");
 

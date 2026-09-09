@@ -9,6 +9,9 @@ import com.xjjk.agent.chat.service.memory.ChatContextPreparationService;
 import com.xjjk.agent.chat.service.model.AiChatService;
 import com.xjjk.agent.chat.result.ChatToolResultRecorder;
 import com.xjjk.agent.chat.result.PendingMessageResult;
+import com.xjjk.agent.chat.routing.BusinessQueryMode;
+import com.xjjk.agent.chat.routing.BusinessQueryPlan;
+import com.xjjk.agent.chat.routing.BusinessQueryPlanner;
 import com.xjjk.agent.chat.service.turn.ChatTurnPreparationService;
 import com.xjjk.agent.chat.stream.ChatSseSession;
 import com.xjjk.agent.chat.stream.ChatStreamControl;
@@ -44,6 +47,8 @@ public class ChatTurnRunner {
     private final ChatTurnFinalizer finalizer;
     private final ChatToolResultRecorder resultRecorder;
     private final ChatActionDispatcher actionDispatcher;
+    private final BusinessQueryPlanner businessQueryPlanner;
+    private final FreshBusinessResultGate freshBusinessResultGate;
 
     public void run(
             ChatStreamRequest request,
@@ -111,7 +116,26 @@ public class ChatTurnRunner {
             return;
         }
 
-        // 第三步：基于 MySQL 稳定游标读取短期记忆，执行 Token 预算和上下文裁剪。
+        /*
+         * 第三步：只根据“当前用户消息”制定实时业务查询计划，历史消息不能决定
+         * 本轮已经查过业务系统。完整且无歧义的编号查询直接进入后端白名单动作，
+         * 每次发送都会重新调用下游服务，因此不会复用上一轮的结果或模型话术。
+         */
+        BusinessQueryPlan queryPlan = businessQueryPlanner.plan(request.message());
+        execution.queryPlan(queryPlan);
+        if (queryPlan.mode() == BusinessQueryMode.DIRECT) {
+            executeAction(
+                    new ChatStreamRequest(
+                            request.conversationId(),
+                            request.message(),
+                            queryPlan.directAction()),
+                    identity,
+                    session,
+                    execution);
+            return;
+        }
+
+        // 第四步：基于 MySQL 稳定游标读取短期记忆，执行 Token 预算和上下文裁剪。
         // 该阶段可能命中 Redis，也可能 fail-open 回源 MySQL，但不会绕过会话归属校验。
         ChatContextSelection selection = contextService.prepare(
                 execution.turn, request.message(), control);
@@ -119,7 +143,8 @@ public class ChatTurnRunner {
             return;
         }
 
-        // 第四步：上下文准备完成后才声明正在生成，随后逐片消费并发送模型流。
+        // 第五步：上下文准备完成后才声明正在生成，随后逐片消费模型流。
+        // MODEL_REQUIRED 模式会暂存正文和结果，校验通过前不会向前端声称查询成功。
         session.generating();
 
         // 进入模型调用前预置失败结果；只有模型流正常结束后才会计算最终成功状态。
@@ -127,10 +152,19 @@ public class ChatTurnRunner {
         consumeModel(request.message(), selection, identity, control, session, execution);
 
         if (!control.isStopRequested()) {
-            // 第五步：根据正文和 finishReason 判断 SUCCESS、OUTPUT_LIMIT、
+            // 第六步：根据正文和 finishReason 判断 SUCCESS、OUTPUT_LIMIT、
             // EMPTY_RESPONSE 或 INCOMPLETE，真正落库与 SSE 终态由 finalizer 处理。
             execution.status = completedStatus(execution);
             execution.error = ChatStreamError.forStatus(execution.status);
+            if (execution.status == MessageStatus.SUCCESS
+                    && execution.buffersModelOutput()) {
+                /*
+                 * 模型实时查询只有在本轮确实产生了允许类型的结构化结果后，
+                 * 才统一发布卡片与回答。缺失结果时会丢弃模型的“已查询”话术，
+                 * 改为固定安全提示，避免历史上下文诱导出假成功。
+                 */
+                freshBusinessResultGate.flush(execution, session);
+            }
         }
     }
 
@@ -217,8 +251,13 @@ public class ChatTurnRunner {
              */
             PendingMessageResult pending = resultRecorder.prepare(
                     result, execution.nextResultSequence());
-            execution.addResult(pending);
-            session.result(result);
+            if (execution.buffersModelOutput()) {
+                // 模型业务查询先暂存，待本轮结果类型校验通过后再发布和持久化。
+                execution.stageResult(pending, result);
+            } else {
+                execution.addResult(pending);
+                session.result(result);
+            }
         }
     }
 
@@ -243,10 +282,13 @@ public class ChatTurnRunner {
         }
         String text = output.getText();
         if (text != null && !text.isEmpty()) {
-            // 发送失败仍保留模型已经返回的部分正文，交给收尾事务处理。
+            // MODEL_REQUIRED 先完整缓存正文，防止工具尚未执行时就流出“已查询”话术。
             execution.content.append(text);
-            session.delta(text);
-            execution.metrics.markFirstDeltaSent();
+            if (!execution.buffersModelOutput()) {
+                // 普通问答继续保持逐片流式输出；发送失败由现有收尾逻辑处理。
+                session.delta(text);
+                execution.metrics.markFirstDeltaSent();
+            }
         }
     }
 
