@@ -11,7 +11,7 @@ integration.knowledge.base-url=http://127.0.0.1:8085
 # 仅服务端使用；必须与 Knowledge Service 的 secret 完全一致，至少32字符
 integration.knowledge.internal-secret=${KNOWLEDGE_INTERNAL_API_SECRET}
 integration.knowledge.connect-timeout=2s
-integration.knowledge.read-timeout=10s
+integration.knowledge.read-timeout=20s
 
 # 知识工具灰度；ALL 表示所有已认证坐席均可查询本租户已发布知识
 agent.tool.knowledge.enabled=true
