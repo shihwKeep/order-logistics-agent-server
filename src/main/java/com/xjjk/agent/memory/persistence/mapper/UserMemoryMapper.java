@@ -102,6 +102,23 @@ public interface UserMemoryMapper extends BaseMapper<UserMemoryEntity> {
             @Param("beforeId") Long beforeId,
             @Param("limit") int limit);
 
+    @Select("""
+        SELECT *
+        FROM agent_user_memory
+        WHERE source_type = 'AUTO_EXTRACT'
+          AND visibility = 'HIDDEN'
+          AND retention_type = 'NORMAL'
+          AND status = 'ACTIVE'
+          AND expires_at IS NOT NULL
+          AND expires_at <= #{now}
+        ORDER BY expires_at, id
+        LIMIT #{limit}
+        FOR UPDATE SKIP LOCKED
+        """)
+    List<UserMemoryEntity> selectExpiredAutomaticForUpdate(
+            @Param("now") LocalDateTime now,
+            @Param("limit") int limit);
+
     @Update("""
         UPDATE agent_user_memory
         SET status = 'SUPERSEDED', updated_at = #{updatedAt}
@@ -164,5 +181,30 @@ public interface UserMemoryMapper extends BaseMapper<UserMemoryEntity> {
             @Param("tenantId") long tenantId,
             @Param("userId") long userId,
             @Param("generation") long generation,
+            @Param("updatedAt") LocalDateTime updatedAt);
+
+    @Update("""
+        UPDATE agent_user_memory
+        SET status = 'EXPIRED', updated_at = #{updatedAt}
+        WHERE id = #{id}
+          AND tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND memory_generation = #{generation}
+          AND memory_id = #{memoryId}
+          AND version = #{version}
+          AND source_type = 'AUTO_EXTRACT'
+          AND visibility = 'HIDDEN'
+          AND retention_type = 'NORMAL'
+          AND status = 'ACTIVE'
+          AND expires_at IS NOT NULL
+          AND expires_at <= #{updatedAt}
+        """)
+    int expireOwnedAutomatic(
+            @Param("id") long id,
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("generation") long generation,
+            @Param("memoryId") String memoryId,
+            @Param("version") long version,
             @Param("updatedAt") LocalDateTime updatedAt);
 }
