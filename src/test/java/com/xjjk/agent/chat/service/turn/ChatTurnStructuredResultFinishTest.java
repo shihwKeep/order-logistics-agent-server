@@ -12,6 +12,7 @@ import com.xjjk.agent.chat.persistence.mapper.AgentMessageMapper;
 import com.xjjk.agent.chat.result.AgentMessageResultEntity;
 import com.xjjk.agent.chat.result.AgentMessageResultMapper;
 import com.xjjk.agent.chat.result.PendingMessageResult;
+import com.xjjk.agent.chat.service.conversation.ConversationTitleService;
 import com.xjjk.agent.chat.service.summary.ChatSummaryTaskScheduler;
 import com.xjjk.agent.common.exception.BusinessException;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -32,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -50,6 +52,8 @@ class ChatTurnStructuredResultFinishTest {
     private ApplicationEventPublisher eventPublisher;
     @Mock
     private ChatSummaryTaskScheduler summaryTaskScheduler;
+    @Mock
+    private ConversationTitleService conversationTitleService;
 
     private AgentConversationEntity conversation;
     private ChatTurnContext turn;
@@ -81,7 +85,8 @@ class ChatTurnStructuredResultFinishTest {
                 "user-message-2", "assistant-message-2", "prompt-v2");
         service = new ChatTurnFinishService(
                 conversationMapper, messageMapper, resultMapper,
-                eventPublisher, summaryTaskScheduler);
+                eventPublisher, summaryTaskScheduler,
+                conversationTitleService);
     }
 
     @Test
@@ -115,6 +120,8 @@ class ChatTurnStructuredResultFinishTest {
         order.verify(messageMapper).update(any(), any(Wrapper.class));
         order.verify(resultMapper).insertBatch(anyList());
         order.verify(conversationMapper).update(any(), any(Wrapper.class));
+        verify(conversationTitleService).assignFromEarliestQuestion(
+                1, 10567, "conversation-1");
     }
 
     @Test
@@ -134,6 +141,8 @@ class ChatTurnStructuredResultFinishTest {
                 any(Long.class), any(Long.class), any(String.class),
                 any(Long.class), any(Long.class));
         verify(eventPublisher, never()).publishEvent(any());
+        verify(conversationTitleService, never())
+                .assignFromEarliestQuestion(anyLong(), anyLong(), any(String.class));
     }
 
     private PendingMessageResult pendingResult() {

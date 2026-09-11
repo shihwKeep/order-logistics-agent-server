@@ -21,6 +21,25 @@ public interface AgentMessageMapper
         extends BaseMapper<AgentMessageEntity> {
 
     /**
+     * 读取指定会话最早的用户问题，用于首次生成稳定会话标题。
+     */
+    @Select("""
+        SELECT content
+        FROM agent_message
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND conversation_id = #{conversationId}
+          AND role = 'USER'
+        ORDER BY message_sequence ASC
+        LIMIT 1
+        """)
+    String selectEarliestUserContent(
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("conversationId") String conversationId
+    );
+
+    /**
      * 倒序读取指定历史边界之前的消息元信息。
      *
      * 不过滤消息状态，避免隐藏失败轮次和破坏读取范围判断。

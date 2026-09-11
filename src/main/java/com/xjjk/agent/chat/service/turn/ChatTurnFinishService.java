@@ -11,6 +11,7 @@ import com.xjjk.agent.chat.persistence.mapper.AgentMessageMapper;
 import com.xjjk.agent.chat.result.AgentMessageResultEntity;
 import com.xjjk.agent.chat.result.AgentMessageResultMapper;
 import com.xjjk.agent.chat.result.PendingMessageResult;
+import com.xjjk.agent.chat.service.conversation.ConversationTitleService;
 import com.xjjk.agent.chat.service.memory.ChatHistoryChangedEvent;
 import com.xjjk.agent.chat.service.summary.ChatSummaryTaskScheduler;
 import com.xjjk.agent.common.api.ApiErrorCode;
@@ -43,6 +44,7 @@ public class ChatTurnFinishService {
     private final AgentMessageResultMapper resultMapper;
     private final ApplicationEventPublisher eventPublisher;
     private final ChatSummaryTaskScheduler summaryTaskScheduler;
+    private final ConversationTitleService conversationTitleService;
 
     /**
      * 尝试结束本轮问答。
@@ -177,6 +179,14 @@ public class ChatTurnFinishService {
             if (resultMapper.insertBatch(resultRows) != resultRows.size()) {
                 throw new BusinessException(ApiErrorCode.INTERNAL_SERVER_ERROR);
             }
+        }
+
+        if (status == MessageStatus.SUCCESS) {
+            conversationTitleService.assignFromEarliestQuestion(
+                    turn.tenantId(),
+                    turn.userId(),
+                    turn.conversationId()
+            );
         }
 
         // 保存消息、推进稳定历史游标和释放占用属于同一个事务，不能只成功一部分。

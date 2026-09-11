@@ -46,7 +46,7 @@ public class AgentConversationService {
         conversation.setTenantId(identity.tenantId());
         conversation.setUserId(identity.userId());
         conversation.setOrgId(identity.orgId());
-        conversation.setTitle("新对话");
+        conversation.setTitle(ConversationTitleFormatter.DEFAULT_TITLE);
         conversation.setLastMessageSequence(0L);
         conversation.setMemoryVersion(0L);
         conversation.setMemoryUntilSequence(0L);
