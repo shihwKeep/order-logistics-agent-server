@@ -8,7 +8,7 @@
 
 1. 启动 MySQL 和 Agent Server 依赖服务。
 2. 在 Nacos 的 `order-logistics-agent-server.properties` 中配置 `agent.memory.*`，通过安全配置提供至少 32 个字符的 `agent.memory.cursor.secret`，并将 `agent.memory.enabled=true`。该密钥没有生产默认值，缺失时服务必须启动失败。不要在文档、命令历史或日志中填写真实 Token、密码或内部密钥。
-3. 启动 Agent Server，确认 Flyway 已成功执行 `V10__create_user_memory_foundation.sql`、`V11__add_user_memory_master_switch.sql` 和 `V12__create_memory_extraction_task.sql`。
+3. 启动 Agent Server，确认 Flyway 已成功执行 `V10__create_user_memory_foundation.sql`、`V11__add_user_memory_master_switch.sql`、`V12__create_memory_extraction_task.sql` 和 `V13__add_memory_extraction_observability.sql`。
 4. 使用测试账号 `74680` 正常登录，由认证链路产生租户与用户身份；所有下列接口均不得提交 `tenantId` 或 `userId`。
 
 ## 验证步骤
@@ -69,7 +69,9 @@ agent.memory.auto-extract.expiry.batch-size=100
 2. 助手成功回答后等待一个轮询周期，检查任务表：
 
 ```sql
-SELECT task_id, status, retry_count, last_error_code, created_at, updated_at
+SELECT task_id, status, result_code,
+       model_candidate_count, accepted_candidate_count, saved_memory_count,
+       retry_count, last_error_code, created_at, updated_at
 FROM agent_memory_extraction_task
 WHERE tenant_id = 1 AND user_id = 74680
 ORDER BY id DESC
@@ -77,6 +79,14 @@ LIMIT 10;
 ```
 
    - 预期每个成功普通问答最多登记一条任务，正常最终状态为 `DONE`。
+   - 新完成任务的 `result_code` 含义如下：
+     - `SAVED`：至少一条通过校验的候选已保存。
+     - `MODEL_EMPTY`：模型正常返回，但没有给出候选。
+     - `ALL_REJECTED`：模型给出候选，但全部被确定性校验规则拒绝。
+     - `NO_CHANGE`：存在通过校验的候选，但因显式记忆优先、删除抑制或同批去重等规则没有写入新记忆。
+     - `MODEL_PROTOCOL_REJECTED`：模型响应不符合严格协议，系统按封闭策略拒绝整批结果。
+   - 计数关系必须满足 `saved_memory_count <= accepted_candidate_count <= model_candidate_count`。这些计数只记录数量，不包含用户消息、候选正文或证据。
+   - V13 迁移前已经完成的历史任务会保留 `result_code=NULL` 和零计数，不能据此反推历史抽取结果。
    - 暂时性失败进入 `RETRY`，达到最大次数进入 `DEAD`；错误字段只能是安全错误码，不得出现用户正文或供应商异常正文。
 3. 检查自动记忆：
 
