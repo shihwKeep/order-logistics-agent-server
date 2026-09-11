@@ -15,6 +15,8 @@ class ConversationTitleMigrationContractTest {
 
         assertThat(sql)
                 .contains("DEFAULT '新会话'")
+                .contains("SET title = '新会话'")
+                .contains("WHERE title = '新对话'")
                 .contains("conversation.title IN ('新对话', '新会话')")
                 .contains("assistant_message.role = 'ASSISTANT'")
                 .contains("assistant_message.status = 'SUCCESS'")

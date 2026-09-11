@@ -2,6 +2,10 @@ ALTER TABLE agent_conversation
     MODIFY COLUMN title VARCHAR(128) NOT NULL DEFAULT '新会话'
         COMMENT '会话标题';
 
+UPDATE agent_conversation
+SET title = '新会话'
+WHERE title = '新对话';
+
 UPDATE agent_conversation AS conversation
 JOIN (
     SELECT first_question.conversation_id,
