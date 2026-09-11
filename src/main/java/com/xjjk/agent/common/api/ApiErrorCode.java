@@ -106,6 +106,24 @@ public enum ApiErrorCode {
             "记忆保存失败，请稍后重试"
     ),
 
+    MEMORY_NOT_FOUND(
+            HttpStatus.NOT_FOUND,
+            "MEMORY_NOT_FOUND",
+            "记忆不存在或无权访问"
+    ),
+
+    MEMORY_CONTENT_REJECTED(
+            HttpStatus.BAD_REQUEST,
+            "MEMORY_CONTENT_REJECTED",
+            "这类内容不适合作为长期记忆保存"
+    ),
+
+    MEMORY_CLEAR_FAILED(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "MEMORY_CLEAR_FAILED",
+            "记忆清理失败，请稍后重试"
+    ),
+
     INTERNAL_SERVER_ERROR(
             HttpStatus.INTERNAL_SERVER_ERROR,
             "INTERNAL_SERVER_ERROR",

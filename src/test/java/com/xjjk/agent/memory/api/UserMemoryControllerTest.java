@@ -5,6 +5,7 @@ import com.xjjk.agent.memory.api.dto.UpdateUserMemorySettingRequest;
 import com.xjjk.agent.memory.api.dto.UserMemoryPageResponse;
 import com.xjjk.agent.memory.api.dto.UserMemorySettingResponse;
 import com.xjjk.agent.memory.service.UserMemoryQueryService;
+import com.xjjk.agent.memory.service.UserMemoryManagementService;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.bind.annotation.RequestMapping;
 
@@ -20,7 +21,8 @@ class UserMemoryControllerTest {
     @Test
     void exposesOnlyCurrentUserMemoryOperations() {
         UserMemoryQueryService service = mock(UserMemoryQueryService.class);
-        UserMemoryController controller = new UserMemoryController(service);
+        UserMemoryController controller = new UserMemoryController(
+                service, mock(UserMemoryManagementService.class));
         AgentIdentity identity = new AgentIdentity(2L, "account", "name", 3L, 1L);
         UserMemoryPageResponse page = new UserMemoryPageResponse(List.of(), null, false);
         when(service.list(identity, null, 10)).thenReturn(page);

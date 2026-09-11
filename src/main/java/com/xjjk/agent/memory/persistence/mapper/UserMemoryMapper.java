@@ -20,6 +20,42 @@ public interface UserMemoryMapper extends BaseMapper<UserMemoryEntity> {
         WHERE tenant_id = #{tenantId}
           AND user_id = #{userId}
           AND memory_generation = #{generation}
+          AND memory_id = #{memoryId}
+          AND source_type = 'USER_EXPLICIT'
+          AND visibility = 'VISIBLE'
+          AND status = 'ACTIVE'
+        LIMIT 1
+        FOR UPDATE
+        """)
+    UserMemoryEntity selectOwnedVisibleExplicitForUpdate(
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("generation") long generation,
+            @Param("memoryId") String memoryId);
+
+    @Select("""
+        SELECT *
+        FROM agent_user_memory
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND memory_generation = #{generation}
+          AND source_type = 'USER_EXPLICIT'
+          AND visibility = 'VISIBLE'
+          AND status = 'ACTIVE'
+        ORDER BY id
+        FOR UPDATE
+        """)
+    List<UserMemoryEntity> selectOwnedVisibleExplicitForUpdate(
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("generation") long generation);
+
+    @Select("""
+        SELECT *
+        FROM agent_user_memory
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND memory_generation = #{generation}
           AND canonical_key = #{canonicalKey}
           AND status = 'ACTIVE'
         ORDER BY version DESC, id DESC
