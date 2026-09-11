@@ -10,6 +10,7 @@ import com.xjjk.agent.chat.persistence.entity.AgentMessageEntity;
 import com.xjjk.agent.chat.persistence.mapper.AgentConversationMapper;
 import com.xjjk.agent.chat.persistence.mapper.AgentMessageMapper;
 import com.xjjk.agent.chat.result.AgentMessageResultMapper;
+import com.xjjk.agent.chat.service.conversation.ConversationTitleService;
 import com.xjjk.agent.chat.service.memory.ChatHistoryChangedEvent;
 import com.xjjk.agent.chat.service.summary.ChatSummaryTaskScheduler;
 import com.xjjk.agent.common.exception.BusinessException;
@@ -52,6 +53,9 @@ class ChatHistoryChangedEventPublishingTest {
 
     @Mock
     private ChatSummaryTaskScheduler summaryTaskScheduler;
+
+    @Mock
+    private ConversationTitleService conversationTitleService;
 
     private AgentConversationEntity conversation;
     private ChatTurnContext turn;
@@ -111,7 +115,8 @@ class ChatHistoryChangedEventPublishingTest {
                 messageMapper,
                 resultMapper,
                 eventPublisher,
-                summaryTaskScheduler
+                summaryTaskScheduler,
+                conversationTitleService
         );
 
         assertThat(service.finish(
@@ -129,6 +134,8 @@ class ChatHistoryChangedEventPublishingTest {
         verify(summaryTaskScheduler).requestStableHistory(
                 1, 10567, "conversation-1", 9, 18
         );
+        verify(conversationTitleService).assignFromEarliestQuestion(
+                1, 10567, "conversation-1");
         assertThat(event.getValue()).isEqualTo(
                 new ChatHistoryChangedEvent(
                         1, 10567, "conversation-1", 9, 18)
@@ -148,7 +155,8 @@ class ChatHistoryChangedEventPublishingTest {
                 messageMapper,
                 resultMapper,
                 eventPublisher,
-                summaryTaskScheduler
+                summaryTaskScheduler,
+                conversationTitleService
         );
 
         assertThatThrownBy(() -> service.finish(
