@@ -37,8 +37,8 @@ CREATE TABLE agent_user_memory (
     status VARCHAR(16)
         CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT 'ACTIVE、SUPERSEDED、DELETED或EXPIRED',
     source_conversation_id CHAR(36)
-        CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '来源会话',
-    source_message_sequence BIGINT NOT NULL COMMENT '来源用户消息序号',
+        CHARACTER SET ascii COLLATE ascii_bin NULL COMMENT '来源会话；API直接编辑时为空',
+    source_message_sequence BIGINT NULL COMMENT '来源用户消息序号；API直接编辑时为空',
     evidence_text VARCHAR(512) NOT NULL COMMENT '受限用户原文证据',
     version BIGINT NOT NULL COMMENT '同语义键版本，从1开始',
     expires_at DATETIME(3) NULL COMMENT '普通记忆过期时间，UTC',

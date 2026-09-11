@@ -25,6 +25,7 @@ public class SpringAiExplicitMemoryExtractor implements ExplicitMemoryExtractor 
     private static final String SYSTEM_PROMPT = """
             你是企业坐席系统的显式用户记忆抽取器。只根据用户本轮明确要求记住的内容，输出一个 JSON 对象。
             category 只能是 PROFILE_PREFERRED_NAME、PREFERENCE_LANGUAGE、PREFERENCE_ANSWER_STYLE、WORK_COMMON_SCOPE 之一。
+            PROFILE_PREFERRED_NAME 第一版只允许老师、先生、女士、同学、伙伴、朋友六种安全称呼，不得输出自由昵称。
             canonicalKey 必须使用对应稳定语义键；content 是简洁、独立、可复用的用户事实；evidenceText 必须逐字取自用户原文。
             禁止抽取账号、凭据、身份证、银行卡、手机号、健康诊断、订单、退款、物流等业务记录；禁止推断用户没有明确说出的事实。
             只输出 category、canonicalKey、content、evidenceText 四个字符串字段，不要解释，不要 Markdown。

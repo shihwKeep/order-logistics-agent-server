@@ -114,8 +114,8 @@ CREATE TABLE agent_user_memory (
     visibility VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     retention_type VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     status VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    source_conversation_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    source_message_sequence BIGINT NOT NULL,
+    source_conversation_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    source_message_sequence BIGINT NULL,
     evidence_text VARCHAR(512) NOT NULL,
     version BIGINT NOT NULL,
     expires_at DATETIME(3) NULL,
@@ -444,8 +444,8 @@ git commit -m "feat: add owner scoped memory persistence"
 ~~~java
 assertThat(detector.detect("请记住以后回答简短一些"))
         .hasValue(new CommandText("以后回答简短一些", false));
-assertThat(detector.detect("请永久记住叫我石老师"))
-        .hasValue(new CommandText("叫我石老师", true));
+assertThat(detector.detect("请永久记住叫我老师"))
+        .hasValue(new CommandText("叫我老师", true));
 assertThat(detector.detect("我觉得你应该记住这个问题吗？")).isEmpty();
 assertThat(detector.detect("请记住回答简短，顺便帮我查订单")).isEmpty();
 ~~~
@@ -699,7 +699,7 @@ git commit -m "feat: handle explicit memory chat commands"
 Request 10 items, verify mapper limit 11 and next cursor from the tenth row. Reject page sizes 0 and 51 before mapper access. Controller tests cover:
 
 ~~~text
-GET /api/v1/me/memories?pageSize=10
+GET /api/v1/me/memories?limit=10
 GET /api/v1/me/memory-settings
 PUT /api/v1/me/memory-settings with autoExtractEnabled=false
 ~~~
@@ -716,7 +716,7 @@ Expected: compilation fails.
 
 - [ ] **Step 3: Implement opaque keyset pagination**
 
-Follow ConversationPageCursorCodec: encode updatedAt|id as URL-safe Base64 without padding, enforce millisecond precision and maximum encoded length 256. Query pageSize+1 and return:
+Encode a versioned HMAC-SHA256 signed cursor containing updatedAt, id, tenantId, userId and memoryGeneration. Enforce millisecond precision and maximum encoded length 256, reject tampering and owner/generation mismatch. Query limit+1 and return:
 
 ~~~java
 public record UserMemoryPageResponse(
@@ -863,7 +863,7 @@ send 请记住以后回答简短一些 and expect fixed success text
 list visible memories and verify one explicit record
 edit it and verify version increases
 delete it and verify list empty plus suppression
-save 请永久记住叫我石老师 and verify null expiry
+save 请永久记住叫我老师 and verify null expiry
 clear explicit, then create records and clear all
 verify memory_generation increments
 use another user and verify the original memory ID is inaccessible

@@ -10,6 +10,8 @@ import com.xjjk.agent.memory.persistence.mapper.MemoryOutboxMapper;
 import com.xjjk.agent.memory.persistence.mapper.MemorySuppressionMapper;
 import com.xjjk.agent.memory.persistence.mapper.UserMemoryMapper;
 import com.xjjk.agent.memory.persistence.mapper.UserMemorySettingMapper;
+import com.xjjk.agent.memory.observation.UserMemoryMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -42,7 +44,9 @@ class UserMemoryClearAllTest {
         service = new UserMemoryManagementService(settingMapper, memoryMapper,
                 suppressionMapper, outboxMapper,
                 new MemorySensitiveContentPolicy(new com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer()),
-                properties(), Clock.fixed(Instant.parse("2026-09-11T08:00:00Z"), ZoneOffset.UTC));
+                new MemoryCategoryContentPolicy(),
+                properties(), new UserMemoryMetrics(new SimpleMeterRegistry()),
+                Clock.fixed(Instant.parse("2026-09-11T08:00:00Z"), ZoneOffset.UTC));
         UserMemorySettingEntity setting = new UserMemorySettingEntity();
         setting.setMemoryGeneration(7L);
         when(settingMapper.selectOwnedForUpdate(1L, 2L)).thenReturn(setting);

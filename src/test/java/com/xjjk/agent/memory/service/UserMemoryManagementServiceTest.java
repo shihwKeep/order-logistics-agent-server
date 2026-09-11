@@ -13,6 +13,8 @@ import com.xjjk.agent.memory.persistence.mapper.MemoryOutboxMapper;
 import com.xjjk.agent.memory.persistence.mapper.MemorySuppressionMapper;
 import com.xjjk.agent.memory.persistence.mapper.UserMemoryMapper;
 import com.xjjk.agent.memory.persistence.mapper.UserMemorySettingMapper;
+import com.xjjk.agent.memory.observation.UserMemoryMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -45,7 +47,9 @@ class UserMemoryManagementServiceTest {
         service = new UserMemoryManagementService(settingMapper, memoryMapper,
                 suppressionMapper, outboxMapper,
                 new MemorySensitiveContentPolicy(new com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer()),
-                properties(), Clock.fixed(Instant.parse("2026-09-11T08:00:00Z"), ZoneOffset.UTC));
+                new MemoryCategoryContentPolicy(),
+                properties(), new UserMemoryMetrics(new SimpleMeterRegistry()),
+                Clock.fixed(Instant.parse("2026-09-11T08:00:00Z"), ZoneOffset.UTC));
         UserMemorySettingEntity setting = new UserMemorySettingEntity();
         setting.setMemoryGeneration(7L);
         when(settingMapper.selectOwnedForUpdate(1L, 2L)).thenReturn(setting);
@@ -72,10 +76,16 @@ class UserMemoryManagementServiceTest {
         assertThat(inserted.getValue().getVersion()).isEqualTo(4L);
         assertThat(inserted.getValue().getContent()).isEqualTo("用户偏好详细回答");
         assertThat(inserted.getValue().getExpiresAt()).isNull();
+        assertThat(inserted.getValue().getSourceConversationId()).isNull();
+        assertThat(inserted.getValue().getSourceMessageSequence()).isNull();
+        assertThat(inserted.getValue().getEvidenceText()).isEqualTo("用户偏好详细回答");
         assertThat(result.memoryId()).isEqualTo(inserted.getValue().getMemoryId());
         ArgumentCaptor<MemoryOutboxEntity> outbox = ArgumentCaptor.forClass(MemoryOutboxEntity.class);
-        verify(outboxMapper).insert(outbox.capture());
-        assertThat(outbox.getValue().getOperation()).isEqualTo("UPSERT");
+        verify(outboxMapper, org.mockito.Mockito.times(2)).insert(outbox.capture());
+        assertThat(outbox.getAllValues()).extracting(MemoryOutboxEntity::getOperation)
+                .containsExactly("DELETE", "UPSERT");
+        assertThat(outbox.getAllValues().get(0).getMemoryId()).isEqualTo("memory-1");
+        assertThat(outbox.getAllValues().get(0).getMemoryVersion()).isEqualTo(3L);
     }
 
     @Test
@@ -85,6 +95,40 @@ class UserMemoryManagementServiceTest {
         assertThatThrownBy(() -> service.delete(identity, "missing"))
                 .isInstanceOfSatisfying(BusinessException.class,
                         error -> assertThat(error.errorCode()).isEqualTo(ApiErrorCode.MEMORY_NOT_FOUND));
+    }
+
+    @Test
+    void editRejectsContentOutsideTheExistingCategoryWhitelist() {
+        UserMemoryEntity current = explicit("memory-1", "旧内容", 3L);
+        when(memoryMapper.selectOwnedVisibleExplicitForUpdate(1L, 2L, 7L, "memory-1"))
+                .thenReturn(current);
+
+        assertThatThrownBy(() -> service.edit(identity, "memory-1",
+                "家庭地址是上海市浦东新区世纪大道100号", MemoryRetentionType.NORMAL))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        error -> assertThat(error.errorCode()).isEqualTo(ApiErrorCode.MEMORY_CONTENT_REJECTED));
+        assertThatThrownBy(() -> service.edit(identity, "memory-1",
+                "公司制度规定退款需要审批", MemoryRetentionType.NORMAL))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        error -> assertThat(error.errorCode()).isEqualTo(ApiErrorCode.MEMORY_CONTENT_REJECTED));
+    }
+
+    @Test
+    void editRejectsAllowedKeywordMixedWithSensitiveContent() {
+        UserMemoryEntity work = explicit("work-1", "用户常用工作范围是Java开发", 1L);
+        work.setCategory("WORK_COMMON_SCOPE");
+        work.setCanonicalKey("work.common_scope");
+        when(memoryMapper.selectOwnedVisibleExplicitForUpdate(1L, 2L, 7L, "work-1"))
+                .thenReturn(work);
+
+        for (String forbidden : List.of(
+                "我做Java开发，每天服用阿司匹林",
+                "我做Java开发，家庭住在世纪大道100号")) {
+            assertThatThrownBy(() -> service.edit(identity, "work-1", forbidden, MemoryRetentionType.NORMAL))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            error -> assertThat(error.errorCode())
+                                    .isEqualTo(ApiErrorCode.MEMORY_CONTENT_REJECTED));
+        }
     }
 
     @Test
@@ -107,7 +151,7 @@ class UserMemoryManagementServiceTest {
 
     @Test
     void explicitClearSuppressesVisibleKeysAndEmitsOneScopeOutbox() {
-        when(memoryMapper.selectOwnedVisibleExplicitForUpdate(1L, 2L, 7L))
+        when(memoryMapper.selectAllOwnedVisibleExplicitForUpdate(1L, 2L, 7L))
                 .thenReturn(List.of(explicit("m1", "a", 1L), explicit("m2", "b", 1L)));
         when(memoryMapper.clearOwnedExplicit(1L, 2L, 7L,
                 LocalDateTime.parse("2026-09-11T08:00:00"))).thenReturn(2);

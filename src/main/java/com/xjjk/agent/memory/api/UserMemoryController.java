@@ -37,9 +37,9 @@ public class UserMemoryController {
     public ApiResponse<UserMemoryPageResponse> list(
             @CurrentAgentIdentity AgentIdentity identity,
             @RequestParam(required = false) String cursor,
-            @RequestParam(defaultValue = "10") int pageSize
+            @RequestParam(name = "limit", defaultValue = "10") int limit
     ) {
-        return ApiResponse.success(queryService.list(identity, cursor, pageSize));
+        return ApiResponse.success(queryService.list(identity, cursor, limit));
     }
 
     @GetMapping("/memory-settings")

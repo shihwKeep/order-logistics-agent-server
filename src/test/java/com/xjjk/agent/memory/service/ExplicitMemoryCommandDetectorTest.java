@@ -12,8 +12,8 @@ class ExplicitMemoryCommandDetectorTest {
     void detectsAnchoredNormalAndPermanentCommands() {
         assertThat(detector.detect("请记住以后回答简短一些"))
                 .contains(new ExplicitMemoryCommandDetector.CommandText("以后回答简短一些", false));
-        assertThat(detector.detect("请永久记住：叫我石老师。"))
-                .contains(new ExplicitMemoryCommandDetector.CommandText("叫我石老师", true));
+        assertThat(detector.detect("请永久记住：叫我老师。"))
+                .contains(new ExplicitMemoryCommandDetector.CommandText("叫我老师", true));
         assertThat(detector.detect("以后请 回答简短一些"))
                 .contains(new ExplicitMemoryCommandDetector.CommandText("回答简短一些", false));
     }

@@ -61,10 +61,10 @@ public class UserMemoryQueryService {
         if (pageSize < 1 || pageSize > properties.pageSizeMax()) {
             throw new BusinessException(ApiErrorCode.VALIDATION_ERROR);
         }
-        UserMemoryPageCursor boundary = cursor == null || cursor.isBlank()
-                ? null : cursorCodec.decode(cursor);
         UserMemorySettingEntity setting = settingMapper.selectOwned(identity.tenantId(), identity.userId());
         long generation = setting == null ? 1L : setting.getMemoryGeneration();
+        UserMemoryPageCursor boundary = cursor == null || cursor.isBlank()
+                ? null : cursorCodec.decode(cursor, identity.tenantId(), identity.userId(), generation);
         List<UserMemoryListRow> rows = memoryMapper.selectVisiblePage(
                 identity.tenantId(), identity.userId(), generation,
                 boundary == null ? null : boundary.updatedAt(),
@@ -74,7 +74,8 @@ public class UserMemoryQueryService {
         String nextCursor = hasMore
                 ? cursorCodec.encode(new UserMemoryPageCursor(
                         visible.get(visible.size() - 1).getUpdatedAt(),
-                        visible.get(visible.size() - 1).getId()))
+                        visible.get(visible.size() - 1).getId(),
+                        identity.tenantId(), identity.userId(), generation))
                 : null;
         return new UserMemoryPageResponse(visible.stream().map(this::toResponse).toList(),
                 nextCursor, hasMore);

@@ -4,6 +4,7 @@ import com.xjjk.agent.common.api.ApiErrorCode;
 import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.memory.config.UserMemoryProperties;
+import com.xjjk.agent.memory.config.UserMemoryCursorProperties;
 import com.xjjk.agent.memory.persistence.entity.UserMemorySettingEntity;
 import com.xjjk.agent.memory.persistence.mapper.UserMemoryMapper;
 import com.xjjk.agent.memory.persistence.mapper.UserMemorySettingMapper;
@@ -29,11 +30,13 @@ class UserMemoryQueryServiceTest {
     private final UserMemorySettingMapper settingMapper = mock(UserMemorySettingMapper.class);
     private final AgentIdentity identity = new AgentIdentity(2L, "account", "name", 3L, 1L);
     private UserMemoryQueryService service;
+    private UserMemoryPageCursorCodec cursorCodec;
 
     @BeforeEach
     void setUp() {
-        service = new UserMemoryQueryService(memoryMapper, settingMapper,
-                new UserMemoryPageCursorCodec(), properties());
+        cursorCodec = new UserMemoryPageCursorCodec(new UserMemoryCursorProperties(
+                "test-memory-cursor-secret-32-bytes-long"));
+        service = new UserMemoryQueryService(memoryMapper, settingMapper, cursorCodec, properties());
     }
 
     @Test
@@ -58,9 +61,26 @@ class UserMemoryQueryServiceTest {
 
         assertThat(page.items()).hasSize(10);
         assertThat(page.hasMore()).isTrue();
-        UserMemoryPageCursor cursor = new UserMemoryPageCursorCodec().decode(page.nextCursor());
+        UserMemoryPageCursor cursor = cursorCodec.decode(page.nextCursor(), 1L, 2L, 7L);
         assertThat(cursor.id()).isEqualTo(rows.get(9).getId());
         assertThat(cursor.updatedAt()).isEqualTo(rows.get(9).getUpdatedAt());
+        assertThat(cursor.tenantId()).isEqualTo(1L);
+        assertThat(cursor.userId()).isEqualTo(2L);
+        assertThat(cursor.generation()).isEqualTo(7L);
+    }
+
+    @Test
+    void rejectsTamperedOrCrossOwnerCursor() {
+        String token = cursorCodec.encode(new UserMemoryPageCursor(
+                LocalDateTime.parse("2026-09-11T08:00:00"), 10L, 1L, 2L, 7L));
+
+        int signatureStart = token.indexOf('.') + 1;
+        char replacement = token.charAt(signatureStart) == 'A' ? 'B' : 'A';
+        String tampered = token.substring(0, signatureStart) + replacement + token.substring(signatureStart + 1);
+        assertValidationError(() -> cursorCodec.decode(tampered,
+                1L, 2L, 7L));
+        assertValidationError(() -> cursorCodec.decode(token, 1L, 99L, 7L));
+        assertValidationError(() -> cursorCodec.decode(token, 1L, 2L, 8L));
     }
 
     @Test
@@ -87,6 +107,12 @@ class UserMemoryQueryServiceTest {
         entity.setMemoryGeneration(generation);
         entity.setAutoExtractEnabled(enabled);
         return entity;
+    }
+
+    private void assertValidationError(org.assertj.core.api.ThrowableAssert.ThrowingCallable call) {
+        assertThatThrownBy(call)
+                .isInstanceOfSatisfying(BusinessException.class,
+                        error -> assertThat(error.errorCode()).isEqualTo(ApiErrorCode.VALIDATION_ERROR));
     }
 
     private UserMemoryProperties properties() {

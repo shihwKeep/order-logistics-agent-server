@@ -45,8 +45,8 @@ class SpringAiExplicitMemoryExtractorTest {
         SpringAiExplicitMemoryExtractor extractor = extractor(client, properties(Duration.ofSeconds(1)), executor());
 
         ExplicitMemoryCandidate result = extractor.extract(
-                new ExplicitMemoryCommandDetector.CommandText("叫我石老师", true),
-                "请永久记住叫我石老师"
+                new ExplicitMemoryCommandDetector.CommandText("叫我老师", true),
+                "请永久记住叫我老师"
         );
 
         assertThat(result).isEqualTo(new ExplicitMemoryCandidate(

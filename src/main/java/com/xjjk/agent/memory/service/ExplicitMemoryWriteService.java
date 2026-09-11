@@ -100,8 +100,11 @@ public class ExplicitMemoryWriteService {
                 turn.tenantId(), turn.userId(), generation, candidate.canonicalKey());
         long version = previous == null || previous.getVersion() == null
                 ? 1L : previous.getVersion() + 1L;
-        memoryMapper.supersedeOwnedActive(
+        int superseded = memoryMapper.supersedeOwnedActive(
                 turn.tenantId(), turn.userId(), generation, candidate.canonicalKey(), now);
+        if (previous != null && (superseded != 1 || previous.getMemoryId() == null)) {
+            throw writeFailed();
+        }
         suppressionMapper.liftOwnedActive(
                 turn.tenantId(), turn.userId(), generation, candidate.canonicalKey(), now);
 
@@ -132,14 +135,25 @@ public class ExplicitMemoryWriteService {
             throw writeFailed();
         }
 
+        if (previous != null) {
+            insertOutbox(turn.tenantId(), turn.userId(), generation,
+                    previous.getVersion(), previous.getMemoryId(), MemoryOutboxOperation.DELETE, now);
+        }
+        insertOutbox(turn.tenantId(), turn.userId(), generation,
+                version, memoryId, MemoryOutboxOperation.UPSERT, now);
+        return new SaveResult(memoryId, candidate.content());
+    }
+
+    private void insertOutbox(long tenantId, long userId, long generation, long version,
+                              String memoryId, MemoryOutboxOperation operation, LocalDateTime now) {
         MemoryOutboxEntity outbox = new MemoryOutboxEntity();
         outbox.setEventId(UUID.randomUUID().toString());
         outbox.setMemoryId(memoryId);
-        outbox.setTenantId(turn.tenantId());
-        outbox.setUserId(turn.userId());
+        outbox.setTenantId(tenantId);
+        outbox.setUserId(userId);
         outbox.setMemoryGeneration(generation);
         outbox.setMemoryVersion(version);
-        outbox.setOperation(MemoryOutboxOperation.UPSERT.name());
+        outbox.setOperation(operation.name());
         outbox.setStatus(MemoryOutboxStatus.PENDING.name());
         outbox.setRetryCount(0);
         outbox.setNextRunAt(now);
@@ -148,7 +162,6 @@ public class ExplicitMemoryWriteService {
         if (outboxMapper.insert(outbox) != 1) {
             throw writeFailed();
         }
-        return new SaveResult(memoryId, candidate.content());
     }
 
     private static BusinessException writeFailed() {

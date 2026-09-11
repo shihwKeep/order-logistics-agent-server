@@ -1,0 +1,31 @@
+package com.xjjk.agent.memory.observation;
+
+import com.xjjk.agent.common.api.ApiErrorCode;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class UserMemoryMetricsTest {
+
+    @Test
+    void recordsOnlyBoundedOperationalTagsWithoutMemoryContent() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        UserMemoryMetrics metrics = new UserMemoryMetrics(registry);
+
+        metrics.success("explicit_save", 1);
+        metrics.failure("delete", ApiErrorCode.MEMORY_NOT_FOUND);
+
+        assertThat(registry.get("agent.user.memory.operation")
+                .tags("operation", "explicit_save", "outcome", "success", "code", "NONE")
+                .counter().count()).isEqualTo(1.0);
+        assertThat(registry.get("agent.user.memory.affected")
+                .tag("operation", "explicit_save").summary().totalAmount()).isEqualTo(1.0);
+        assertThat(registry.getMeters())
+                .flatExtracting(meter -> meter.getId().getTags())
+                .allSatisfy(tag -> {
+                    assertThat(tag.getKey()).doesNotContain("content", "evidence");
+                    assertThat(tag.getValue()).doesNotContain("请记住", "用户偏好");
+                });
+    }
+}

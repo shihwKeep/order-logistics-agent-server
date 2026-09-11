@@ -23,6 +23,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -60,9 +61,12 @@ class ExplicitMemoryWriteServiceTest {
     @Test
     void savesExplicitMemoryAndOutboxInTheSameTransactionBoundary() {
         UserMemoryEntity existing = new UserMemoryEntity();
+        existing.setMemoryId("old-memory");
         existing.setVersion(3L);
         when(memoryMapper.selectActiveByKeyForUpdate(1L, 2L, 7L, "preference.answer_style"))
                 .thenReturn(existing);
+        when(memoryMapper.supersedeOwnedActive(eq(1L), eq(2L), eq(7L),
+                eq("preference.answer_style"), any())).thenReturn(1);
 
         ExplicitMemoryWriteService.SaveResult result = service.save(turn(), candidate());
 
@@ -80,11 +84,15 @@ class ExplicitMemoryWriteServiceTest {
         assertThat(memory.getValue().getContentHash()).hasSize(64);
 
         ArgumentCaptor<MemoryOutboxEntity> outbox = ArgumentCaptor.forClass(MemoryOutboxEntity.class);
-        verify(outboxMapper).insert(outbox.capture());
-        assertThat(outbox.getValue().getMemoryId()).isEqualTo(memory.getValue().getMemoryId());
-        assertThat(outbox.getValue().getMemoryVersion()).isEqualTo(4L);
-        assertThat(outbox.getValue().getOperation()).isEqualTo("UPSERT");
-        assertThat(outbox.getValue().getStatus()).isEqualTo("PENDING");
+        verify(outboxMapper, org.mockito.Mockito.times(2)).insert(outbox.capture());
+        List<MemoryOutboxEntity> events = outbox.getAllValues();
+        assertThat(events).extracting(MemoryOutboxEntity::getOperation)
+                .containsExactly("DELETE", "UPSERT");
+        assertThat(events.get(0).getMemoryId()).isEqualTo("old-memory");
+        assertThat(events.get(0).getMemoryVersion()).isEqualTo(3L);
+        assertThat(events.get(1).getMemoryId()).isEqualTo(memory.getValue().getMemoryId());
+        assertThat(events.get(1).getMemoryVersion()).isEqualTo(4L);
+        assertThat(events.get(1).getStatus()).isEqualTo("PENDING");
         assertThat(result.memoryId()).isEqualTo(memory.getValue().getMemoryId());
         assertThat(result.content()).isEqualTo("用户偏好简洁回答");
 

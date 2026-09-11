@@ -79,7 +79,7 @@ MySQL 是记忆的唯一权威数据源。ES 和 Milvus 中的数据必须能够
 
 第一版使用类别白名单，只允许：
 
-- `PROFILE.PREFERRED_NAME`：用户希望被如何称呼。
+- `PROFILE.PREFERRED_NAME`：第一版仅允许“老师、先生、女士、同学、伙伴、朋友”六种安全称呼；自由昵称需待独立内容审核能力上线后再开放。
 - `PREFERENCE.LANGUAGE`：用户明确偏好的交流语言。
 - `PREFERENCE.ANSWER_STYLE`：简洁、详细、先结论后说明等回答风格。
 - `WORK.COMMON_SCOPE`：稳定且非敏感的常用工作或业务范围，例如 Java 开发、客服售后。
@@ -148,8 +148,8 @@ Agent Server 负责记忆生命周期、MySQL 数据、用户 API、抽取任务
 | `visibility` | `VISIBLE` 或 `HIDDEN` |
 | `retention_type` | `NORMAL` 或 `PERMANENT` |
 | `status` | `ACTIVE`、`SUPERSEDED`、`DELETED`、`EXPIRED` |
-| `source_conversation_id` | 来源会话 |
-| `source_message_sequence` | 来源用户消息序号 |
+| `source_conversation_id` | 来源会话；API 直接编辑产生的新版本为空 |
+| `source_message_sequence` | 来源用户消息序号；API 直接编辑产生的新版本为空 |
 | `evidence_text` | 受长度限制的用户原文证据 |
 | `version` | 同一记忆的乐观锁版本 |
 | `expires_at` | 普通过期时间；永久记忆为空 |
@@ -567,7 +567,7 @@ agent.memory.index.max-retries=10
 ## 20. 验收标准
 
 1. 用户说“请记住以后回答简短一些”后，新会话能够使用该偏好，记忆面板可以看到并删除。
-2. 用户说“请永久记住叫我石老师”后，重新登录仍生效，且面板显示永久标记。
+2. 用户说“请永久记住叫我老师”后，重新登录仍生效，且面板显示永久标记。
 3. 普通对话中明确表达的稳定白名单偏好可以异步持久化并跨会话使用，但不在面板逐条展示。
 4. 助手回答、临时问题、敏感信息和具体业务数据不能形成长期用户记忆。
 5. 显式与隐式冲突时只使用显式记忆。

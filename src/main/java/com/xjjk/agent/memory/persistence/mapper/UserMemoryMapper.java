@@ -45,7 +45,7 @@ public interface UserMemoryMapper extends BaseMapper<UserMemoryEntity> {
         ORDER BY id
         FOR UPDATE
         """)
-    List<UserMemoryEntity> selectOwnedVisibleExplicitForUpdate(
+    List<UserMemoryEntity> selectAllOwnedVisibleExplicitForUpdate(
             @Param("tenantId") long tenantId,
             @Param("userId") long userId,
             @Param("generation") long generation);

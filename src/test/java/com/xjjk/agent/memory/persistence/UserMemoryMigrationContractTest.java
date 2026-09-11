@@ -24,6 +24,8 @@ class UserMemoryMigrationContractTest {
                     .contains("CREATE TABLE agent_memory_suppression")
                     .contains("CREATE TABLE agent_memory_outbox")
                     .contains("memory_generation BIGINT NOT NULL")
+                    .contains("source_conversation_id CHAR(36)\n        CHARACTER SET ascii COLLATE ascii_bin NULL")
+                    .contains("source_message_sequence BIGINT NULL")
                     .contains("UNIQUE KEY uk_memory_id (memory_id)")
                     .contains("KEY idx_memory_owner_status")
                     .contains("UNIQUE KEY uk_memory_outbox_event (event_id)");

@@ -8,6 +8,7 @@ import java.util.Objects;
 public class ExplicitMemoryCandidateValidator {
 
     private final MemorySensitiveContentPolicy sensitiveContentPolicy;
+    private final MemoryCategoryContentPolicy categoryContentPolicy;
     private final int maxContentCodePoints;
     private final int maxEvidenceCodePoints;
 
@@ -16,7 +17,18 @@ public class ExplicitMemoryCandidateValidator {
             int maxContentCodePoints,
             int maxEvidenceCodePoints
     ) {
+        this(sensitiveContentPolicy, new MemoryCategoryContentPolicy(),
+                maxContentCodePoints, maxEvidenceCodePoints);
+    }
+
+    public ExplicitMemoryCandidateValidator(
+            MemorySensitiveContentPolicy sensitiveContentPolicy,
+            MemoryCategoryContentPolicy categoryContentPolicy,
+            int maxContentCodePoints,
+            int maxEvidenceCodePoints
+    ) {
         this.sensitiveContentPolicy = Objects.requireNonNull(sensitiveContentPolicy, "sensitiveContentPolicy");
+        this.categoryContentPolicy = Objects.requireNonNull(categoryContentPolicy, "categoryContentPolicy");
         this.maxContentCodePoints = requirePositive(maxContentCodePoints);
         this.maxEvidenceCodePoints = requirePositive(maxEvidenceCodePoints);
     }
@@ -51,10 +63,13 @@ public class ExplicitMemoryCandidateValidator {
         }
         if (!sensitiveContentPolicy.isAllowed(content)
                 || !sensitiveContentPolicy.isAllowed(evidence)
-                || !sensitiveContentPolicy.isAllowed(original)) {
+                || !sensitiveContentPolicy.isAllowed(original)
+                || !categoryContentPolicy.isAllowed(candidate.category(), evidence, content)) {
             throw invalid();
         }
-        return new ExplicitMemoryCandidate(candidate.category(), key, content, evidence, expected);
+        String canonicalContent = categoryContentPolicy.canonicalize(candidate.category(), evidence)
+                .orElseThrow(ExplicitMemoryCandidateValidator::invalid);
+        return new ExplicitMemoryCandidate(candidate.category(), key, canonicalContent, evidence, expected);
     }
 
     private static String normalize(String value) {

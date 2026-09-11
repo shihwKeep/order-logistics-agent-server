@@ -5,6 +5,7 @@ import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.memory.config.UserMemoryProperties;
 import com.xjjk.agent.memory.domain.MemoryOutboxOperation;
+import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.domain.MemoryOutboxStatus;
 import com.xjjk.agent.memory.domain.MemoryRetentionType;
 import com.xjjk.agent.memory.domain.MemoryStatus;
@@ -17,9 +18,12 @@ import com.xjjk.agent.memory.persistence.mapper.MemoryOutboxMapper;
 import com.xjjk.agent.memory.persistence.mapper.MemorySuppressionMapper;
 import com.xjjk.agent.memory.persistence.mapper.UserMemoryMapper;
 import com.xjjk.agent.memory.persistence.mapper.UserMemorySettingMapper;
+import com.xjjk.agent.memory.observation.UserMemoryMetrics;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -28,6 +32,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Supplier;
+import java.util.function.ToIntFunction;
 
 @Service
 public class UserMemoryManagementService {
@@ -37,8 +43,10 @@ public class UserMemoryManagementService {
     private final MemorySuppressionMapper suppressionMapper;
     private final MemoryOutboxMapper outboxMapper;
     private final MemorySensitiveContentPolicy sensitivePolicy;
+    private final MemoryCategoryContentPolicy categoryContentPolicy;
     private final UserMemoryProperties properties;
     private final Clock clock;
+    private final UserMemoryMetrics metrics;
 
     @Autowired
     public UserMemoryManagementService(
@@ -47,10 +55,12 @@ public class UserMemoryManagementService {
             MemorySuppressionMapper suppressionMapper,
             MemoryOutboxMapper outboxMapper,
             MemorySensitiveContentPolicy sensitivePolicy,
-            UserMemoryProperties properties
+            MemoryCategoryContentPolicy categoryContentPolicy,
+            UserMemoryProperties properties,
+            UserMemoryMetrics metrics
     ) {
         this(settingMapper, memoryMapper, suppressionMapper, outboxMapper,
-                sensitivePolicy, properties, Clock.systemUTC());
+                sensitivePolicy, categoryContentPolicy, properties, metrics, Clock.systemUTC());
     }
 
     UserMemoryManagementService(
@@ -59,7 +69,9 @@ public class UserMemoryManagementService {
             MemorySuppressionMapper suppressionMapper,
             MemoryOutboxMapper outboxMapper,
             MemorySensitiveContentPolicy sensitivePolicy,
+            MemoryCategoryContentPolicy categoryContentPolicy,
             UserMemoryProperties properties,
+            UserMemoryMetrics metrics,
             Clock clock
     ) {
         this.settingMapper = Objects.requireNonNull(settingMapper);
@@ -67,8 +79,10 @@ public class UserMemoryManagementService {
         this.suppressionMapper = Objects.requireNonNull(suppressionMapper);
         this.outboxMapper = Objects.requireNonNull(outboxMapper);
         this.sensitivePolicy = Objects.requireNonNull(sensitivePolicy);
+        this.categoryContentPolicy = Objects.requireNonNull(categoryContentPolicy);
         this.properties = Objects.requireNonNull(properties);
         this.clock = Objects.requireNonNull(clock);
+        this.metrics = Objects.requireNonNull(metrics);
     }
 
     @Transactional
@@ -78,6 +92,12 @@ public class UserMemoryManagementService {
             String requestedContent,
             MemoryRetentionType retentionType
     ) {
+        return observe("edit", ApiErrorCode.MEMORY_WRITE_FAILED,
+                () -> doEdit(identity, memoryId, requestedContent, retentionType), ignored -> 1);
+    }
+
+    private EditResult doEdit(AgentIdentity identity, String memoryId, String requestedContent,
+                              MemoryRetentionType retentionType) {
         String content = ExplicitMemoryCommandDetector.normalizeWhitespace(requestedContent == null ? "" : requestedContent);
         if (content.isBlank()
                 || content.codePointCount(0, content.length()) > properties.maxContentLength()
@@ -92,6 +112,7 @@ public class UserMemoryManagementService {
         if (current == null) {
             throw new BusinessException(ApiErrorCode.MEMORY_NOT_FOUND);
         }
+        content = canonicalizeForExistingCategory(current, content);
         if (memoryMapper.supersedeOwnedActive(identity.tenantId(), identity.userId(), generation,
                 current.getCanonicalKey(), now) != 1) {
             throw new BusinessException(ApiErrorCode.MEMORY_WRITE_FAILED);
@@ -104,13 +125,29 @@ public class UserMemoryManagementService {
         if (memoryMapper.insert(replacement) != 1) {
             throw new BusinessException(ApiErrorCode.MEMORY_WRITE_FAILED);
         }
+        insertOutbox(identity, generation, current.getVersion(), current.getMemoryId(),
+                MemoryOutboxOperation.DELETE, now, ApiErrorCode.MEMORY_WRITE_FAILED);
         insertOutbox(identity, generation, replacement.getVersion(), newMemoryId,
                 MemoryOutboxOperation.UPSERT, now, ApiErrorCode.MEMORY_WRITE_FAILED);
         return new EditResult(newMemoryId, replacement.getVersion());
     }
 
+    private String canonicalizeForExistingCategory(UserMemoryEntity current, String content) {
+        try {
+            return categoryContentPolicy.canonicalize(MemoryCategory.valueOf(current.getCategory()), content)
+                    .orElseThrow(() -> new BusinessException(ApiErrorCode.MEMORY_CONTENT_REJECTED));
+        } catch (IllegalArgumentException | NullPointerException exception) {
+            throw new BusinessException(ApiErrorCode.MEMORY_CONTENT_REJECTED);
+        }
+    }
+
     @Transactional
     public MutationResult delete(AgentIdentity identity, String memoryId) {
+        return observe("delete", ApiErrorCode.MEMORY_WRITE_FAILED,
+                () -> doDelete(identity, memoryId), MutationResult::affectedCount);
+    }
+
+    private MutationResult doDelete(AgentIdentity identity, String memoryId) {
         LocalDateTime now = now();
         long generation = lockSetting(identity, now).getMemoryGeneration();
         UserMemoryEntity current = memoryMapper.selectOwnedVisibleExplicitForUpdate(
@@ -130,9 +167,14 @@ public class UserMemoryManagementService {
 
     @Transactional
     public MutationResult clearExplicit(AgentIdentity identity) {
+        return observe("clear_explicit", ApiErrorCode.MEMORY_CLEAR_FAILED,
+                () -> doClearExplicit(identity), MutationResult::affectedCount);
+    }
+
+    private MutationResult doClearExplicit(AgentIdentity identity) {
         LocalDateTime now = now();
         long generation = lockSetting(identity, now).getMemoryGeneration();
-        List<UserMemoryEntity> active = memoryMapper.selectOwnedVisibleExplicitForUpdate(
+        List<UserMemoryEntity> active = memoryMapper.selectAllOwnedVisibleExplicitForUpdate(
                 identity.tenantId(), identity.userId(), generation);
         for (UserMemoryEntity memory : active) {
             insertSuppression(identity, generation, memory, now);
@@ -149,6 +191,11 @@ public class UserMemoryManagementService {
 
     @Transactional
     public MutationResult clearAll(AgentIdentity identity) {
+        return observe("clear_all", ApiErrorCode.MEMORY_CLEAR_FAILED,
+                () -> doClearAll(identity), MutationResult::affectedCount);
+    }
+
+    private MutationResult doClearAll(AgentIdentity identity) {
         LocalDateTime now = now();
         long generation = lockSetting(identity, now).getMemoryGeneration();
         final long nextGeneration;
@@ -197,8 +244,9 @@ public class UserMemoryManagementService {
         replacement.setVisibility(current.getVisibility());
         replacement.setRetentionType(retention.name());
         replacement.setStatus(MemoryStatus.ACTIVE.name());
-        replacement.setSourceConversationId(current.getSourceConversationId());
-        replacement.setSourceMessageSequence(current.getSourceMessageSequence());
+        // API 编辑是新的直接用户证据，不能伪装成旧会话中的消息来源。
+        replacement.setSourceConversationId(null);
+        replacement.setSourceMessageSequence(null);
         replacement.setEvidenceText(content);
         replacement.setVersion(Math.incrementExact(current.getVersion()));
         replacement.setExpiresAt(retention == MemoryRetentionType.PERMANENT
@@ -248,6 +296,50 @@ public class UserMemoryManagementService {
 
     private LocalDateTime now() {
         return LocalDateTime.ofInstant(clock.instant().truncatedTo(ChronoUnit.MILLIS), ZoneOffset.UTC);
+    }
+
+    private <T> T observe(String operation, ApiErrorCode rollbackCode,
+                          Supplier<T> action, ToIntFunction<T> affectedCount) {
+        try {
+            T result = action.get();
+            recordSuccessAfterCommit(operation, rollbackCode, affectedCount.applyAsInt(result));
+            return result;
+        } catch (BusinessException exception) {
+            if (exception.errorCode() == ApiErrorCode.MEMORY_CONTENT_REJECTED
+                    || exception.errorCode() == ApiErrorCode.MEMORY_NOT_FOUND) {
+                metrics.rejected(operation, exception.errorCode());
+            } else {
+                metrics.failure(operation, exception.errorCode());
+            }
+            throw exception;
+        } catch (RuntimeException exception) {
+            metrics.failure(operation, ApiErrorCode.INTERNAL_SERVER_ERROR);
+            throw exception;
+        }
+    }
+
+    private void recordSuccessAfterCommit(String operation, ApiErrorCode rollbackCode,
+                                          int affectedCount) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            metrics.success(operation, affectedCount);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            private boolean committed;
+
+            @Override
+            public void afterCommit() {
+                committed = true;
+                metrics.success(operation, affectedCount);
+            }
+
+            @Override
+            public void afterCompletion(int status) {
+                if (!committed && status != STATUS_COMMITTED) {
+                    metrics.failure(operation, rollbackCode);
+                }
+            }
+        });
     }
 
     public record EditResult(String memoryId, long version) {}
