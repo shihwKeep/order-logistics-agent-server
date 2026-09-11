@@ -67,4 +67,3 @@ class DeterministicExplicitMemoryCandidateParserTest {
         )).isEmpty();
     }
 }
-

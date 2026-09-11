@@ -43,4 +43,3 @@ public class DeterministicExplicitMemoryCandidateParser {
                 : Optional.empty();
     }
 }
-
