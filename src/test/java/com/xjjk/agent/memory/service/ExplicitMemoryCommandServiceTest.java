@@ -17,6 +17,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -59,6 +61,41 @@ class ExplicitMemoryCommandServiceTest {
                 .isEqualTo(new ExplicitMemoryCommandResult(
                         true, true, "好的，已记住：用户偏好简洁回答", "memory-1"));
         assertThat(operationCount("explicit_save", "success", "NONE")).isEqualTo(1.0);
+    }
+
+    @Test
+    void savesSupportedPermanentPreferredNameWithoutDependingOnModelWording() {
+        String message = "请永久记住：叫我老师。";
+        ExplicitMemoryCandidateValidator strictValidator = new ExplicitMemoryCandidateValidator(
+                new MemorySensitiveContentPolicy(
+                        new com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer()),
+                512,
+                512
+        );
+        ExplicitMemoryCommandService strictService = new ExplicitMemoryCommandService(
+                properties(true), new ExplicitMemoryCommandDetector(512),
+                new MemorySensitiveContentPolicy(
+                        new com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer()),
+                extractor, strictValidator, writer, new UserMemoryMetrics(meterRegistry));
+        when(extractor.extract(
+                new ExplicitMemoryCommandDetector.CommandText("叫我老师", true),
+                message
+        )).thenReturn(new ExplicitMemoryCandidate(
+                MemoryCategory.PROFILE_PREFERRED_NAME,
+                "profile.preferred_name",
+                "称呼用户为老师",
+                message,
+                MemoryRetentionType.PERMANENT
+        ));
+        when(writer.save(eq(turn()), any())).thenReturn(
+                new ExplicitMemoryWriteService.SaveResult("memory-1", "用户希望被称为老师")
+        );
+
+        ExplicitMemoryCommandResult result = strictService.handle(turn(), message);
+
+        assertThat(result.handled()).isTrue();
+        assertThat(result.saved()).isTrue();
+        assertThat(result.assistantText()).isEqualTo("好的，已记住：用户希望被称为老师");
     }
 
     @Test
