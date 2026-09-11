@@ -19,6 +19,8 @@ import com.xjjk.agent.chat.stream.ChatSseSession;
 import com.xjjk.agent.chat.stream.ChatStreamControl;
 import com.xjjk.agent.customer.service.CustomerOrderQueryService;
 import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.memory.domain.ExplicitMemoryCommandResult;
+import com.xjjk.agent.memory.service.ExplicitMemoryCommandService;
 import com.xjjk.agent.order.service.OrderQueryGateway;
 import com.xjjk.agent.order.tool.OrderToolAvailability;
 import com.xjjk.agent.tool.ToolUiResult;
@@ -162,6 +164,10 @@ class ChatTurnRunnerBusinessQueryTest {
     }
 
     private ChatTurnRunner runner() {
+        ExplicitMemoryCommandService memoryService =
+                org.mockito.Mockito.mock(ExplicitMemoryCommandService.class);
+        when(memoryService.handle(any(), anyString()))
+                .thenReturn(ExplicitMemoryCommandResult.notHandled());
         ChatActionDispatcher dispatcher = new ChatActionDispatcher(
                 orderGateway,
                 customerOrderQueryService,
@@ -176,7 +182,8 @@ class ChatTurnRunnerBusinessQueryTest {
                 resultRecorder,
                 dispatcher,
                 planner,
-                new FreshBusinessResultGate());
+                new FreshBusinessResultGate(),
+                memoryService);
     }
 
     private ChatTurnContext turn(

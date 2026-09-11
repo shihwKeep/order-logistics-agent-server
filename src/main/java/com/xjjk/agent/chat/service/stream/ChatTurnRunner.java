@@ -18,6 +18,8 @@ import com.xjjk.agent.chat.stream.ChatStreamControl;
 import com.xjjk.agent.chat.stream.ChatStreamError;
 import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.memory.domain.ExplicitMemoryCommandResult;
+import com.xjjk.agent.memory.service.ExplicitMemoryCommandService;
 import com.xjjk.agent.tool.AgentToolRequestContext;
 import com.xjjk.agent.tool.ToolCallGuard;
 import com.xjjk.agent.tool.ToolUiResult;
@@ -49,6 +51,7 @@ public class ChatTurnRunner {
     private final ChatActionDispatcher actionDispatcher;
     private final BusinessQueryPlanner businessQueryPlanner;
     private final FreshBusinessResultGate freshBusinessResultGate;
+    private final ExplicitMemoryCommandService explicitMemoryCommandService;
 
     public void run(
             ChatStreamRequest request,
@@ -113,6 +116,22 @@ public class ChatTurnRunner {
 
         // 第二步：先把正式 conversationId/requestId 告知前端，后续事件都可据此关联本轮请求。
         session.session(execution.turn.conversationId(), execution.requestId);
+
+        if (request.action() == null) {
+            ExplicitMemoryCommandResult memory = explicitMemoryCommandService.handle(
+                    execution.turn, request.message());
+            if (memory.handled()) {
+                session.generating();
+                execution.content.append(memory.assistantText());
+                session.delta(memory.assistantText());
+                execution.metrics.markFirstDeltaSent();
+                execution.finishReason = memory.saved()
+                        ? "MEMORY_SAVED" : "MEMORY_REJECTED";
+                execution.status = MessageStatus.SUCCESS;
+                execution.error = null;
+                return;
+            }
+        }
 
         if (request.action() != null) {
             executeAction(request, identity, session, execution);
