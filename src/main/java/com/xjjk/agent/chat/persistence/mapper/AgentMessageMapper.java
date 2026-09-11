@@ -37,6 +37,41 @@ public interface AgentMessageMapper
             @Param("messageId") String messageId
     );
 
+    @Select("""
+        SELECT * FROM agent_message
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND conversation_id = #{conversationId}
+          AND request_id = #{requestId}
+          AND message_id = #{messageId}
+          AND message_sequence = #{messageSequence}
+          AND role = 'USER' AND status = 'SUCCESS'
+        LIMIT 1
+        """)
+    AgentMessageEntity selectOwnedSuccessfulUserMessage(
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("conversationId") String conversationId,
+            @Param("requestId") String requestId,
+            @Param("messageId") String messageId,
+            @Param("messageSequence") long messageSequence);
+
+    @Select("""
+        SELECT content FROM agent_message
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND conversation_id = #{conversationId}
+          AND message_sequence < #{beforeSequence}
+          AND role = 'USER' AND status = 'SUCCESS'
+        ORDER BY message_sequence DESC
+        LIMIT 1
+        """)
+    String selectPreviousSuccessfulUserContent(
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("conversationId") String conversationId,
+            @Param("beforeSequence") long beforeSequence);
+
     /**
      * 读取指定会话最早的用户问题，用于首次生成稳定会话标题。
      */
