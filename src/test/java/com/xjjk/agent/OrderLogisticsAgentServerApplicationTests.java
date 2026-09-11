@@ -8,6 +8,7 @@ import com.xjjk.agent.chat.persistence.mapper.AgentSummaryTaskMapper;
 import com.xjjk.agent.chat.result.AgentMessageResultMapper;
 import com.xjjk.agent.chat.service.memory.ChatHistorySnapshotProvider;
 import com.xjjk.agent.memory.persistence.mapper.MemoryOutboxMapper;
+import com.xjjk.agent.memory.persistence.mapper.MemoryExtractionTaskMapper;
 import com.xjjk.agent.memory.persistence.mapper.MemorySuppressionMapper;
 import com.xjjk.agent.memory.persistence.mapper.UserMemoryMapper;
 import com.xjjk.agent.memory.persistence.mapper.UserMemorySettingMapper;
@@ -55,6 +56,9 @@ class OrderLogisticsAgentServerApplicationTests {
 
     @MockitoBean
     private MemoryOutboxMapper memoryOutboxMapper;
+
+    @MockitoBean
+    private MemoryExtractionTaskMapper memoryExtractionTaskMapper;
 
     @Test
     void contextLoads() {
