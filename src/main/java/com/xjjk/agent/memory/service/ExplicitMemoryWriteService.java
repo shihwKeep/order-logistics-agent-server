@@ -20,6 +20,7 @@ import com.xjjk.agent.memory.persistence.mapper.MemorySuppressionMapper;
 import com.xjjk.agent.memory.persistence.mapper.UserMemoryMapper;
 import com.xjjk.agent.memory.persistence.mapper.UserMemorySettingMapper;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -41,6 +42,7 @@ public class ExplicitMemoryWriteService {
     private final UserMemoryProperties properties;
     private final Clock clock;
 
+    @Autowired
     public ExplicitMemoryWriteService(
             UserMemorySettingMapper settingMapper,
             UserMemoryMapper memoryMapper,

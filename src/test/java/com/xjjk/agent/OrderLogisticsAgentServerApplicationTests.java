@@ -7,6 +7,10 @@ import com.xjjk.agent.chat.persistence.mapper.AgentConversationSummaryMapper;
 import com.xjjk.agent.chat.persistence.mapper.AgentSummaryTaskMapper;
 import com.xjjk.agent.chat.result.AgentMessageResultMapper;
 import com.xjjk.agent.chat.service.memory.ChatHistorySnapshotProvider;
+import com.xjjk.agent.memory.persistence.mapper.MemoryOutboxMapper;
+import com.xjjk.agent.memory.persistence.mapper.MemorySuppressionMapper;
+import com.xjjk.agent.memory.persistence.mapper.UserMemoryMapper;
+import com.xjjk.agent.memory.persistence.mapper.UserMemorySettingMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -39,6 +43,18 @@ class OrderLogisticsAgentServerApplicationTests {
 
     @MockitoBean
     private AgentMessageResultMapper messageResultMapper;
+
+    @MockitoBean
+    private UserMemorySettingMapper userMemorySettingMapper;
+
+    @MockitoBean
+    private UserMemoryMapper userMemoryMapper;
+
+    @MockitoBean
+    private MemorySuppressionMapper memorySuppressionMapper;
+
+    @MockitoBean
+    private MemoryOutboxMapper memoryOutboxMapper;
 
     @Test
     void contextLoads() {
