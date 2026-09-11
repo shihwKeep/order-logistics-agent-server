@@ -3,6 +3,7 @@ package com.xjjk.agent.memory.service;
 import com.xjjk.agent.chat.persistence.entity.AgentMessageEntity;
 import com.xjjk.agent.chat.persistence.mapper.AgentMessageMapper;
 import com.xjjk.agent.memory.domain.ImplicitMemoryCandidate;
+import com.xjjk.agent.memory.domain.ImplicitMemoryExtractionBatch;
 import com.xjjk.agent.memory.domain.MemoryExtractionTaskClaim;
 import com.xjjk.agent.memory.observation.UserMemoryMetrics;
 import lombok.extern.slf4j.Slf4j;
@@ -62,11 +63,14 @@ public class ImplicitMemoryTaskWorker {
                     // 单个候选按封闭策略丢弃，不记录正文或模型输出。
                 }
             }
-            int saved = commitService.commit(claim, List.copyOf(accepted));
+            ImplicitMemoryExtractionBatch batch =
+                    ImplicitMemoryExtractionBatch.observed(extracted.size(), accepted);
+            int saved = commitService.commit(claim, batch);
             metrics.success("auto_extract", saved);
         } catch (ImplicitMemoryExtractionException error) {
             if (error.code() == ImplicitMemoryExtractionException.Code.MODEL_PROTOCOL_ERROR) {
-                int saved = commitService.commit(claim, List.of());
+                int saved = commitService.commit(
+                        claim, ImplicitMemoryExtractionBatch.protocolRejected());
                 metrics.success("auto_extract", saved);
             } else {
                 taskState.scheduleRetry(claim, error.code().name());

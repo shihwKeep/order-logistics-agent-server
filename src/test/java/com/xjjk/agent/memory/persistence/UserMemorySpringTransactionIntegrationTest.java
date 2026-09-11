@@ -5,6 +5,7 @@ import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.memory.domain.MemoryRetentionType;
 import com.xjjk.agent.memory.domain.ImplicitMemoryCandidate;
+import com.xjjk.agent.memory.domain.ImplicitMemoryExtractionBatch;
 import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.domain.MemoryExtractionTaskClaim;
 import com.xjjk.agent.memory.persistence.entity.MemoryOutboxEntity;
@@ -34,6 +35,7 @@ import static org.mockito.Mockito.doReturn;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @SpringBootTest(properties = {
         "spring.autoconfigure.exclude=",
@@ -119,11 +121,12 @@ class UserMemorySpringTransactionIntegrationTest {
                 "60000000-0000-0000-0000-000000000010", "integration-node",
                 LocalDateTime.now().plusMinutes(1));
 
-        int saved = implicitMemoryCommitService.commit(claim, List.of(
-                new ImplicitMemoryCandidate(
+        int saved = implicitMemoryCommitService.commit(claim,
+                ImplicitMemoryExtractionBatch.observed(1, List.of(
+                        new ImplicitMemoryCandidate(
                         MemoryCategory.PREFERENCE_LANGUAGE,
                         "preference.language", "用户偏好中文回答",
-                        "希望使用中文回答", 0.95)));
+                        "希望使用中文回答", 0.95))));
 
         assertThat(saved).isEqualTo(1);
         assertThat(jdbc.queryForObject("""
@@ -137,10 +140,17 @@ class UserMemorySpringTransactionIntegrationTest {
                 WHERE tenant_id = 1 AND user_id = 2 AND memory_generation = 7
                   AND operation = 'UPSERT' AND status = 'PENDING'
                 """, Long.class)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("""
-                SELECT status FROM agent_memory_extraction_task
+        Map<String, Object> task = jdbc.queryForMap("""
+                SELECT status, result_code, model_candidate_count,
+                       accepted_candidate_count, saved_memory_count
+                FROM agent_memory_extraction_task
                 WHERE task_id = '50000000-0000-0000-0000-000000000010'
-                """, String.class)).isEqualTo("DONE");
+                """);
+        assertThat(task.get("status")).isEqualTo("DONE");
+        assertThat(task.get("result_code")).isEqualTo("SAVED");
+        assertThat(((Number) task.get("model_candidate_count")).intValue()).isEqualTo(1);
+        assertThat(((Number) task.get("accepted_candidate_count")).intValue()).isEqualTo(1);
+        assertThat(((Number) task.get("saved_memory_count")).intValue()).isEqualTo(1);
     }
 
     @Test

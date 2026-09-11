@@ -2,6 +2,8 @@ package com.xjjk.agent.memory.service;
 
 import com.xjjk.agent.memory.config.ImplicitMemoryProperties;
 import com.xjjk.agent.memory.domain.ImplicitMemoryCandidate;
+import com.xjjk.agent.memory.domain.ImplicitMemoryExtractionBatch;
+import com.xjjk.agent.memory.domain.MemoryExtractionResultCode;
 import com.xjjk.agent.memory.domain.MemoryExtractionTaskClaim;
 import com.xjjk.agent.memory.domain.MemoryOutboxOperation;
 import com.xjjk.agent.memory.domain.MemoryOutboxStatus;
@@ -80,9 +82,9 @@ public class ImplicitMemoryCommitService {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public int commit(MemoryExtractionTaskClaim claim, List<ImplicitMemoryCandidate> candidates) {
+    public int commit(MemoryExtractionTaskClaim claim, ImplicitMemoryExtractionBatch batch) {
         Objects.requireNonNull(claim, "claim");
-        Objects.requireNonNull(candidates, "candidates");
+        Objects.requireNonNull(batch, "batch");
         LocalDateTime now = now();
         MemoryExtractionTaskEntity task = taskMapper.selectLeaseForUpdate(
                 claim.id(), claim.leaseToken(), claim.lockedBy());
@@ -103,7 +105,7 @@ public class ImplicitMemoryCommitService {
         }
 
         int saved = 0;
-        for (ImplicitMemoryCandidate candidate : deduplicate(candidates)) {
+        for (ImplicitMemoryCandidate candidate : deduplicate(batch.acceptedCandidates())) {
             if (suppressionMapper.existsOwnedActive(
                     claim.tenantId(), claim.userId(), claim.memoryGeneration(),
                     candidate.canonicalKey())) {
@@ -135,7 +137,10 @@ public class ImplicitMemoryCommitService {
             insertOutbox(claim, memoryId, version, MemoryOutboxOperation.UPSERT, now);
             saved++;
         }
-        if (taskMapper.completeLease(claim.id(), claim.leaseToken(), claim.lockedBy(), now) != 1) {
+        MemoryExtractionResultCode resultCode = batch.resultCodeFor(saved);
+        if (taskMapper.completeLease(
+                claim.id(), claim.leaseToken(), claim.lockedBy(), resultCode.name(),
+                batch.modelCandidateCount(), batch.acceptedCandidates().size(), saved, now) != 1) {
             throw new IllegalStateException("隐式记忆任务完成失败");
         }
         return saved;

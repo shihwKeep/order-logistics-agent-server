@@ -3,6 +3,7 @@ package com.xjjk.agent.memory.service;
 import com.xjjk.agent.chat.persistence.entity.AgentMessageEntity;
 import com.xjjk.agent.chat.persistence.mapper.AgentMessageMapper;
 import com.xjjk.agent.memory.domain.ImplicitMemoryCandidate;
+import com.xjjk.agent.memory.domain.ImplicitMemoryExtractionBatch;
 import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.domain.MemoryExtractionTaskClaim;
 import com.xjjk.agent.memory.observation.UserMemoryMetrics;
@@ -45,13 +46,54 @@ class ImplicitMemoryTaskWorkerTest {
         when(validator.validate(safe, source.getContent())).thenReturn(safe);
         when(validator.validate(rejected, source.getContent()))
                 .thenThrow(new IllegalArgumentException("MEMORY_CONTENT_REJECTED"));
-        when(commitService.commit(claim, List.of(safe))).thenReturn(1);
+        ImplicitMemoryExtractionBatch batch =
+                ImplicitMemoryExtractionBatch.observed(2, List.of(safe));
+        when(commitService.commit(claim, batch)).thenReturn(1);
 
         worker().process(claim);
 
-        verify(commitService).commit(claim, List.of(safe));
+        verify(commitService).commit(claim, batch);
         verify(metrics).success("auto_extract", 1);
         verify(taskState, never()).scheduleRetry(any(), any());
+    }
+
+    @Test
+    void recordsModelEmptyWhenExtractionReturnsNoCandidates() {
+        when(messageMapper.selectOwnedSuccessfulUserMessage(
+                1L, 2L, "conversation-1", "request-1", "user-1", 17L))
+                .thenReturn(source("今天心情不错"));
+        when(modelClient.extract(any())).thenReturn(List.of());
+        ImplicitMemoryExtractionBatch batch =
+                ImplicitMemoryExtractionBatch.observed(0, List.of());
+        when(commitService.commit(claim, batch)).thenReturn(0);
+
+        worker().process(claim);
+
+        verify(commitService).commit(claim, batch);
+        verify(metrics).success("auto_extract", 0);
+    }
+
+    @Test
+    void recordsAllRejectedWhenEveryModelCandidateFailsValidation() {
+        AgentMessageEntity source = source("我是Java开发");
+        when(messageMapper.selectOwnedSuccessfulUserMessage(
+                1L, 2L, "conversation-1", "request-1", "user-1", 17L))
+                .thenReturn(source);
+        ImplicitMemoryCandidate first = candidate("work.common_scope", 0.40);
+        ImplicitMemoryCandidate second = candidate("preference.answer_style", 0.30);
+        when(modelClient.extract(any())).thenReturn(List.of(first, second));
+        when(validator.validate(first, source.getContent()))
+                .thenThrow(new IllegalArgumentException("MEMORY_CONTENT_REJECTED"));
+        when(validator.validate(second, source.getContent()))
+                .thenThrow(new IllegalArgumentException("MEMORY_CONTENT_REJECTED"));
+        ImplicitMemoryExtractionBatch batch =
+                ImplicitMemoryExtractionBatch.observed(2, List.of());
+        when(commitService.commit(claim, batch)).thenReturn(0);
+
+        worker().process(claim);
+
+        verify(commitService).commit(claim, batch);
+        verify(metrics).success("auto_extract", 0);
     }
 
     @Test
@@ -90,7 +132,7 @@ class ImplicitMemoryTaskWorkerTest {
 
         worker().process(claim);
 
-        verify(commitService).commit(claim, List.of());
+        verify(commitService).commit(claim, ImplicitMemoryExtractionBatch.protocolRejected());
         verify(metrics).success("auto_extract", 0);
         verify(taskState, never()).scheduleRetry(any(), any());
     }

@@ -2,6 +2,7 @@ package com.xjjk.agent.memory.service;
 
 import com.xjjk.agent.memory.config.ImplicitMemoryProperties;
 import com.xjjk.agent.memory.domain.ImplicitMemoryCandidate;
+import com.xjjk.agent.memory.domain.ImplicitMemoryExtractionBatch;
 import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.domain.MemoryExtractionTaskClaim;
 import com.xjjk.agent.memory.persistence.entity.MemoryExtractionTaskEntity;
@@ -30,6 +31,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -55,9 +57,12 @@ class ImplicitMemoryCommitServiceTest {
                 .thenReturn(null);
         when(memoryMapper.insert(any(UserMemoryEntity.class))).thenReturn(1);
         when(outboxMapper.insert(any(MemoryOutboxEntity.class))).thenReturn(1);
-        when(taskMapper.completeLease(eq(10L), eq("lease-1"), eq("node-1"), any())).thenReturn(1);
+        when(taskMapper.completeLease(
+                eq(10L), eq("lease-1"), eq("node-1"),
+                eq("SAVED"), eq(1), eq(1), eq(1), any())).thenReturn(1);
 
-        int saved = service().commit(claim, List.of(candidate(0.91)));
+        int saved = service().commit(claim,
+                ImplicitMemoryExtractionBatch.observed(1, List.of(candidate(0.91))));
 
         assertThat(saved).isEqualTo(1);
         ArgumentCaptor<UserMemoryEntity> memory = ArgumentCaptor.forClass(UserMemoryEntity.class);
@@ -71,7 +76,9 @@ class ImplicitMemoryCommitServiceTest {
             assertThat(row.getSourceConversationId()).isEqualTo("conversation-1");
             assertThat(row.getSourceMessageSequence()).isEqualTo(17L);
         });
-        verify(taskMapper).completeLease(eq(10L), eq("lease-1"), eq("node-1"), any());
+        verify(taskMapper).completeLease(
+                eq(10L), eq("lease-1"), eq("node-1"),
+                eq("SAVED"), eq(1), eq(1), eq(1), any());
     }
 
     @Test
@@ -83,13 +90,20 @@ class ImplicitMemoryCommitServiceTest {
                 .thenReturn(false, true);
         when(memoryMapper.selectActiveByKeyForUpdate(1L, 2L, 4L, "work.common_scope"))
                 .thenReturn(explicit);
-        when(taskMapper.completeLease(eq(10L), eq("lease-1"), eq("node-1"), any())).thenReturn(1);
+        when(taskMapper.completeLease(
+                eq(10L), eq("lease-1"), eq("node-1"),
+                eq("NO_CHANGE"), eq(1), eq(1), eq(0), any())).thenReturn(1);
 
-        assertThat(service().commit(claim, List.of(candidate(0.91)))).isZero();
-        assertThat(service().commit(claim, List.of(candidate(0.91)))).isZero();
+        assertThat(service().commit(claim,
+                ImplicitMemoryExtractionBatch.observed(1, List.of(candidate(0.91))))).isZero();
+        assertThat(service().commit(claim,
+                ImplicitMemoryExtractionBatch.observed(1, List.of(candidate(0.91))))).isZero();
 
         verify(memoryMapper, never()).insert(any(UserMemoryEntity.class));
         verify(outboxMapper, never()).insert(any(MemoryOutboxEntity.class));
+        verify(taskMapper, times(2)).completeLease(
+                eq(10L), eq("lease-1"), eq("node-1"),
+                eq("NO_CHANGE"), eq(1), eq(1), eq(0), any());
     }
 
     @Test
@@ -103,7 +117,8 @@ class ImplicitMemoryCommitServiceTest {
                 eq("STALE_GENERATION"), any()))
                 .thenReturn(1);
 
-        assertThat(service().commit(claim, List.of(candidate(0.91)))).isZero();
+        assertThat(service().commit(claim,
+                ImplicitMemoryExtractionBatch.observed(1, List.of(candidate(0.91))))).isZero();
 
         verify(memoryMapper, never()).insert(any(UserMemoryEntity.class));
         verify(taskMapper).cancelLease(

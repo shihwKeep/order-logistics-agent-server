@@ -45,6 +45,14 @@ public class MemoryExtractionTaskEntity {
     private LocalDateTime lockedUntil;
     @TableField("last_error_code")
     private String lastErrorCode;
+    @TableField("result_code")
+    private String resultCode;
+    @TableField("model_candidate_count")
+    private Integer modelCandidateCount;
+    @TableField("accepted_candidate_count")
+    private Integer acceptedCandidateCount;
+    @TableField("saved_memory_count")
+    private Integer savedMemoryCount;
     @TableField("created_at")
     private LocalDateTime createdAt;
     @TableField("updated_at")

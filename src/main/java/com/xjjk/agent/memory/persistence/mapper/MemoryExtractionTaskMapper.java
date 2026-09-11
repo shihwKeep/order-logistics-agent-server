@@ -52,7 +52,12 @@ public interface MemoryExtractionTaskMapper extends BaseMapper<MemoryExtractionT
     @Update("""
         UPDATE agent_memory_extraction_task
         SET status = 'DONE', lease_token = NULL, locked_by = NULL,
-            locked_until = NULL, last_error_code = NULL, updated_at = #{now}
+            locked_until = NULL, last_error_code = NULL,
+            result_code = #{resultCode},
+            model_candidate_count = #{modelCandidateCount},
+            accepted_candidate_count = #{acceptedCandidateCount},
+            saved_memory_count = #{savedMemoryCount},
+            updated_at = #{now}
         WHERE id = #{id} AND status = 'PROCESSING'
           AND lease_token = #{leaseToken} AND locked_by = #{lockedBy}
         """)
@@ -60,6 +65,10 @@ public interface MemoryExtractionTaskMapper extends BaseMapper<MemoryExtractionT
             @Param("id") long id,
             @Param("leaseToken") String leaseToken,
             @Param("lockedBy") String lockedBy,
+            @Param("resultCode") String resultCode,
+            @Param("modelCandidateCount") int modelCandidateCount,
+            @Param("acceptedCandidateCount") int acceptedCandidateCount,
+            @Param("savedMemoryCount") int savedMemoryCount,
             @Param("now") LocalDateTime now);
 
     @Update("""
