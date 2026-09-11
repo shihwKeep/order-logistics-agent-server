@@ -2,8 +2,10 @@ package com.xjjk.agent.chat.api.controller;
 
 import com.xjjk.agent.chat.api.dto.ChatMessagePageResponse;
 import com.xjjk.agent.chat.api.dto.ConversationResponse;
+import com.xjjk.agent.chat.api.dto.ConversationPageResponse;
 import com.xjjk.agent.chat.persistence.entity.AgentConversationEntity;
 import com.xjjk.agent.chat.service.conversation.AgentConversationService;
+import com.xjjk.agent.chat.service.conversation.AgentConversationListService;
 import com.xjjk.agent.chat.service.conversation.AgentMessageQueryService;
 import com.xjjk.agent.common.api.ApiResponse;
 import com.xjjk.agent.identity.domain.AgentIdentity;
@@ -24,8 +26,21 @@ public class AgentConversationController {
 
     private final AgentConversationService conversationService;
 
+    private final AgentConversationListService conversationListService;
+
     /** 历史消息查询服务。 */
     private final AgentMessageQueryService messageQueryService;
+
+    /** 查询当前用户最近活动的非空会话。 */
+    @GetMapping
+    public ApiResponse<ConversationPageResponse> list(
+            @CurrentAgentIdentity AgentIdentity identity,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(defaultValue = "10") int pageSize
+    ) {
+        return ApiResponse.success(
+                conversationListService.list(identity, cursor, pageSize));
+    }
 
     /**
      * 创建当前用户的新会话。

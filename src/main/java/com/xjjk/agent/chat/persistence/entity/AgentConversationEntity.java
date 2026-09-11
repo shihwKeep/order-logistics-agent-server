@@ -43,7 +43,7 @@ public class AgentConversationEntity {
     @TableField("org_id")
     private Long orgId;
 
-    /** 会话标题，创建时默认使用“新对话”。 */
+    /** 会话标题，创建时默认使用“新会话”。 */
     @TableField("title")
     private String title;
 
