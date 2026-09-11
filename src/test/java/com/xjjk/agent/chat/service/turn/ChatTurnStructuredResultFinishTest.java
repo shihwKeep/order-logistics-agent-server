@@ -15,6 +15,7 @@ import com.xjjk.agent.chat.result.PendingMessageResult;
 import com.xjjk.agent.chat.service.conversation.ConversationTitleService;
 import com.xjjk.agent.chat.service.summary.ChatSummaryTaskScheduler;
 import com.xjjk.agent.common.exception.BusinessException;
+import com.xjjk.agent.memory.service.ImplicitMemoryTaskScheduler;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,6 +55,8 @@ class ChatTurnStructuredResultFinishTest {
     private ChatSummaryTaskScheduler summaryTaskScheduler;
     @Mock
     private ConversationTitleService conversationTitleService;
+    @Mock
+    private ImplicitMemoryTaskScheduler implicitMemoryTaskScheduler;
 
     private AgentConversationEntity conversation;
     private ChatTurnContext turn;
@@ -86,7 +89,7 @@ class ChatTurnStructuredResultFinishTest {
         service = new ChatTurnFinishService(
                 conversationMapper, messageMapper, resultMapper,
                 eventPublisher, summaryTaskScheduler,
-                conversationTitleService);
+                conversationTitleService, implicitMemoryTaskScheduler);
     }
 
     @Test
@@ -122,6 +125,7 @@ class ChatTurnStructuredResultFinishTest {
         order.verify(conversationMapper).update(any(), any(Wrapper.class));
         verify(conversationTitleService).assignFromEarliestQuestion(
                 1, 10567, "conversation-1");
+        verify(implicitMemoryTaskScheduler).request(turn);
     }
 
     @Test
@@ -143,6 +147,20 @@ class ChatTurnStructuredResultFinishTest {
         verify(eventPublisher, never()).publishEvent(any());
         verify(conversationTitleService, never())
                 .assignFromEarliestQuestion(anyLong(), anyLong(), any(String.class));
+        verify(implicitMemoryTaskScheduler, never()).request(any());
+    }
+
+    @Test
+    void explicitMemoryCommandDoesNotScheduleImplicitExtraction() {
+        when(conversationMapper.selectOne(any(Wrapper.class))).thenReturn(conversation);
+        when(messageMapper.update(any(), any(Wrapper.class))).thenReturn(1);
+        when(conversationMapper.update(any(), any(Wrapper.class))).thenReturn(1);
+
+        assertThat(service.finish(
+                turn, MessageStatus.SUCCESS, "好的，已记住", "MEMORY_SAVED", null,
+                List.of())).isTrue();
+
+        verify(implicitMemoryTaskScheduler, never()).request(any());
     }
 
     private PendingMessageResult pendingResult() {

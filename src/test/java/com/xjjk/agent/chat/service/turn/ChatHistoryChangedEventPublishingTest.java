@@ -15,6 +15,7 @@ import com.xjjk.agent.chat.service.memory.ChatHistoryChangedEvent;
 import com.xjjk.agent.chat.service.summary.ChatSummaryTaskScheduler;
 import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.memory.service.ImplicitMemoryTaskScheduler;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,6 +57,9 @@ class ChatHistoryChangedEventPublishingTest {
 
     @Mock
     private ConversationTitleService conversationTitleService;
+
+    @Mock
+    private ImplicitMemoryTaskScheduler implicitMemoryTaskScheduler;
 
     private AgentConversationEntity conversation;
     private ChatTurnContext turn;
@@ -116,7 +120,8 @@ class ChatHistoryChangedEventPublishingTest {
                 resultMapper,
                 eventPublisher,
                 summaryTaskScheduler,
-                conversationTitleService
+                conversationTitleService,
+                implicitMemoryTaskScheduler
         );
 
         assertThat(service.finish(
@@ -136,6 +141,7 @@ class ChatHistoryChangedEventPublishingTest {
         );
         verify(conversationTitleService).assignFromEarliestQuestion(
                 1, 10567, "conversation-1");
+        verify(implicitMemoryTaskScheduler).request(turn);
         assertThat(event.getValue()).isEqualTo(
                 new ChatHistoryChangedEvent(
                         1, 10567, "conversation-1", 9, 18)
@@ -156,7 +162,8 @@ class ChatHistoryChangedEventPublishingTest {
                 resultMapper,
                 eventPublisher,
                 summaryTaskScheduler,
-                conversationTitleService
+                conversationTitleService,
+                implicitMemoryTaskScheduler
         );
 
         assertThatThrownBy(() -> service.finish(
@@ -175,6 +182,7 @@ class ChatHistoryChangedEventPublishingTest {
                 anyLong(),
                 anyLong()
         );
+        verify(implicitMemoryTaskScheduler, never()).request(any());
     }
 
     @Test

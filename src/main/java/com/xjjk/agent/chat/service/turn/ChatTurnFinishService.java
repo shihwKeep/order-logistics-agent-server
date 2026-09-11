@@ -16,6 +16,7 @@ import com.xjjk.agent.chat.service.memory.ChatHistoryChangedEvent;
 import com.xjjk.agent.chat.service.summary.ChatSummaryTaskScheduler;
 import com.xjjk.agent.common.api.ApiErrorCode;
 import com.xjjk.agent.common.exception.BusinessException;
+import com.xjjk.agent.memory.service.ImplicitMemoryTaskScheduler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -45,6 +46,7 @@ public class ChatTurnFinishService {
     private final ApplicationEventPublisher eventPublisher;
     private final ChatSummaryTaskScheduler summaryTaskScheduler;
     private final ConversationTitleService conversationTitleService;
+    private final ImplicitMemoryTaskScheduler implicitMemoryTaskScheduler;
 
     /**
      * 尝试结束本轮问答。
@@ -225,6 +227,10 @@ public class ChatTurnFinishService {
                 nextMemoryUntilSequence
         );
 
+        if (status == MessageStatus.SUCCESS && !isMemoryManagementFinish(finishReason)) {
+            implicitMemoryTaskScheduler.request(turn);
+        }
+
         // 回答消息和稳定历史游标已经在当前事务中更新完成，此处发布“历史已推进”事件。
         // 事件监听器使用 AFTER_COMMIT：只有本方法事务真正提交成功后才会收到事件；
         // 监听器随后把预热任务提交到专用线程池，异步重建并写入新版本 Redis 快照。
@@ -238,6 +244,10 @@ public class ChatTurnFinishService {
         ));
 
         return true;
+    }
+
+    private static boolean isMemoryManagementFinish(String finishReason) {
+        return StringUtils.hasText(finishReason) && finishReason.startsWith("MEMORY_");
     }
 
     private List<PendingMessageResult> validateResults(
