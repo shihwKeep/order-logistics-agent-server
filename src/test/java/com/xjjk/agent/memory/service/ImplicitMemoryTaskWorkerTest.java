@@ -5,6 +5,7 @@ import com.xjjk.agent.chat.persistence.mapper.AgentMessageMapper;
 import com.xjjk.agent.memory.domain.ImplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.domain.MemoryExtractionTaskClaim;
+import com.xjjk.agent.memory.observation.UserMemoryMetrics;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
@@ -24,6 +25,7 @@ class ImplicitMemoryTaskWorkerTest {
     private final ImplicitMemoryCandidateValidator validator = mock(ImplicitMemoryCandidateValidator.class);
     private final ImplicitMemoryCommitService commitService = mock(ImplicitMemoryCommitService.class);
     private final ImplicitMemoryTaskCommitService taskState = mock(ImplicitMemoryTaskCommitService.class);
+    private final UserMemoryMetrics metrics = mock(UserMemoryMetrics.class);
     private final MemoryExtractionTaskClaim claim = new MemoryExtractionTaskClaim(
             10L, "task-1", 1L, 2L, "conversation-1", "request-1", "user-1",
             17L, 4L, 0, "lease-1", "node-1",
@@ -43,10 +45,12 @@ class ImplicitMemoryTaskWorkerTest {
         when(validator.validate(safe, source.getContent())).thenReturn(safe);
         when(validator.validate(rejected, source.getContent()))
                 .thenThrow(new IllegalArgumentException("MEMORY_CONTENT_REJECTED"));
+        when(commitService.commit(claim, List.of(safe))).thenReturn(1);
 
         worker().process(claim);
 
         verify(commitService).commit(claim, List.of(safe));
+        verify(metrics).success("auto_extract", 1);
         verify(taskState, never()).scheduleRetry(any(), any());
     }
 
@@ -87,12 +91,13 @@ class ImplicitMemoryTaskWorkerTest {
         worker().process(claim);
 
         verify(commitService).commit(claim, List.of());
+        verify(metrics).success("auto_extract", 0);
         verify(taskState, never()).scheduleRetry(any(), any());
     }
 
     private ImplicitMemoryTaskWorker worker() {
         return new ImplicitMemoryTaskWorker(
-                messageMapper, modelClient, validator, commitService, taskState);
+                messageMapper, modelClient, validator, commitService, taskState, metrics);
     }
 
     private AgentMessageEntity source(String content) {

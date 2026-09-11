@@ -12,7 +12,8 @@ import java.util.Set;
 public class UserMemoryMetrics {
 
     private static final Set<String> OPERATIONS = Set.of(
-            "explicit_save", "edit", "delete", "clear_explicit", "clear_all");
+            "explicit_save", "edit", "delete", "clear_explicit", "clear_all",
+            "auto_extract", "expiry");
     private final MeterRegistry registry;
 
     public UserMemoryMetrics(MeterRegistry registry) {

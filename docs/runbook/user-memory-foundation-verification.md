@@ -2,13 +2,13 @@
 
 ## 范围
 
-本手册验证 Agent Server 第一阶段基础能力：显式记忆写入、用户可见记忆管理、记忆开关、世代清空和索引 Outbox。第一阶段不会消费 Outbox，也不会把记忆写入 Elasticsearch/Milvus 或注入聊天上下文。
+本手册验证 Agent Server 前两个阶段能力：显式记忆写入、用户可见记忆管理、记忆开关、世代清空、异步隐式记忆抽取、自动记忆过期和索引 Outbox。当前阶段仍不会消费 Outbox，也不会把记忆写入 Elasticsearch/Milvus 或注入聊天上下文。
 
 ## 准备
 
 1. 启动 MySQL 和 Agent Server 依赖服务。
 2. 在 Nacos 的 `order-logistics-agent-server.properties` 中配置 `agent.memory.*`，通过安全配置提供至少 32 个字符的 `agent.memory.cursor.secret`，并将 `agent.memory.enabled=true`。该密钥没有生产默认值，缺失时服务必须启动失败。不要在文档、命令历史或日志中填写真实 Token、密码或内部密钥。
-3. 启动 Agent Server，确认 Flyway 已成功执行 `V10__create_user_memory_foundation.sql`。
+3. 启动 Agent Server，确认 Flyway 已成功执行 `V10__create_user_memory_foundation.sql`、`V11__add_user_memory_master_switch.sql` 和 `V12__create_memory_extraction_task.sql`。
 4. 使用测试账号 `74680` 正常登录，由认证链路产生租户与用户身份；所有下列接口均不得提交 `tenantId` 或 `userId`。
 
 ## 验证步骤
@@ -37,6 +37,71 @@
    - 预期只包含标识、版本、操作、状态和租约字段，不包含记忆正文、密码或 Token。
 10. 检查 `agent.user.memory.operation` 与 `agent.user.memory.affected` 指标。
    - 预期只包含固定操作、结果和错误码标签，不含记忆正文、证据、用户或租户信息。
+
+## 隐式记忆抽取验证
+
+在 Nacos 中保留以下生产配置；可按容量调节线程池、批量和间隔，但不要把模型 Token 写入普通日志：
+
+```properties
+agent.memory.auto-extract.confidence-threshold=0.85
+agent.memory.auto-extract.expire-days=180
+agent.memory.auto-extract.max-candidates=3
+agent.memory.auto-extract.prompt-version=memory-auto-v1
+agent.memory.auto-extract.model=qwen-plus
+agent.memory.auto-extract.temperature=0.0
+agent.memory.auto-extract.timeout=10s
+agent.memory.auto-extract.model-executor.pool-size=2
+agent.memory.auto-extract.model-executor.queue-capacity=100
+agent.memory.auto-extract.worker.poll-interval=2s
+agent.memory.auto-extract.worker.recovery-interval=30s
+agent.memory.auto-extract.worker.claim-batch-size=10
+agent.memory.auto-extract.worker.lease-duration=60s
+agent.memory.auto-extract.worker.max-attempts=5
+agent.memory.auto-extract.worker.initial-backoff=2s
+agent.memory.auto-extract.worker.max-backoff=5m
+agent.memory.auto-extract.worker.executor.pool-size=2
+agent.memory.auto-extract.worker.executor.queue-capacity=100
+agent.memory.auto-extract.expiry.poll-interval=10m
+agent.memory.auto-extract.expiry.batch-size=100
+```
+
+1. 保持总开关和当前用户自动抽取开关为开启，创建新会话并正常提问：`我是一名 Java 开发，平时希望回答简洁一些。`。不要使用“请记住”，否则会进入显式记忆链路。
+2. 助手成功回答后等待一个轮询周期，检查任务表：
+
+```sql
+SELECT task_id, status, retry_count, last_error_code, created_at, updated_at
+FROM agent_memory_extraction_task
+WHERE tenant_id = 1 AND user_id = 74680
+ORDER BY id DESC
+LIMIT 10;
+```
+
+   - 预期每个成功普通问答最多登记一条任务，正常最终状态为 `DONE`。
+   - 暂时性失败进入 `RETRY`，达到最大次数进入 `DEAD`；错误字段只能是安全错误码，不得出现用户正文或供应商异常正文。
+3. 检查自动记忆：
+
+```sql
+SELECT memory_id, source_type, category, canonical_key, confidence,
+       visibility, retention_type, status, version, expires_at
+FROM agent_user_memory
+WHERE tenant_id = 1 AND user_id = 74680
+ORDER BY id DESC
+LIMIT 20;
+```
+
+   - 有稳定且符合策略的事实时，预期出现 `AUTO_EXTRACT / HIDDEN / NORMAL / ACTIVE`，默认 180 天后过期。
+   - 闲聊、敏感数据、一次性业务状态或置信度不足时，任务仍可正常 `DONE`，但不会新增记忆。
+   - “我的记忆”面板不得展示 `AUTO_EXTRACT / HIDDEN` 记录。
+4. 对同一 `canonical_key` 先保存显式记忆，再通过普通对话表达不同偏好。
+   - 预期显式 `USER_EXPLICIT` 继续有效，自动抽取不得覆盖它。
+5. 删除显式记忆后再次表达相同事实。
+   - 预期当前世代抑制记录阻止自动记忆重新生成。
+6. 关闭总开关或当前用户 `autoExtractEnabled` 后继续正常问答。
+   - 预期不登记新任务；恢复调度器会把尚未领取且已失效的旧任务改为 `CANCELLED`。
+7. 将一条隐藏自动记忆的 `expires_at` 调整到当前 UTC 时间之前，等待过期调度。
+   - 预期状态变为 `EXPIRED`，并在同一事务新增 `PENDING / DELETE` Outbox。
+
+注意：本阶段写出的 `PENDING` Outbox 尚无消费者，自动记忆还不会影响跨会话回答。需要完成下一阶段 ES/Milvus 索引消费与召回注入后，才能验证真正的跨会话个性化效果。
 
 ## 开关与故障验证
 

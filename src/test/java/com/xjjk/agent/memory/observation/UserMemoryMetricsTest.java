@@ -14,6 +14,8 @@ class UserMemoryMetricsTest {
         UserMemoryMetrics metrics = new UserMemoryMetrics(registry);
 
         metrics.success("explicit_save", 1);
+        metrics.success("auto_extract", 2);
+        metrics.success("expiry", 3);
         metrics.failure("delete", ApiErrorCode.MEMORY_NOT_FOUND);
 
         assertThat(registry.get("agent.user.memory.operation")
@@ -21,6 +23,10 @@ class UserMemoryMetricsTest {
                 .counter().count()).isEqualTo(1.0);
         assertThat(registry.get("agent.user.memory.affected")
                 .tag("operation", "explicit_save").summary().totalAmount()).isEqualTo(1.0);
+        assertThat(registry.get("agent.user.memory.affected")
+                .tag("operation", "auto_extract").summary().totalAmount()).isEqualTo(2.0);
+        assertThat(registry.get("agent.user.memory.affected")
+                .tag("operation", "expiry").summary().totalAmount()).isEqualTo(3.0);
         assertThat(registry.getMeters())
                 .flatExtracting(meter -> meter.getId().getTags())
                 .allSatisfy(tag -> {

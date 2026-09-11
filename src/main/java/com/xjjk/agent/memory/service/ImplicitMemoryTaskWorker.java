@@ -4,6 +4,7 @@ import com.xjjk.agent.chat.persistence.entity.AgentMessageEntity;
 import com.xjjk.agent.chat.persistence.mapper.AgentMessageMapper;
 import com.xjjk.agent.memory.domain.ImplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.MemoryExtractionTaskClaim;
+import com.xjjk.agent.memory.observation.UserMemoryMetrics;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -20,19 +21,22 @@ public class ImplicitMemoryTaskWorker {
     private final ImplicitMemoryCandidateValidator validator;
     private final ImplicitMemoryCommitService commitService;
     private final ImplicitMemoryTaskCommitService taskState;
+    private final UserMemoryMetrics metrics;
 
     public ImplicitMemoryTaskWorker(
             AgentMessageMapper messageMapper,
             ImplicitMemoryModelClient modelClient,
             ImplicitMemoryCandidateValidator validator,
             ImplicitMemoryCommitService commitService,
-            ImplicitMemoryTaskCommitService taskState
+            ImplicitMemoryTaskCommitService taskState,
+            UserMemoryMetrics metrics
     ) {
         this.messageMapper = Objects.requireNonNull(messageMapper, "messageMapper");
         this.modelClient = Objects.requireNonNull(modelClient, "modelClient");
         this.validator = Objects.requireNonNull(validator, "validator");
         this.commitService = Objects.requireNonNull(commitService, "commitService");
         this.taskState = Objects.requireNonNull(taskState, "taskState");
+        this.metrics = Objects.requireNonNull(metrics, "metrics");
     }
 
     public void process(MemoryExtractionTaskClaim claim) {
@@ -58,10 +62,12 @@ public class ImplicitMemoryTaskWorker {
                     // 单个候选按封闭策略丢弃，不记录正文或模型输出。
                 }
             }
-            commitService.commit(claim, List.copyOf(accepted));
+            int saved = commitService.commit(claim, List.copyOf(accepted));
+            metrics.success("auto_extract", saved);
         } catch (ImplicitMemoryExtractionException error) {
             if (error.code() == ImplicitMemoryExtractionException.Code.MODEL_PROTOCOL_ERROR) {
-                commitService.commit(claim, List.of());
+                int saved = commitService.commit(claim, List.of());
+                metrics.success("auto_extract", saved);
             } else {
                 taskState.scheduleRetry(claim, error.code().name());
             }

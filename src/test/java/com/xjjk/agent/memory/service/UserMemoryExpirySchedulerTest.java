@@ -2,6 +2,7 @@ package com.xjjk.agent.memory.service;
 
 import com.xjjk.agent.memory.config.ImplicitMemoryProperties;
 import com.xjjk.agent.memory.config.UserMemoryProperties;
+import com.xjjk.agent.memory.observation.UserMemoryMetrics;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -15,23 +16,27 @@ class UserMemoryExpirySchedulerTest {
     @Test
     void skipsExpiryWhenMemoryFeatureIsDisabled() {
         UserMemoryExpiryService service = mock(UserMemoryExpiryService.class);
+        UserMemoryMetrics metrics = mock(UserMemoryMetrics.class);
         UserMemoryExpiryScheduler scheduler = new UserMemoryExpiryScheduler(
-                service, memoryProperties(false), implicitProperties());
+                service, memoryProperties(false), implicitProperties(), metrics);
 
         scheduler.expire();
 
         verify(service, never()).expireBatch(100);
+        verify(metrics, never()).success("expiry", 0);
     }
 
     @Test
     void expiresConfiguredBatchWhenMemoryFeatureIsEnabled() {
         UserMemoryExpiryService service = mock(UserMemoryExpiryService.class);
+        UserMemoryMetrics metrics = mock(UserMemoryMetrics.class);
         UserMemoryExpiryScheduler scheduler = new UserMemoryExpiryScheduler(
-                service, memoryProperties(true), implicitProperties());
+                service, memoryProperties(true), implicitProperties(), metrics);
 
         scheduler.expire();
 
         verify(service).expireBatch(100);
+        verify(metrics).success("expiry", 0);
     }
 
     private static UserMemoryProperties memoryProperties(boolean enabled) {
