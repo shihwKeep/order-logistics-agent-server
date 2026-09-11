@@ -12,8 +12,10 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.sql.SQLException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Testcontainers(disabledWithoutDocker = true)
 class UserMemoryMySqlIntegrationTest {
@@ -144,6 +146,40 @@ class UserMemoryMySqlIntegrationTest {
                     "memory_id = '00000000-0000-0000-0000-000000000002'" )).isZero();
             assertThat(count(statement, "agent_memory_outbox",
                     "event_id = '10000000-0000-0000-0000-000000000002'" )).isZero();
+        }
+    }
+
+    @Test
+    void appliesExtractionTaskMigrationAndRejectsDuplicateOwnedRequest() throws Exception {
+        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    INSERT INTO agent_message (
+                        message_id, conversation_id, tenant_id, user_id, request_id,
+                        message_sequence, role, content, status, created_at, updated_at
+                    ) VALUES (
+                        '30000000-0000-0000-0000-000000000001',
+                        '20000000-0000-0000-0000-000000000001', 1, 2,
+                        '40000000-0000-0000-0000-000000000001', 1,
+                        'USER', '测试消息', 'SUCCESS', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)
+                    )
+                    """);
+            String insert = """
+                    INSERT INTO agent_memory_extraction_task (
+                        task_id, tenant_id, user_id, conversation_id, request_id,
+                        user_message_id, user_message_sequence, memory_generation,
+                        status, retry_count, next_run_at, created_at, updated_at
+                    ) VALUES (
+                        '%s', 1, 2, '20000000-0000-0000-0000-000000000001',
+                        '40000000-0000-0000-0000-000000000001',
+                        '30000000-0000-0000-0000-000000000001', 1, 7,
+                        'PENDING', 0, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)
+                    )
+                    """;
+            statement.executeUpdate(insert.formatted(
+                    "50000000-0000-0000-0000-000000000001"));
+            assertThatThrownBy(() -> statement.executeUpdate(insert.formatted(
+                    "50000000-0000-0000-0000-000000000002")))
+                    .isInstanceOf(SQLException.class);
         }
     }
 

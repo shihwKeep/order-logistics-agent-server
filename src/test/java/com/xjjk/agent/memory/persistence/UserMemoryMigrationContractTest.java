@@ -34,6 +34,21 @@ class UserMemoryMigrationContractTest {
                 .contains("AFTER memory_generation");
     }
 
+    @Test
+    void createsDurableImplicitMemoryExtractionTasks() throws IOException {
+        String sql = readMigration("/db/migration/V12__create_memory_extraction_task.sql");
+        assertThat(sql)
+                .contains("CREATE TABLE agent_memory_extraction_task")
+                .contains("user_message_id CHAR(36)")
+                .contains("user_message_sequence BIGINT NOT NULL")
+                .contains("memory_generation BIGINT NOT NULL")
+                .contains("UNIQUE KEY uk_memory_extraction_request")
+                .contains("KEY idx_memory_extraction_claim")
+                .contains("KEY idx_memory_extraction_lease")
+                .contains("CONSTRAINT chk_memory_extraction_status")
+                .doesNotContain("message_content", "candidate_content", "evidence_text");
+    }
+
     private String readMigration(String path) throws IOException {
         try (var input = getClass().getResourceAsStream(path)) {
             assertThat(input).isNotNull();
