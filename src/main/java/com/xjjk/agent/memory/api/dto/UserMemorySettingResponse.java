@@ -1,4 +1,7 @@
 package com.xjjk.agent.memory.api.dto;
 
-public record UserMemorySettingResponse(boolean autoExtractEnabled) {
+public record UserMemorySettingResponse(
+        boolean memoryEnabled,
+        boolean autoExtractEnabled
+) {
 }

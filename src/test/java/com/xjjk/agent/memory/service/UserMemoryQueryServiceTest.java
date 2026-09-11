@@ -13,7 +13,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -23,9 +26,13 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
 
 class UserMemoryQueryServiceTest {
 
+    private static final LocalDateTime NOW = LocalDateTime.parse("2026-09-11T08:00:00");
     private final UserMemoryMapper memoryMapper = mock(UserMemoryMapper.class);
     private final UserMemorySettingMapper settingMapper = mock(UserMemorySettingMapper.class);
     private final AgentIdentity identity = new AgentIdentity(2L, "account", "name", 3L, 1L);
@@ -36,12 +43,14 @@ class UserMemoryQueryServiceTest {
     void setUp() {
         cursorCodec = new UserMemoryPageCursorCodec(new UserMemoryCursorProperties(
                 "test-memory-cursor-secret-32-bytes-long"));
-        service = new UserMemoryQueryService(memoryMapper, settingMapper, cursorCodec, properties());
+        service = new UserMemoryQueryService(
+                memoryMapper, settingMapper, cursorCodec, properties(),
+                Clock.fixed(Instant.parse("2026-09-11T08:00:00Z"), ZoneOffset.UTC));
     }
 
     @Test
     void usesLimitPlusOneAndBuildsCursorFromLastReturnedRow() {
-        UserMemorySettingEntity setting = setting(7L, true);
+        UserMemorySettingEntity setting = setting(7L, true, true);
         when(settingMapper.selectOwned(1L, 2L)).thenReturn(setting);
         List<UserMemoryListRow> rows = new ArrayList<>();
         for (int i = 0; i < 11; i++) {
@@ -94,19 +103,50 @@ class UserMemoryQueryServiceTest {
     }
 
     @Test
-    void returnsConfiguredSettingDefaultWithoutCreatingRow() {
+    void returnsBothDefaultsWithoutCreatingASettingRow() {
         when(settingMapper.selectOwned(1L, 2L)).thenReturn(null);
-        assertThat(service.getSetting(identity).autoExtractEnabled()).isTrue();
+        assertThat(service.getSetting(identity))
+                .isEqualTo(new com.xjjk.agent.memory.api.dto.UserMemorySettingResponse(true, true));
         verify(settingMapper, never()).insertIfAbsent(
-                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong(),
-                org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean(),
-                org.mockito.ArgumentMatchers.any());
+                anyLong(), anyLong(), anyBoolean(), anyBoolean(), any());
     }
 
-    private UserMemorySettingEntity setting(long generation, boolean enabled) {
+    @Test
+    void updatesOnlyTheMasterSwitchAndPreservesAutoExtract() {
+        UserMemorySettingEntity current = setting(7L, true, false);
+        when(settingMapper.selectOwnedForUpdate(1L, 2L)).thenReturn(current);
+        when(settingMapper.updateSettings(1L, 2L, false, false, NOW)).thenReturn(1);
+
+        assertThat(service.updateSetting(identity, false, null))
+                .isEqualTo(new com.xjjk.agent.memory.api.dto.UserMemorySettingResponse(false, false));
+        verify(settingMapper).updateSettings(1L, 2L, false, false, NOW);
+    }
+
+    @Test
+    void updatesOnlyAutoExtractForBackwardCompatibleClients() {
+        UserMemorySettingEntity current = setting(7L, true, true);
+        when(settingMapper.selectOwnedForUpdate(1L, 2L)).thenReturn(current);
+        when(settingMapper.updateSettings(1L, 2L, true, false, NOW)).thenReturn(1);
+
+        assertThat(service.updateSetting(identity, null, false))
+                .isEqualTo(new com.xjjk.agent.memory.api.dto.UserMemorySettingResponse(true, false));
+        verify(settingMapper).updateSettings(1L, 2L, true, false, NOW);
+    }
+
+    @Test
+    void rejectsAnEmptyPartialUpdate() {
+        assertThatThrownBy(() -> service.updateSetting(identity, null, null))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        error -> assertThat(error.errorCode()).isEqualTo(ApiErrorCode.VALIDATION_ERROR));
+        verify(settingMapper, never()).selectOwnedForUpdate(anyLong(), anyLong());
+    }
+
+    private UserMemorySettingEntity setting(long generation, boolean memoryEnabled,
+                                              boolean autoExtractEnabled) {
         UserMemorySettingEntity entity = new UserMemorySettingEntity();
         entity.setMemoryGeneration(generation);
-        entity.setAutoExtractEnabled(enabled);
+        entity.setMemoryEnabled(memoryEnabled);
+        entity.setAutoExtractEnabled(autoExtractEnabled);
         return entity;
     }
 

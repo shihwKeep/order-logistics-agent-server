@@ -26,15 +26,21 @@ class UserMemoryControllerTest {
         AgentIdentity identity = new AgentIdentity(2L, "account", "name", 3L, 1L);
         UserMemoryPageResponse page = new UserMemoryPageResponse(List.of(), null, false);
         when(service.list(identity, null, 10)).thenReturn(page);
-        when(service.getSetting(identity)).thenReturn(new UserMemorySettingResponse(true));
-        when(service.updateSetting(identity, false)).thenReturn(new UserMemorySettingResponse(false));
+        when(service.getSetting(identity)).thenReturn(new UserMemorySettingResponse(true, true));
+        when(service.updateSetting(identity, false, null))
+                .thenReturn(new UserMemorySettingResponse(false, true));
+        when(service.updateSetting(identity, null, false))
+                .thenReturn(new UserMemorySettingResponse(true, false));
 
         assertThat(controller.list(identity, null, 10).data()).isSameAs(page);
-        assertThat(controller.getSetting(identity).data().autoExtractEnabled()).isTrue();
+        assertThat(controller.getSetting(identity).data().memoryEnabled()).isTrue();
         assertThat(controller.updateSetting(identity,
-                new UpdateUserMemorySettingRequest(false)).data().autoExtractEnabled()).isFalse();
+                new UpdateUserMemorySettingRequest(false, null)).data().memoryEnabled()).isFalse();
+        assertThat(controller.updateSetting(identity,
+                new UpdateUserMemorySettingRequest(null, false)).data().autoExtractEnabled()).isFalse();
         verify(service).list(identity, null, 10);
-        verify(service).updateSetting(identity, false);
+        verify(service).updateSetting(identity, false, null);
+        verify(service).updateSetting(identity, null, false);
 
         assertThat(UserMemoryController.class.getAnnotation(RequestMapping.class).value())
                 .containsExactly("/api/v1/me");

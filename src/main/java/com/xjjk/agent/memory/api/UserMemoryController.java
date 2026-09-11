@@ -55,7 +55,7 @@ public class UserMemoryController {
             @Valid @RequestBody UpdateUserMemorySettingRequest request
     ) {
         return ApiResponse.success(queryService.updateSetting(
-                identity, request.autoExtractEnabled()));
+                identity, request.memoryEnabled(), request.autoExtractEnabled()));
     }
 
     @PutMapping("/memories/{memoryId}")

@@ -48,13 +48,16 @@ public interface UserMemorySettingMapper extends BaseMapper<UserMemorySettingEnt
 
     @Update("""
         UPDATE agent_user_memory_setting
-        SET auto_extract_enabled = #{enabled}, updated_at = #{updatedAt}
+        SET memory_enabled = #{memoryEnabled},
+            auto_extract_enabled = #{autoExtractEnabled},
+            updated_at = #{updatedAt}
         WHERE tenant_id = #{tenantId} AND user_id = #{userId}
         """)
-    int updateAutoExtractEnabled(
+    int updateSettings(
             @Param("tenantId") long tenantId,
             @Param("userId") long userId,
-            @Param("enabled") boolean enabled,
+            @Param("memoryEnabled") boolean memoryEnabled,
+            @Param("autoExtractEnabled") boolean autoExtractEnabled,
             @Param("updatedAt") LocalDateTime updatedAt);
 
     @Update("""

@@ -83,24 +83,42 @@ public class UserMemoryQueryService {
 
     public UserMemorySettingResponse getSetting(AgentIdentity identity) {
         UserMemorySettingEntity setting = settingMapper.selectOwned(identity.tenantId(), identity.userId());
-        return new UserMemorySettingResponse(setting == null
-                ? properties.autoExtractDefaultEnabled()
-                : Boolean.TRUE.equals(setting.getAutoExtractEnabled()));
+        return setting == null
+                ? new UserMemorySettingResponse(true, properties.autoExtractDefaultEnabled())
+                : new UserMemorySettingResponse(
+                        Boolean.TRUE.equals(setting.getMemoryEnabled()),
+                        Boolean.TRUE.equals(setting.getAutoExtractEnabled()));
     }
 
     @Transactional
-    public UserMemorySettingResponse updateSetting(AgentIdentity identity, boolean enabled) {
+    public UserMemorySettingResponse updateSetting(
+            AgentIdentity identity,
+            Boolean requestedMemoryEnabled,
+            Boolean requestedAutoExtractEnabled
+    ) {
+        if (requestedMemoryEnabled == null && requestedAutoExtractEnabled == null) {
+            throw new BusinessException(ApiErrorCode.VALIDATION_ERROR);
+        }
         LocalDateTime now = LocalDateTime.ofInstant(
                 clock.instant().truncatedTo(ChronoUnit.MILLIS), ZoneOffset.UTC);
         settingMapper.insertIfAbsent(identity.tenantId(), identity.userId(),
                 true, properties.autoExtractDefaultEnabled(), now);
         UserMemorySettingEntity setting = settingMapper.selectOwnedForUpdate(
                 identity.tenantId(), identity.userId());
-        if (setting == null || settingMapper.updateAutoExtractEnabled(
-                identity.tenantId(), identity.userId(), enabled, now) != 1) {
+        if (setting == null) {
             throw new BusinessException(ApiErrorCode.MEMORY_WRITE_FAILED);
         }
-        return new UserMemorySettingResponse(enabled);
+        boolean memoryEnabled = requestedMemoryEnabled != null
+                ? requestedMemoryEnabled
+                : Boolean.TRUE.equals(setting.getMemoryEnabled());
+        boolean autoExtractEnabled = requestedAutoExtractEnabled != null
+                ? requestedAutoExtractEnabled
+                : Boolean.TRUE.equals(setting.getAutoExtractEnabled());
+        if (settingMapper.updateSettings(identity.tenantId(), identity.userId(),
+                memoryEnabled, autoExtractEnabled, now) != 1) {
+            throw new BusinessException(ApiErrorCode.MEMORY_WRITE_FAILED);
+        }
+        return new UserMemorySettingResponse(memoryEnabled, autoExtractEnabled);
     }
 
     private UserMemoryResponse toResponse(UserMemoryListRow row) {
