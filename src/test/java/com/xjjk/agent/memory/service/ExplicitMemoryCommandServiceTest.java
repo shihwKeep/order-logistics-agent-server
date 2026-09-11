@@ -22,6 +22,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ExplicitMemoryCommandServiceTest {
@@ -30,16 +31,18 @@ class ExplicitMemoryCommandServiceTest {
             new DeterministicExplicitMemoryCandidateParser(new MemoryCategoryContentPolicy());
     private final ExplicitMemoryCandidateValidator validator = mock(ExplicitMemoryCandidateValidator.class);
     private final ExplicitMemoryWriteService writer = mock(ExplicitMemoryWriteService.class);
+    private final UserMemoryPolicyService policy = mock(UserMemoryPolicyService.class);
     private ExplicitMemoryCommandService service;
     private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
+        when(policy.isMemoryEnabled(1L, 2L)).thenReturn(true);
         service = new ExplicitMemoryCommandService(
                 properties(true), new ExplicitMemoryCommandDetector(512),
                 new MemorySensitiveContentPolicy(new com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer()),
-                parser, validator, writer, new UserMemoryMetrics(meterRegistry));
+                parser, validator, writer, policy, new UserMemoryMetrics(meterRegistry));
     }
 
     @Test
@@ -75,7 +78,7 @@ class ExplicitMemoryCommandServiceTest {
                 properties(true), new ExplicitMemoryCommandDetector(512),
                 new MemorySensitiveContentPolicy(
                         new com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer()),
-                parser, strictValidator, writer, new UserMemoryMetrics(meterRegistry));
+                parser, strictValidator, writer, policy, new UserMemoryMetrics(meterRegistry));
         when(writer.save(eq(turn()), any())).thenReturn(
                 new ExplicitMemoryWriteService.SaveResult("memory-1", "用户希望被称为老师")
         );
@@ -111,9 +114,21 @@ class ExplicitMemoryCommandServiceTest {
         service = new ExplicitMemoryCommandService(
                 properties(false), new ExplicitMemoryCommandDetector(512),
                 new MemorySensitiveContentPolicy(new com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer()),
-                parser, validator, writer, new UserMemoryMetrics(meterRegistry));
+                parser, validator, writer, policy, new UserMemoryMetrics(meterRegistry));
         assertThat(service.handle(turn(), "请记住以后回答简短一些"))
                 .isEqualTo(ExplicitMemoryCommandResult.notHandled());
+    }
+
+    @Test
+    void explainsHowToEnableMemoryWithoutParsingOrWritingWhenUserSwitchIsOff() {
+        when(policy.isMemoryEnabled(1L, 2L)).thenReturn(false);
+
+        assertThat(service.handle(turn(), "请永久记住：叫我老师。"))
+                .isEqualTo(new ExplicitMemoryCommandResult(
+                        true, false, "记忆功能已关闭，可在“我的记忆”中开启。", null));
+        verifyNoInteractions(validator, writer);
+        assertThat(operationCount("explicit_save", "rejected", "MEMORY_DISABLED"))
+                .isEqualTo(1.0);
     }
 
     @Test

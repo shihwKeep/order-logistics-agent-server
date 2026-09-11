@@ -106,6 +106,12 @@ public enum ApiErrorCode {
             "记忆保存失败，请稍后重试"
     ),
 
+    MEMORY_DISABLED(
+            HttpStatus.CONFLICT,
+            "MEMORY_DISABLED",
+            "记忆功能已关闭，可在“我的记忆”中开启"
+    ),
+
     MEMORY_NOT_FOUND(
             HttpStatus.NOT_FOUND,
             "MEMORY_NOT_FOUND",

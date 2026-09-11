@@ -20,6 +20,7 @@ import java.util.Optional;
 public class ExplicitMemoryCommandService {
 
     private static final String REJECTED_TEXT = "这类内容不适合作为长期记忆保存。";
+    private static final String DISABLED_TEXT = "记忆功能已关闭，可在“我的记忆”中开启。";
 
     private final UserMemoryProperties properties;
     private final ExplicitMemoryCommandDetector detector;
@@ -27,6 +28,7 @@ public class ExplicitMemoryCommandService {
     private final DeterministicExplicitMemoryCandidateParser parser;
     private final ExplicitMemoryCandidateValidator validator;
     private final ExplicitMemoryWriteService writer;
+    private final UserMemoryPolicyService policy;
     private final UserMemoryMetrics metrics;
 
     public ExplicitMemoryCommandService(
@@ -36,6 +38,7 @@ public class ExplicitMemoryCommandService {
             DeterministicExplicitMemoryCandidateParser parser,
             ExplicitMemoryCandidateValidator validator,
             ExplicitMemoryWriteService writer,
+            UserMemoryPolicyService policy,
             UserMemoryMetrics metrics
     ) {
         this.properties = Objects.requireNonNull(properties, "properties");
@@ -44,6 +47,7 @@ public class ExplicitMemoryCommandService {
         this.parser = Objects.requireNonNull(parser, "parser");
         this.validator = Objects.requireNonNull(validator, "validator");
         this.writer = Objects.requireNonNull(writer, "writer");
+        this.policy = Objects.requireNonNull(policy, "policy");
         this.metrics = Objects.requireNonNull(metrics, "metrics");
     }
 
@@ -55,11 +59,14 @@ public class ExplicitMemoryCommandService {
         if (detected.isEmpty()) {
             return ExplicitMemoryCommandResult.notHandled();
         }
-        if (!sensitivePolicy.isAllowed(userMessage)) {
-            metrics.rejected("explicit_save", ApiErrorCode.MEMORY_CONTENT_REJECTED);
-            return rejected();
-        }
         try {
+            if (!policy.isMemoryEnabled(turn.tenantId(), turn.userId())) {
+                return disabled();
+            }
+            if (!sensitivePolicy.isAllowed(userMessage)) {
+                metrics.rejected("explicit_save", ApiErrorCode.MEMORY_CONTENT_REJECTED);
+                return rejected();
+            }
             ExplicitMemoryCandidate extracted = parser.parse(detected.get())
                     .orElseThrow(() -> new IllegalArgumentException("MEMORY_CONTENT_REJECTED"));
             ExplicitMemoryCandidate candidate = validator.validate(
@@ -74,6 +81,8 @@ public class ExplicitMemoryCommandService {
         } catch (ExplicitMemoryExtractionException unavailable) {
             metrics.failure("explicit_save", ApiErrorCode.MEMORY_WRITE_FAILED);
             throw new BusinessException(ApiErrorCode.MEMORY_WRITE_FAILED);
+        } catch (UserMemoryDisabledException disabled) {
+            return disabled();
         } catch (BusinessException failure) {
             metrics.failure("explicit_save", failure.errorCode());
             throw failure;
@@ -88,6 +97,11 @@ public class ExplicitMemoryCommandService {
 
     private static ExplicitMemoryCommandResult rejected() {
         return new ExplicitMemoryCommandResult(true, false, REJECTED_TEXT, null);
+    }
+
+    private ExplicitMemoryCommandResult disabled() {
+        metrics.rejected("explicit_save", ApiErrorCode.MEMORY_DISABLED);
+        return new ExplicitMemoryCommandResult(true, false, DISABLED_TEXT, null);
     }
 
     private void recordSuccessAfterCommit() {
