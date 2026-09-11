@@ -99,7 +99,8 @@ class UserMemoryQueryServiceTest {
         assertThat(service.getSetting(identity).autoExtractEnabled()).isTrue();
         verify(settingMapper, never()).insertIfAbsent(
                 org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong(),
-                org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.any());
+                org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean(),
+                org.mockito.ArgumentMatchers.any());
     }
 
     private UserMemorySettingEntity setting(long generation, boolean enabled) {

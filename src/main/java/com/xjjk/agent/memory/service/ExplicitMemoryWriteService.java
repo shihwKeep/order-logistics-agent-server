@@ -81,7 +81,8 @@ public class ExplicitMemoryWriteService {
                 clock.instant().truncatedTo(ChronoUnit.MILLIS), ZoneOffset.UTC);
 
         int settingInsert = settingMapper.insertIfAbsent(
-                turn.tenantId(), turn.userId(), properties.autoExtractDefaultEnabled(), now);
+                turn.tenantId(), turn.userId(), true,
+                properties.autoExtractDefaultEnabled(), now);
         if (settingInsert < 0 || settingInsert > 1) {
             throw writeFailed();
         }

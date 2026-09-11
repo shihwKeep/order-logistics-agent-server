@@ -26,6 +26,9 @@ public class UserMemorySettingEntity {
     @TableField("memory_generation")
     private Long memoryGeneration;
 
+    @TableField("memory_enabled")
+    private Boolean memoryEnabled;
+
     @TableField("auto_extract_enabled")
     private Boolean autoExtractEnabled;
 

@@ -93,7 +93,7 @@ public class UserMemoryQueryService {
         LocalDateTime now = LocalDateTime.ofInstant(
                 clock.instant().truncatedTo(ChronoUnit.MILLIS), ZoneOffset.UTC);
         settingMapper.insertIfAbsent(identity.tenantId(), identity.userId(),
-                properties.autoExtractDefaultEnabled(), now);
+                true, properties.autoExtractDefaultEnabled(), now);
         UserMemorySettingEntity setting = settingMapper.selectOwnedForUpdate(
                 identity.tenantId(), identity.userId());
         if (setting == null || settingMapper.updateAutoExtractEnabled(

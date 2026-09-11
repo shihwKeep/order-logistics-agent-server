@@ -46,8 +46,36 @@ class UserMemoryMySqlIntegrationTest {
         }
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .target(MigrationVersion.fromVersion("10"))
                 .load()
                 .migrate();
+        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    INSERT INTO agent_user_memory_setting (
+                        tenant_id, user_id, memory_generation, auto_extract_enabled,
+                        created_at, updated_at
+                    ) VALUES (1, 2, 7, 1, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
+                    """);
+        } catch (Exception exception) {
+            throw new IllegalStateException("无法准备V10升级数据", exception);
+        }
+        Flyway.configure()
+                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .load()
+                .migrate();
+    }
+
+    @Test
+    void upgradesExistingSettingWithMemoryEnabledByDefault() throws Exception {
+        try (Connection connection = connection(); Statement statement = connection.createStatement();
+             ResultSet result = statement.executeQuery("""
+                     SELECT memory_enabled
+                     FROM agent_user_memory_setting
+                     WHERE tenant_id = 1 AND user_id = 2
+                     """)) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getBoolean("memory_enabled")).isTrue();
+        }
     }
 
     @Test

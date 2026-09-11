@@ -15,14 +15,17 @@ public interface UserMemorySettingMapper extends BaseMapper<UserMemorySettingEnt
 
     @Insert("""
         INSERT IGNORE INTO agent_user_memory_setting (
-            tenant_id, user_id, memory_generation, auto_extract_enabled, created_at, updated_at
+            tenant_id, user_id, memory_generation, memory_enabled,
+            auto_extract_enabled, created_at, updated_at
         ) VALUES (
-            #{tenantId}, #{userId}, 1, #{autoExtractEnabled}, #{now}, #{now}
+            #{tenantId}, #{userId}, 1, #{memoryEnabled},
+            #{autoExtractEnabled}, #{now}, #{now}
         )
         """)
     int insertIfAbsent(
             @Param("tenantId") long tenantId,
             @Param("userId") long userId,
+            @Param("memoryEnabled") boolean memoryEnabled,
             @Param("autoExtractEnabled") boolean autoExtractEnabled,
             @Param("now") LocalDateTime now);
 

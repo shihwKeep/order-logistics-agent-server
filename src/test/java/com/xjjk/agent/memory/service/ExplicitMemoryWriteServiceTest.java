@@ -96,7 +96,7 @@ class ExplicitMemoryWriteServiceTest {
         assertThat(result.memoryId()).isEqualTo(memory.getValue().getMemoryId());
         assertThat(result.content()).isEqualTo("用户偏好简洁回答");
 
-        verify(settingMapper).insertIfAbsent(eq(1L), eq(2L), eq(true), any());
+        verify(settingMapper).insertIfAbsent(eq(1L), eq(2L), eq(true), eq(true), any());
         verify(memoryMapper).supersedeOwnedActive(eq(1L), eq(2L), eq(7L),
                 eq("preference.answer_style"), any());
         verify(suppressionMapper).liftOwnedActive(eq(1L), eq(2L), eq(7L),

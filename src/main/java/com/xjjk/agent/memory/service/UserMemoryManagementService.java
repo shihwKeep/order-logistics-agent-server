@@ -219,7 +219,7 @@ public class UserMemoryManagementService {
 
     private UserMemorySettingEntity lockSetting(AgentIdentity identity, LocalDateTime now) {
         settingMapper.insertIfAbsent(identity.tenantId(), identity.userId(),
-                properties.autoExtractDefaultEnabled(), now);
+                true, properties.autoExtractDefaultEnabled(), now);
         UserMemorySettingEntity setting = settingMapper.selectOwnedForUpdate(
                 identity.tenantId(), identity.userId());
         if (setting == null || setting.getMemoryGeneration() == null) {
