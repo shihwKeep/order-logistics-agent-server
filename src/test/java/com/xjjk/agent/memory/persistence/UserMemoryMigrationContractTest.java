@@ -17,7 +17,7 @@ class UserMemoryMigrationContractTest {
             String sql = new String(
                     input.readAllBytes(),
                     StandardCharsets.UTF_8
-            );
+            ).replace("\r\n", "\n");
             assertThat(sql)
                     .contains("CREATE TABLE agent_user_memory_setting")
                     .contains("CREATE TABLE agent_user_memory")
