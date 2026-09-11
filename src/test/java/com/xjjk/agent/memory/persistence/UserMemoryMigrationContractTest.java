@@ -49,6 +49,20 @@ class UserMemoryMigrationContractTest {
                 .doesNotContain("message_content", "candidate_content", "evidence_text");
     }
 
+    @Test
+    void addsPrivacySafeImplicitExtractionResultFields() throws IOException {
+        String sql = readMigration(
+                "/db/migration/V13__add_memory_extraction_observability.sql");
+        assertThat(sql)
+                .contains("ADD COLUMN result_code VARCHAR(40)")
+                .contains("ADD COLUMN model_candidate_count SMALLINT UNSIGNED NOT NULL DEFAULT 0")
+                .contains("ADD COLUMN accepted_candidate_count SMALLINT UNSIGNED NOT NULL DEFAULT 0")
+                .contains("ADD COLUMN saved_memory_count SMALLINT UNSIGNED NOT NULL DEFAULT 0")
+                .contains("CONSTRAINT chk_memory_extraction_result_code")
+                .contains("CONSTRAINT chk_memory_extraction_result_counts")
+                .doesNotContain("model_output", "candidate_content", "evidence_text");
+    }
+
     private String readMigration(String path) throws IOException {
         try (var input = getClass().getResourceAsStream(path)) {
             assertThat(input).isNotNull();
