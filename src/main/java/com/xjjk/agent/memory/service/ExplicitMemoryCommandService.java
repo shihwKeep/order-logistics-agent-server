@@ -24,7 +24,7 @@ public class ExplicitMemoryCommandService {
     private final UserMemoryProperties properties;
     private final ExplicitMemoryCommandDetector detector;
     private final MemorySensitiveContentPolicy sensitivePolicy;
-    private final ExplicitMemoryExtractor extractor;
+    private final DeterministicExplicitMemoryCandidateParser parser;
     private final ExplicitMemoryCandidateValidator validator;
     private final ExplicitMemoryWriteService writer;
     private final UserMemoryMetrics metrics;
@@ -33,7 +33,7 @@ public class ExplicitMemoryCommandService {
             UserMemoryProperties properties,
             ExplicitMemoryCommandDetector detector,
             MemorySensitiveContentPolicy sensitivePolicy,
-            ExplicitMemoryExtractor extractor,
+            DeterministicExplicitMemoryCandidateParser parser,
             ExplicitMemoryCandidateValidator validator,
             ExplicitMemoryWriteService writer,
             UserMemoryMetrics metrics
@@ -41,7 +41,7 @@ public class ExplicitMemoryCommandService {
         this.properties = Objects.requireNonNull(properties, "properties");
         this.detector = Objects.requireNonNull(detector, "detector");
         this.sensitivePolicy = Objects.requireNonNull(sensitivePolicy, "sensitivePolicy");
-        this.extractor = Objects.requireNonNull(extractor, "extractor");
+        this.parser = Objects.requireNonNull(parser, "parser");
         this.validator = Objects.requireNonNull(validator, "validator");
         this.writer = Objects.requireNonNull(writer, "writer");
         this.metrics = Objects.requireNonNull(metrics, "metrics");
@@ -60,7 +60,8 @@ public class ExplicitMemoryCommandService {
             return rejected();
         }
         try {
-            ExplicitMemoryCandidate extracted = extractor.extract(detected.get(), userMessage);
+            ExplicitMemoryCandidate extracted = parser.parse(detected.get())
+                    .orElseThrow(() -> new IllegalArgumentException("MEMORY_CONTENT_REJECTED"));
             ExplicitMemoryCandidate candidate = validator.validate(
                     extracted, userMessage, detected.get().permanent());
             ExplicitMemoryWriteService.SaveResult saved = writer.save(turn, candidate);

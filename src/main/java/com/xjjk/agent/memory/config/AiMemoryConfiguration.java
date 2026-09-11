@@ -2,6 +2,7 @@ package com.xjjk.agent.memory.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer;
+import com.xjjk.agent.memory.service.DeterministicExplicitMemoryCandidateParser;
 import com.xjjk.agent.memory.service.ExplicitMemoryCandidateValidator;
 import com.xjjk.agent.memory.service.ExplicitMemoryCommandDetector;
 import com.xjjk.agent.memory.service.MemorySensitiveContentPolicy;
@@ -62,6 +63,13 @@ public class AiMemoryConfiguration {
     @Bean
     public MemoryCategoryContentPolicy memoryCategoryContentPolicy() {
         return new MemoryCategoryContentPolicy();
+    }
+
+    @Bean
+    public DeterministicExplicitMemoryCandidateParser deterministicExplicitMemoryCandidateParser(
+            MemoryCategoryContentPolicy contentPolicy
+    ) {
+        return new DeterministicExplicitMemoryCandidateParser(contentPolicy);
     }
 
     @Bean

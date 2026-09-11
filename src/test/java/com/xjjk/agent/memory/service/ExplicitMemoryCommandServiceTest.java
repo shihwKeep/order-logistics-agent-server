@@ -17,16 +17,17 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ExplicitMemoryCommandServiceTest {
 
-    private final ExplicitMemoryExtractor extractor = mock(ExplicitMemoryExtractor.class);
+    private final DeterministicExplicitMemoryCandidateParser parser =
+            new DeterministicExplicitMemoryCandidateParser(new MemoryCategoryContentPolicy());
     private final ExplicitMemoryCandidateValidator validator = mock(ExplicitMemoryCandidateValidator.class);
     private final ExplicitMemoryWriteService writer = mock(ExplicitMemoryWriteService.class);
     private ExplicitMemoryCommandService service;
@@ -38,7 +39,7 @@ class ExplicitMemoryCommandServiceTest {
         service = new ExplicitMemoryCommandService(
                 properties(true), new ExplicitMemoryCommandDetector(512),
                 new MemorySensitiveContentPolicy(new com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer()),
-                extractor, validator, writer, new UserMemoryMetrics(meterRegistry));
+                parser, validator, writer, new UserMemoryMetrics(meterRegistry));
     }
 
     @Test
@@ -50,9 +51,7 @@ class ExplicitMemoryCommandServiceTest {
     @Test
     void extractsValidatesPersistsAndAcknowledgesPureCommand() {
         String message = "请记住以后回答简短一些";
-        var command = new ExplicitMemoryCommandDetector.CommandText("以后回答简短一些", false);
         ExplicitMemoryCandidate candidate = candidate();
-        when(extractor.extract(command, message)).thenReturn(candidate);
         when(validator.validate(candidate, message, false)).thenReturn(candidate);
         when(writer.save(turn(), candidate))
                 .thenReturn(new ExplicitMemoryWriteService.SaveResult("memory-1", "用户偏好简洁回答"));
@@ -76,17 +75,7 @@ class ExplicitMemoryCommandServiceTest {
                 properties(true), new ExplicitMemoryCommandDetector(512),
                 new MemorySensitiveContentPolicy(
                         new com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer()),
-                extractor, strictValidator, writer, new UserMemoryMetrics(meterRegistry));
-        when(extractor.extract(
-                new ExplicitMemoryCommandDetector.CommandText("叫我老师", true),
-                message
-        )).thenReturn(new ExplicitMemoryCandidate(
-                MemoryCategory.PROFILE_PREFERRED_NAME,
-                "profile.preferred_name",
-                "称呼用户为老师",
-                message,
-                MemoryRetentionType.PERMANENT
-        ));
+                parser, strictValidator, writer, new UserMemoryMetrics(meterRegistry));
         when(writer.save(eq(turn()), any())).thenReturn(
                 new ExplicitMemoryWriteService.SaveResult("memory-1", "用户希望被称为老师")
         );
@@ -96,6 +85,16 @@ class ExplicitMemoryCommandServiceTest {
         assertThat(result.handled()).isTrue();
         assertThat(result.saved()).isTrue();
         assertThat(result.assistantText()).isEqualTo("好的，已记住：用户希望被称为老师");
+        org.mockito.ArgumentCaptor<ExplicitMemoryCandidate> candidate =
+                org.mockito.ArgumentCaptor.forClass(ExplicitMemoryCandidate.class);
+        verify(writer).save(eq(turn()), candidate.capture());
+        assertThat(candidate.getValue()).isEqualTo(new ExplicitMemoryCandidate(
+                MemoryCategory.PROFILE_PREFERRED_NAME,
+                "profile.preferred_name",
+                "用户希望被称为老师",
+                "叫我老师",
+                MemoryRetentionType.PERMANENT
+        ));
     }
 
     @Test
@@ -112,7 +111,7 @@ class ExplicitMemoryCommandServiceTest {
         service = new ExplicitMemoryCommandService(
                 properties(false), new ExplicitMemoryCommandDetector(512),
                 new MemorySensitiveContentPolicy(new com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer()),
-                extractor, validator, writer, new UserMemoryMetrics(meterRegistry));
+                parser, validator, writer, new UserMemoryMetrics(meterRegistry));
         assertThat(service.handle(turn(), "请记住以后回答简短一些"))
                 .isEqualTo(ExplicitMemoryCommandResult.notHandled());
     }
@@ -120,9 +119,7 @@ class ExplicitMemoryCommandServiceTest {
     @Test
     void recordsUnexpectedPersistenceRuntimeFailureWithoutContentTags() {
         String message = "请记住以后回答简短一些";
-        var command = new ExplicitMemoryCommandDetector.CommandText("以后回答简短一些", false);
         ExplicitMemoryCandidate candidate = candidate();
-        when(extractor.extract(command, message)).thenReturn(candidate);
         when(validator.validate(candidate, message, false)).thenReturn(candidate);
         when(writer.save(turn(), candidate)).thenThrow(new IllegalStateException("database failure"));
 
@@ -135,9 +132,7 @@ class ExplicitMemoryCommandServiceTest {
     @Test
     void mapsDatabaseFailureToStableMemoryWriteFailure() {
         String message = "请记住以后回答简短一些";
-        var command = new ExplicitMemoryCommandDetector.CommandText("以后回答简短一些", false);
         ExplicitMemoryCandidate candidate = candidate();
-        when(extractor.extract(command, message)).thenReturn(candidate);
         when(validator.validate(candidate, message, false)).thenReturn(candidate);
         when(writer.save(turn(), candidate))
                 .thenThrow(new DataAccessResourceFailureException("database unavailable"));
@@ -153,9 +148,7 @@ class ExplicitMemoryCommandServiceTest {
     @Test
     void defersSuccessMetricUntilOuterTransactionCommitsAndRecordsRollback() {
         String message = "请记住以后回答简短一些";
-        var command = new ExplicitMemoryCommandDetector.CommandText("以后回答简短一些", false);
         ExplicitMemoryCandidate candidate = candidate();
-        when(extractor.extract(command, message)).thenReturn(candidate);
         when(validator.validate(candidate, message, false)).thenReturn(candidate);
         when(writer.save(turn(), candidate))
                 .thenReturn(new ExplicitMemoryWriteService.SaveResult("memory-1", "用户偏好简洁回答"));
