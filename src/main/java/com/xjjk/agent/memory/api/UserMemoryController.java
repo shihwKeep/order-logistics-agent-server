@@ -88,4 +88,13 @@ public class UserMemoryController {
         return ApiResponse.success(new MemoryMutationResponse(
                 result.affectedCount(), null, result.generation()));
     }
+
+    @DeleteMapping(value = "/memories", params = "scope=all")
+    public ApiResponse<MemoryMutationResponse> clearAll(
+            @CurrentAgentIdentity AgentIdentity identity
+    ) {
+        var result = managementService.clearAll(identity);
+        return ApiResponse.success(new MemoryMutationResponse(
+                result.affectedCount(), null, result.generation()));
+    }
 }

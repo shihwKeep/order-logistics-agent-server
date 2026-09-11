@@ -145,6 +145,29 @@ public class UserMemoryManagementService {
         return new MutationResult(affected, generation);
     }
 
+    @Transactional
+    public MutationResult clearAll(AgentIdentity identity) {
+        LocalDateTime now = now();
+        long generation = lockSetting(identity, now).getMemoryGeneration();
+        final long nextGeneration;
+        try {
+            nextGeneration = Math.incrementExact(generation);
+        } catch (ArithmeticException exception) {
+            throw new BusinessException(ApiErrorCode.MEMORY_CLEAR_FAILED);
+        }
+        int affected = memoryMapper.clearOwnedGeneration(
+                identity.tenantId(), identity.userId(), generation, now);
+        suppressionMapper.liftOwnedGeneration(
+                identity.tenantId(), identity.userId(), generation, now);
+        if (settingMapper.compareAndIncrementGeneration(
+                identity.tenantId(), identity.userId(), generation, now) != 1) {
+            throw new BusinessException(ApiErrorCode.MEMORY_CLEAR_FAILED);
+        }
+        insertOutbox(identity, generation, 0L, null,
+                MemoryOutboxOperation.CLEAR_GENERATION, now, ApiErrorCode.MEMORY_CLEAR_FAILED);
+        return new MutationResult(affected, nextGeneration);
+    }
+
     private UserMemorySettingEntity lockSetting(AgentIdentity identity, LocalDateTime now) {
         settingMapper.insertIfAbsent(identity.tenantId(), identity.userId(),
                 properties.autoExtractDefaultEnabled(), now);

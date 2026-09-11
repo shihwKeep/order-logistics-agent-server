@@ -39,4 +39,18 @@ public interface MemorySuppressionMapper extends BaseMapper<MemorySuppressionEnt
             @Param("generation") long generation,
             @Param("canonicalKey") String canonicalKey,
             @Param("updatedAt") LocalDateTime updatedAt);
+
+    @Update("""
+        UPDATE agent_memory_suppression
+        SET status = 'LIFTED', updated_at = #{updatedAt}
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND memory_generation = #{generation}
+          AND status = 'ACTIVE'
+        """)
+    int liftOwnedGeneration(
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("generation") long generation,
+            @Param("updatedAt") LocalDateTime updatedAt);
 }
