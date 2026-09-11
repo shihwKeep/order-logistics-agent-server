@@ -4,9 +4,14 @@ import com.xjjk.agent.common.api.ApiErrorCode;
 import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.memory.domain.MemoryRetentionType;
+import com.xjjk.agent.memory.domain.ImplicitMemoryCandidate;
+import com.xjjk.agent.memory.domain.MemoryCategory;
+import com.xjjk.agent.memory.domain.MemoryExtractionTaskClaim;
 import com.xjjk.agent.memory.persistence.entity.MemoryOutboxEntity;
 import com.xjjk.agent.memory.persistence.mapper.MemoryOutboxMapper;
 import com.xjjk.agent.memory.service.UserMemoryManagementService;
+import com.xjjk.agent.memory.service.ImplicitMemoryCommitService;
+import com.xjjk.agent.memory.service.UserMemoryExpiryService;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,6 +31,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
+
+import java.time.LocalDateTime;
+import java.util.List;
 
 @SpringBootTest(properties = {
         "spring.autoconfigure.exclude=",
@@ -53,6 +61,12 @@ class UserMemorySpringTransactionIntegrationTest {
     private UserMemoryManagementService service;
 
     @Autowired
+    private ImplicitMemoryCommitService implicitMemoryCommitService;
+
+    @Autowired
+    private UserMemoryExpiryService expiryService;
+
+    @Autowired
     private JdbcTemplate jdbc;
 
     @Autowired
@@ -69,6 +83,9 @@ class UserMemorySpringTransactionIntegrationTest {
         jdbc.update("DELETE FROM agent_memory_outbox");
         jdbc.update("DELETE FROM agent_memory_suppression");
         jdbc.update("DELETE FROM agent_user_memory");
+        jdbc.update("DELETE FROM agent_memory_extraction_task");
+        jdbc.update("DELETE FROM agent_message");
+        jdbc.update("DELETE FROM agent_conversation");
         jdbc.update("DELETE FROM agent_user_memory_setting");
         jdbc.update("""
                 INSERT INTO agent_user_memory_setting (
@@ -89,6 +106,72 @@ class UserMemorySpringTransactionIntegrationTest {
                     UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)
                 )
                 """);
+    }
+
+    @Test
+    void commitsHiddenAutomaticMemoryAndOutboxWithRealSpringTransaction() {
+        seedProcessingTask();
+        MemoryExtractionTaskClaim claim = new MemoryExtractionTaskClaim(
+                taskRowId(), "50000000-0000-0000-0000-000000000010",
+                1L, 2L, "20000000-0000-0000-0000-000000000010",
+                "40000000-0000-0000-0000-000000000010",
+                "30000000-0000-0000-0000-000000000010", 1L, 7L, 0,
+                "60000000-0000-0000-0000-000000000010", "integration-node",
+                LocalDateTime.now().plusMinutes(1));
+
+        int saved = implicitMemoryCommitService.commit(claim, List.of(
+                new ImplicitMemoryCandidate(
+                        MemoryCategory.PREFERENCE_LANGUAGE,
+                        "preference.language", "用户偏好中文回答",
+                        "希望使用中文回答", 0.95)));
+
+        assertThat(saved).isEqualTo(1);
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM agent_user_memory
+                WHERE tenant_id = 1 AND user_id = 2 AND memory_generation = 7
+                  AND source_type = 'AUTO_EXTRACT' AND visibility = 'HIDDEN'
+                  AND retention_type = 'NORMAL' AND status = 'ACTIVE'
+                """, Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM agent_memory_outbox
+                WHERE tenant_id = 1 AND user_id = 2 AND memory_generation = 7
+                  AND operation = 'UPSERT' AND status = 'PENDING'
+                """, Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("""
+                SELECT status FROM agent_memory_extraction_task
+                WHERE task_id = '50000000-0000-0000-0000-000000000010'
+                """, String.class)).isEqualTo("DONE");
+    }
+
+    @Test
+    void expiresOnlyHiddenAutomaticMemoryAndWritesDeleteOutboxAtomically() {
+        jdbc.update("DELETE FROM agent_user_memory");
+        jdbc.update("""
+                INSERT INTO agent_user_memory (
+                    memory_id, tenant_id, user_id, memory_generation, source_type, category,
+                    canonical_key, content, content_hash, confidence, visibility, retention_type,
+                    status, source_conversation_id, source_message_sequence, evidence_text,
+                    version, expires_at, created_at, updated_at
+                ) VALUES (
+                    '00000000-0000-0000-0000-000000000020', 1, 2, 7, 'AUTO_EXTRACT',
+                    'PREFERENCE_LANGUAGE', 'preference.language', '用户偏好中文回答',
+                    REPEAT('d', 64), 0.9500, 'HIDDEN', 'NORMAL', 'ACTIVE', NULL, NULL,
+                    '偏好中文', 1, UTC_TIMESTAMP(3) - INTERVAL 1 SECOND,
+                    UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)
+                )
+                """);
+
+        assertThat(expiryService.expireBatch(100)).isEqualTo(1);
+
+        assertThat(jdbc.queryForObject("""
+                SELECT status FROM agent_user_memory
+                WHERE memory_id = '00000000-0000-0000-0000-000000000020'
+                """, String.class)).isEqualTo("EXPIRED");
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM agent_memory_outbox
+                WHERE memory_id = '00000000-0000-0000-0000-000000000020'
+                  AND operation = 'DELETE' AND status = 'PENDING'
+                """, Long.class)).isEqualTo(1);
     }
 
     @Test
@@ -136,5 +219,52 @@ class UserMemorySpringTransactionIntegrationTest {
 
     private long count(String predicate) {
         return jdbc.queryForObject("SELECT COUNT(*) FROM agent_user_memory WHERE " + predicate, Long.class);
+    }
+
+    private void seedProcessingTask() {
+        jdbc.update("""
+                INSERT INTO agent_conversation (
+                    conversation_id, tenant_id, user_id, org_id, title,
+                    last_message_sequence, memory_until_sequence, created_at, updated_at
+                ) VALUES (
+                    '20000000-0000-0000-0000-000000000010', 1, 2, 3, '集成测试',
+                    1, 1, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)
+                )
+                """);
+        jdbc.update("""
+                INSERT INTO agent_message (
+                    message_id, conversation_id, tenant_id, user_id, request_id,
+                    message_sequence, role, content, status, created_at, updated_at
+                ) VALUES (
+                    '30000000-0000-0000-0000-000000000010',
+                    '20000000-0000-0000-0000-000000000010', 1, 2,
+                    '40000000-0000-0000-0000-000000000010', 1,
+                    'USER', '我是 Java 开发，希望回答简洁一些', 'SUCCESS',
+                    UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)
+                )
+                """);
+        jdbc.update("""
+                INSERT INTO agent_memory_extraction_task (
+                    task_id, tenant_id, user_id, conversation_id, request_id,
+                    user_message_id, user_message_sequence, memory_generation,
+                    status, retry_count, next_run_at, lease_token, locked_by, locked_until,
+                    created_at, updated_at
+                ) VALUES (
+                    '50000000-0000-0000-0000-000000000010', 1, 2,
+                    '20000000-0000-0000-0000-000000000010',
+                    '40000000-0000-0000-0000-000000000010',
+                    '30000000-0000-0000-0000-000000000010', 1, 7,
+                    'PROCESSING', 0, UTC_TIMESTAMP(3),
+                    '60000000-0000-0000-0000-000000000010', 'integration-node',
+                    UTC_TIMESTAMP(3) + INTERVAL 1 MINUTE, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)
+                )
+                """);
+    }
+
+    private long taskRowId() {
+        return jdbc.queryForObject("""
+                SELECT id FROM agent_memory_extraction_task
+                WHERE task_id = '50000000-0000-0000-0000-000000000010'
+                """, Long.class);
     }
 }
