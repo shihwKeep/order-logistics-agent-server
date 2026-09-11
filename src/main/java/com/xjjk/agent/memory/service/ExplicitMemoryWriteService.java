@@ -40,6 +40,7 @@ public class ExplicitMemoryWriteService {
     private final MemoryOutboxMapper outboxMapper;
     private final AgentMessageMapper messageMapper;
     private final UserMemoryProperties properties;
+    private final UserMemoryPolicyService policy;
     private final Clock clock;
 
     @Autowired
@@ -49,10 +50,11 @@ public class ExplicitMemoryWriteService {
             MemorySuppressionMapper suppressionMapper,
             MemoryOutboxMapper outboxMapper,
             AgentMessageMapper messageMapper,
-            UserMemoryProperties properties
+            UserMemoryProperties properties,
+            UserMemoryPolicyService policy
     ) {
         this(settingMapper, memoryMapper, suppressionMapper, outboxMapper,
-                messageMapper, properties, Clock.systemUTC());
+                messageMapper, properties, policy, Clock.systemUTC());
     }
 
     ExplicitMemoryWriteService(
@@ -62,6 +64,7 @@ public class ExplicitMemoryWriteService {
             MemoryOutboxMapper outboxMapper,
             AgentMessageMapper messageMapper,
             UserMemoryProperties properties,
+            UserMemoryPolicyService policy,
             Clock clock
     ) {
         this.settingMapper = Objects.requireNonNull(settingMapper, "settingMapper");
@@ -70,6 +73,7 @@ public class ExplicitMemoryWriteService {
         this.outboxMapper = Objects.requireNonNull(outboxMapper, "outboxMapper");
         this.messageMapper = Objects.requireNonNull(messageMapper, "messageMapper");
         this.properties = Objects.requireNonNull(properties, "properties");
+        this.policy = Objects.requireNonNull(policy, "policy");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -90,6 +94,7 @@ public class ExplicitMemoryWriteService {
         if (setting == null || setting.getMemoryGeneration() == null) {
             throw writeFailed();
         }
+        policy.requireEnabled(setting);
         long generation = setting.getMemoryGeneration();
         Long sourceSequence = messageMapper.selectOwnedUserMessageSequence(
                 turn.tenantId(), turn.userId(), turn.conversationId(), turn.userMessageId());

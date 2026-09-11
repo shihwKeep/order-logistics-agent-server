@@ -32,6 +32,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ExplicitMemoryWriteServiceTest {
@@ -47,10 +48,11 @@ class ExplicitMemoryWriteServiceTest {
     void setUp() {
         service = new ExplicitMemoryWriteService(
                 settingMapper, memoryMapper, suppressionMapper, outboxMapper,
-                messageMapper, properties(), Clock.fixed(
+                messageMapper, properties(), new UserMemoryPolicyService(settingMapper), Clock.fixed(
                         Instant.parse("2026-09-11T08:00:00Z"), ZoneOffset.UTC));
         UserMemorySettingEntity setting = new UserMemorySettingEntity();
         setting.setMemoryGeneration(7L);
+        setting.setMemoryEnabled(true);
         when(settingMapper.selectOwnedForUpdate(1L, 2L)).thenReturn(setting);
         when(messageMapper.selectOwnedUserMessageSequence(1L, 2L, "conversation", "user-message"))
                 .thenReturn(11L);
@@ -111,6 +113,18 @@ class ExplicitMemoryWriteServiceTest {
         when(memoryMapper.insert(any(UserMemoryEntity.class))).thenReturn(1);
         when(outboxMapper.insert(any(MemoryOutboxEntity.class))).thenReturn(0);
         assertWriteFailed();
+    }
+
+    @Test
+    void rejectsAfterLockWhenTheMasterSwitchWasClosedAfterThePrecheck() {
+        UserMemorySettingEntity setting = new UserMemorySettingEntity();
+        setting.setMemoryGeneration(7L);
+        setting.setMemoryEnabled(false);
+        when(settingMapper.selectOwnedForUpdate(1L, 2L)).thenReturn(setting);
+
+        assertThatThrownBy(() -> service.save(turn(), candidate()))
+                .isInstanceOf(UserMemoryDisabledException.class);
+        verifyNoInteractions(memoryMapper, suppressionMapper, outboxMapper, messageMapper);
     }
 
     private void assertWriteFailed() {
