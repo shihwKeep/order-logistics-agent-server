@@ -134,14 +134,23 @@ public interface MemoryExtractionTaskMapper extends BaseMapper<MemoryExtractionT
 
     @Update("""
         UPDATE agent_memory_extraction_task t
-        LEFT JOIN agent_user_memory_setting s
-          ON s.tenant_id = t.tenant_id AND s.user_id = t.user_id
         SET t.status = 'CANCELLED', t.last_error_code = 'SETTING_DISABLED',
             t.updated_at = #{now}
-        WHERE t.status IN ('PENDING', 'RETRY')
-          AND (s.id IS NULL OR s.memory_enabled = 0 OR s.auto_extract_enabled = 0
-               OR s.memory_generation <> t.memory_generation)
-        ORDER BY t.id LIMIT #{limit}
+        WHERE t.id IN (
+            SELECT id FROM (
+                SELECT candidate.id
+                FROM agent_memory_extraction_task candidate
+                LEFT JOIN agent_user_memory_setting setting
+                  ON setting.tenant_id = candidate.tenant_id
+                 AND setting.user_id = candidate.user_id
+                WHERE candidate.status IN ('PENDING', 'RETRY')
+                  AND (setting.id IS NULL OR setting.memory_enabled = 0
+                       OR setting.auto_extract_enabled = 0
+                       OR setting.memory_generation <> candidate.memory_generation)
+                ORDER BY candidate.id
+                LIMIT #{limit}
+            ) invalid_tasks
+        )
         """)
     int cancelInvalidUnclaimed(
             @Param("now") LocalDateTime now,

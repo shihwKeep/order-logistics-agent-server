@@ -3,6 +3,7 @@ package com.xjjk.agent.memory.persistence;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -65,6 +66,17 @@ class UserMemoryMySqlIntegrationTest {
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .load()
                 .migrate();
+    }
+
+    @BeforeEach
+    void resetMemorySetting() throws Exception {
+        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    UPDATE agent_user_memory_setting
+                    SET memory_enabled = 1, auto_extract_enabled = 1, memory_generation = 7
+                    WHERE tenant_id = 1 AND user_id = 2
+                    """);
+        }
     }
 
     @Test
@@ -180,6 +192,68 @@ class UserMemoryMySqlIntegrationTest {
             assertThatThrownBy(() -> statement.executeUpdate(insert.formatted(
                     "50000000-0000-0000-0000-000000000002")))
                     .isInstanceOf(SQLException.class);
+        }
+    }
+
+    @Test
+    void cancelsInvalidUnclaimedExtractionTasksWithBoundedMySqlUpdate() throws Exception {
+        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    UPDATE agent_user_memory_setting
+                    SET memory_enabled = 0
+                    WHERE tenant_id = 1 AND user_id = 2
+                    """);
+            statement.executeUpdate("""
+                    INSERT IGNORE INTO agent_message (
+                        message_id, conversation_id, tenant_id, user_id, request_id,
+                        message_sequence, role, content, status, created_at, updated_at
+                    ) VALUES (
+                        '30000000-0000-0000-0000-000000000003',
+                        '20000000-0000-0000-0000-000000000001', 1, 2,
+                        '40000000-0000-0000-0000-000000000003', 3,
+                        'USER', '待取消消息', 'SUCCESS', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)
+                    )
+                    """);
+            statement.executeUpdate("""
+                    INSERT INTO agent_memory_extraction_task (
+                        task_id, tenant_id, user_id, conversation_id, request_id,
+                        user_message_id, user_message_sequence, memory_generation,
+                        status, retry_count, next_run_at, created_at, updated_at
+                    ) VALUES (
+                        '50000000-0000-0000-0000-000000000003', 1, 2,
+                        '20000000-0000-0000-0000-000000000001',
+                        '40000000-0000-0000-0000-000000000003',
+                        '30000000-0000-0000-0000-000000000003', 3, 7,
+                        'PENDING', 0, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)
+                    )
+                    """);
+
+            int updated = statement.executeUpdate("""
+                    UPDATE agent_memory_extraction_task t
+                    SET t.status = 'CANCELLED', t.last_error_code = 'SETTING_DISABLED',
+                        t.updated_at = UTC_TIMESTAMP(3)
+                    WHERE t.id IN (
+                        SELECT id FROM (
+                            SELECT candidate.id
+                            FROM agent_memory_extraction_task candidate
+                            LEFT JOIN agent_user_memory_setting setting
+                              ON setting.tenant_id = candidate.tenant_id
+                             AND setting.user_id = candidate.user_id
+                            WHERE candidate.status IN ('PENDING', 'RETRY')
+                              AND (setting.id IS NULL OR setting.memory_enabled = 0
+                                   OR setting.auto_extract_enabled = 0
+                                   OR setting.memory_generation <> candidate.memory_generation)
+                            ORDER BY candidate.id
+                            LIMIT 20
+                        ) invalid_tasks
+                    )
+                    """);
+
+            assertThat(updated).isGreaterThanOrEqualTo(1);
+            assertThat(count(statement, "agent_memory_extraction_task",
+                    "task_id = '50000000-0000-0000-0000-000000000003'"
+                            + " AND status = 'CANCELLED' AND last_error_code = 'SETTING_DISABLED'"))
+                    .isEqualTo(1);
         }
     }
 
