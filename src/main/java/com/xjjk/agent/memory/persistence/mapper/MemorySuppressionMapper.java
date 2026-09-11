@@ -6,11 +6,28 @@ import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Update;
+import org.apache.ibatis.annotations.Select;
 
 import java.time.LocalDateTime;
 
 @Mapper
 public interface MemorySuppressionMapper extends BaseMapper<MemorySuppressionEntity> {
+
+    @Select("""
+        SELECT EXISTS(
+            SELECT 1 FROM agent_memory_suppression
+            WHERE tenant_id = #{tenantId}
+              AND user_id = #{userId}
+              AND memory_generation = #{generation}
+              AND canonical_key = #{canonicalKey}
+              AND status = 'ACTIVE'
+        )
+        """)
+    boolean existsOwnedActive(
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("generation") long generation,
+            @Param("canonicalKey") String canonicalKey);
 
     @Insert("""
         INSERT INTO agent_memory_suppression (
