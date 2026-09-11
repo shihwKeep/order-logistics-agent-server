@@ -100,6 +100,12 @@ public enum ApiErrorCode {
             "当前物流查询暂时不可用，请稍后重试"
     ),
 
+    MEMORY_WRITE_FAILED(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "MEMORY_WRITE_FAILED",
+            "记忆保存失败，请稍后重试"
+    ),
+
     INTERNAL_SERVER_ERROR(
             HttpStatus.INTERNAL_SERVER_ERROR,
             "INTERNAL_SERVER_ERROR",

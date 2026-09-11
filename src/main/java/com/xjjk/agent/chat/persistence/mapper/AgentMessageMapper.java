@@ -20,6 +20,23 @@ import java.util.List;
 public interface AgentMessageMapper
         extends BaseMapper<AgentMessageEntity> {
 
+    @Select("""
+        SELECT message_sequence
+        FROM agent_message
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND conversation_id = #{conversationId}
+          AND message_id = #{messageId}
+          AND role = 'USER'
+        LIMIT 1
+        """)
+    Long selectOwnedUserMessageSequence(
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("conversationId") String conversationId,
+            @Param("messageId") String messageId
+    );
+
     /**
      * 读取指定会话最早的用户问题，用于首次生成稳定会话标题。
      */
