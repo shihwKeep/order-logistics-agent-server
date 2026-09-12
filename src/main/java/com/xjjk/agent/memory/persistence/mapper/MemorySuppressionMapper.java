@@ -9,9 +9,34 @@ import org.apache.ibatis.annotations.Update;
 import org.apache.ibatis.annotations.Select;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Mapper
 public interface MemorySuppressionMapper extends BaseMapper<MemorySuppressionEntity> {
+
+    @Select("""
+        <script>
+        SELECT canonical_key
+        FROM agent_memory_suppression
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND memory_generation = #{generation}
+          AND status = 'ACTIVE'
+          AND canonical_key IN
+          <foreach item="canonicalKey" collection="canonicalKeys"
+                   open="(" separator="," close=")">
+              #{canonicalKey}
+          </foreach>
+        ORDER BY id
+        LIMIT #{limit}
+        </script>
+        """)
+    List<String> selectActiveKeys(
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("generation") long generation,
+            @Param("canonicalKeys") List<String> canonicalKeys,
+            @Param("limit") int limit);
 
     @Select("""
         SELECT EXISTS(

@@ -20,6 +20,54 @@ public interface UserMemoryMapper extends BaseMapper<UserMemoryEntity> {
         WHERE tenant_id = #{tenantId}
           AND user_id = #{userId}
           AND memory_generation = #{generation}
+          AND source_type = 'USER_EXPLICIT'
+          AND visibility = 'VISIBLE'
+          AND category IN (
+              'PROFILE_PREFERRED_NAME',
+              'PREFERENCE_LANGUAGE',
+              'PREFERENCE_ANSWER_STYLE'
+          )
+          AND status = 'ACTIVE'
+          AND (expires_at IS NULL OR expires_at > #{now})
+        ORDER BY updated_at DESC, id DESC
+        LIMIT #{limit}
+        """)
+    List<UserMemoryEntity> selectGlobalExplicit(
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("generation") long generation,
+            @Param("now") LocalDateTime now,
+            @Param("limit") int limit);
+
+    @Select("""
+        <script>
+        SELECT *
+        FROM agent_user_memory
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND memory_generation = #{generation}
+          AND status = 'ACTIVE'
+          AND (expires_at IS NULL OR expires_at > #{now})
+          AND memory_id IN
+          <foreach item="memoryId" collection="memoryIds" open="(" separator="," close=")">
+              #{memoryId}
+          </foreach>
+        ORDER BY id
+        </script>
+        """)
+    List<UserMemoryEntity> selectActiveCandidates(
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("generation") long generation,
+            @Param("memoryIds") List<String> memoryIds,
+            @Param("now") LocalDateTime now);
+
+    @Select("""
+        SELECT *
+        FROM agent_user_memory
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND memory_generation = #{generation}
           AND memory_id = #{memoryId}
           AND status = 'ACTIVE'
           AND (expires_at IS NULL OR expires_at > #{now})

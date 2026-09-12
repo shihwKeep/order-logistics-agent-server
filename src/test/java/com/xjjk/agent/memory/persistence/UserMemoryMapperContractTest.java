@@ -18,6 +18,8 @@ class UserMemoryMapperContractTest {
 
     private static final List<String> OWNER_SCOPED_METHODS = List.of(
             "selectActiveByKeyForUpdate",
+            "selectGlobalExplicit",
+            "selectActiveCandidates",
             "selectVisiblePage",
             "supersedeOwnedActive",
             "softDeleteOwned",
@@ -72,6 +74,23 @@ class UserMemoryMapperContractTest {
                     .contains("user_id = #{userId}")
                     .contains("memory_generation = #{generation}");
         }
+    }
+
+    @Test
+    void recallQueriesEnforceOwnerGenerationStatusAndExpiry() {
+        for (String methodName : List.of("selectGlobalExplicit", "selectActiveCandidates")) {
+            String sql = String.join("\n",
+                    findMethod(methodName).getAnnotation(Select.class).value());
+            assertThat(sql)
+                    .contains("tenant_id = #{tenantId}")
+                    .contains("user_id = #{userId}")
+                    .contains("memory_generation = #{generation}")
+                    .contains("status = 'ACTIVE'")
+                    .contains("expires_at IS NULL OR expires_at > #{now}");
+        }
+        String candidates = String.join("\n",
+                findMethod("selectActiveCandidates").getAnnotation(Select.class).value());
+        assertThat(candidates).contains("collection=\"memoryIds\"");
     }
 
     private Method findMethod(String name) {

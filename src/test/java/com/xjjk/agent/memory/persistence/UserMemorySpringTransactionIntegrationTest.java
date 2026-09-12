@@ -11,6 +11,8 @@ import com.xjjk.agent.memory.domain.MemoryExtractionTaskClaim;
 import com.xjjk.agent.memory.domain.MemoryOutboxClaim;
 import com.xjjk.agent.memory.persistence.entity.MemoryOutboxEntity;
 import com.xjjk.agent.memory.persistence.mapper.MemoryOutboxMapper;
+import com.xjjk.agent.memory.persistence.mapper.MemorySuppressionMapper;
+import com.xjjk.agent.memory.persistence.mapper.UserMemoryMapper;
 import com.xjjk.agent.memory.service.UserMemoryManagementService;
 import com.xjjk.agent.memory.service.ImplicitMemoryCommitService;
 import com.xjjk.agent.memory.service.UserMemoryExpiryService;
@@ -72,6 +74,12 @@ class UserMemorySpringTransactionIntegrationTest {
 
     @Autowired
     private MemoryIndexOutboxStateService outboxState;
+
+    @Autowired
+    private UserMemoryMapper memoryMapper;
+
+    @Autowired
+    private MemorySuppressionMapper suppressionMapper;
 
     @Autowired
     private JdbcTemplate jdbc;
@@ -232,6 +240,37 @@ class UserMemorySpringTransactionIntegrationTest {
         assertThat(jdbc.queryForObject("""
                 SELECT status FROM agent_memory_outbox WHERE event_id = ?
                 """, String.class, claim.eventId())).isEqualTo("DONE");
+    }
+
+    @Test
+    void recallQueriesAreOwnerScopedAndExecutableOnRealMySql() {
+        LocalDateTime now = LocalDateTime.now();
+
+        assertThat(memoryMapper.selectGlobalExplicit(1L, 2L, 7L, now, 3))
+                .extracting(com.xjjk.agent.memory.persistence.entity.UserMemoryEntity::getMemoryId)
+                .containsExactly("00000000-0000-0000-0000-000000000010");
+        assertThat(memoryMapper.selectActiveCandidates(
+                1L, 2L, 7L,
+                List.of("00000000-0000-0000-0000-000000000010"), now))
+                .hasSize(1);
+        assertThat(memoryMapper.selectActiveCandidates(
+                1L, 99L, 7L,
+                List.of("00000000-0000-0000-0000-000000000010"), now))
+                .isEmpty();
+
+        jdbc.update("""
+                INSERT INTO agent_memory_suppression (
+                    suppression_id, tenant_id, user_id, memory_generation,
+                    canonical_key, content_hash, status, created_at, updated_at
+                ) VALUES (
+                    '70000000-0000-0000-0000-000000000099', 1, 2, 7,
+                    'preference.answer_style', REPEAT('f', 64), 'ACTIVE',
+                    UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)
+                )
+                """);
+        assertThat(suppressionMapper.selectActiveKeys(
+                1L, 2L, 7L, List.of("preference.answer_style"), 20))
+                .containsExactly("preference.answer_style");
     }
 
     @Test
