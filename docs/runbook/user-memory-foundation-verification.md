@@ -2,7 +2,7 @@
 
 ## 范围
 
-本手册验证 Agent Server 前两个阶段能力：显式记忆写入、用户可见记忆管理、记忆开关、世代清空、异步隐式记忆抽取、自动记忆过期和索引 Outbox。当前阶段仍不会消费 Outbox，也不会把记忆写入 Elasticsearch/Milvus 或注入聊天上下文。
+本手册验证 Agent Server 的记忆基础能力：显式记忆写入、用户可见记忆管理、记忆开关、世代清空、异步隐式记忆抽取、自动记忆过期和索引 Outbox。ES/Milvus 投递与跨会话召回请继续执行 `user-memory-index-recall-verification.md`。
 
 ## 准备
 
@@ -111,7 +111,7 @@ LIMIT 20;
 7. 将一条隐藏自动记忆的 `expires_at` 调整到当前 UTC 时间之前，等待过期调度。
    - 预期状态变为 `EXPIRED`，并在同一事务新增 `PENDING / DELETE` Outbox。
 
-注意：本阶段写出的 `PENDING` Outbox 尚无消费者，自动记忆还不会影响跨会话回答。需要完成下一阶段 ES/Milvus 索引消费与召回注入后，才能验证真正的跨会话个性化效果。
+注意：`PENDING` Outbox 会由索引 worker 异步消费；只有事件变为 `DONE` 后，才进入跨会话召回验证。
 
 ## 开关与故障验证
 

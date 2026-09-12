@@ -17,6 +17,11 @@ class UserMemoryMetricsTest {
         metrics.success("auto_extract", 2);
         metrics.success("expiry", 3);
         metrics.failure("delete", ApiErrorCode.MEMORY_NOT_FOUND);
+        metrics.indexOperation("UPSERT", "SUCCESS");
+        metrics.outboxTransition("DONE");
+        metrics.recall("KEYWORD_ONLY", "OK");
+        metrics.candidateCount("INDEX", 4);
+        metrics.mysqlRejected("VERSION_MISMATCH", 2);
 
         assertThat(registry.get("agent.user.memory.operation")
                 .tags("operation", "explicit_save", "outcome", "success", "code", "NONE")
@@ -33,5 +38,10 @@ class UserMemoryMetricsTest {
                     assertThat(tag.getKey()).doesNotContain("content", "evidence");
                     assertThat(tag.getValue()).doesNotContain("请记住", "用户偏好");
                 });
+        assertThat(registry.get("agent.user.memory.index.operation")
+                .tags("operation", "UPSERT", "outcome", "SUCCESS")
+                .counter().count()).isEqualTo(1.0);
+        assertThat(registry.get("agent.user.memory.mysql.rejected")
+                .tag("reason", "VERSION_MISMATCH").counter().count()).isEqualTo(2.0);
     }
 }

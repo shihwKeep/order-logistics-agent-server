@@ -6,6 +6,7 @@ import com.xjjk.agent.memory.domain.MemoryOutboxOperation;
 import com.xjjk.agent.memory.domain.MemoryOutboxStatus;
 import com.xjjk.agent.memory.persistence.entity.MemoryOutboxEntity;
 import com.xjjk.agent.memory.persistence.mapper.MemoryOutboxMapper;
+import com.xjjk.agent.memory.observation.UserMemoryMetrics;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -28,11 +29,13 @@ public class MemoryIndexOutboxStateService {
     private final MemoryIndexWorkerProperties properties;
     private final Clock clock;
     private final String instanceId;
+    private final UserMemoryMetrics metrics;
 
     @Autowired
     public MemoryIndexOutboxStateService(
-            MemoryOutboxMapper mapper, MemoryIndexWorkerProperties properties) {
-        this(mapper, properties, Clock.systemUTC(), UUID.randomUUID().toString());
+            MemoryOutboxMapper mapper, MemoryIndexWorkerProperties properties,
+            UserMemoryMetrics metrics) {
+        this(mapper, properties, Clock.systemUTC(), UUID.randomUUID().toString(), metrics);
     }
 
     MemoryIndexOutboxStateService(
@@ -40,10 +43,20 @@ public class MemoryIndexOutboxStateService {
             MemoryIndexWorkerProperties properties,
             Clock clock,
             String instanceId) {
+        this(mapper, properties, clock, instanceId, null);
+    }
+
+    MemoryIndexOutboxStateService(
+            MemoryOutboxMapper mapper,
+            MemoryIndexWorkerProperties properties,
+            Clock clock,
+            String instanceId,
+            UserMemoryMetrics metrics) {
         this.mapper = Objects.requireNonNull(mapper, "mapper");
         this.properties = Objects.requireNonNull(properties, "properties");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
+        this.metrics = metrics;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
@@ -70,6 +83,7 @@ public class MemoryIndexOutboxStateService {
                 claim.id(), claim.leaseToken(), claim.lockedBy(), now()) != 1) {
             throw new IllegalStateException("记忆索引任务完成状态更新失败");
         }
+        if (metrics != null) metrics.outboxTransition("DONE");
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
@@ -85,12 +99,15 @@ public class MemoryIndexOutboxStateService {
                 nextAttempt, nextRunAt, safeCode(errorCode), now) != 1) {
             throw new IllegalStateException("记忆索引任务重试状态更新失败");
         }
+        if (metrics != null) metrics.outboxTransition(status);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public int recoverExpiredLeases() {
-        return mapper.recoverExpiredLeases(
+        int recovered = mapper.recoverExpiredLeases(
                 now(), properties.maxAttempts(), properties.claimBatchSize());
+        if (metrics != null && recovered > 0) metrics.outboxTransition("RECOVERED");
+        return recovered;
     }
 
     private MemoryOutboxClaim toClaim(

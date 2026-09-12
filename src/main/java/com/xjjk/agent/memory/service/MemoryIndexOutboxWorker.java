@@ -7,6 +7,7 @@ import com.xjjk.agent.memory.index.MemoryIndexGateway;
 import com.xjjk.agent.memory.index.MemoryIndexUnavailableException;
 import com.xjjk.agent.memory.persistence.entity.UserMemoryEntity;
 import com.xjjk.agent.memory.persistence.mapper.UserMemoryMapper;
+import com.xjjk.agent.memory.observation.UserMemoryMetrics;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -26,13 +27,15 @@ public class MemoryIndexOutboxWorker {
     private final MemoryIndexGateway gateway;
     private final MemoryIndexOutboxStateService state;
     private final Clock clock;
+    private final UserMemoryMetrics metrics;
 
     @Autowired
     public MemoryIndexOutboxWorker(
             UserMemoryMapper memoryMapper,
             MemoryIndexGateway gateway,
-            MemoryIndexOutboxStateService state) {
-        this(memoryMapper, gateway, state, Clock.systemUTC());
+            MemoryIndexOutboxStateService state,
+            UserMemoryMetrics metrics) {
+        this(memoryMapper, gateway, state, Clock.systemUTC(), metrics);
     }
 
     MemoryIndexOutboxWorker(
@@ -40,25 +43,38 @@ public class MemoryIndexOutboxWorker {
             MemoryIndexGateway gateway,
             MemoryIndexOutboxStateService state,
             Clock clock) {
+        this(memoryMapper, gateway, state, clock, null);
+    }
+
+    MemoryIndexOutboxWorker(
+            UserMemoryMapper memoryMapper,
+            MemoryIndexGateway gateway,
+            MemoryIndexOutboxStateService state,
+            Clock clock,
+            UserMemoryMetrics metrics) {
         this.memoryMapper = Objects.requireNonNull(memoryMapper, "memoryMapper");
         this.gateway = Objects.requireNonNull(gateway, "gateway");
         this.state = Objects.requireNonNull(state, "state");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.metrics = metrics;
     }
 
     public void process(MemoryOutboxClaim claim) {
         try {
             gateway.apply(toCommand(claim));
         } catch (MemoryIndexUnavailableException unavailable) {
+            recordIndex(claim, "FAILURE");
             state.scheduleRetry(claim, "INDEX_UNAVAILABLE");
             return;
         } catch (RuntimeException failure) {
+            recordIndex(claim, "FAILURE");
             log.warn("memory_index_outbox eventId={}, operation={}, result=RETRY, errorCode=WORKER_FAILED",
                     claim.eventId(), claim.operation());
             state.scheduleRetry(claim, "WORKER_FAILED");
             return;
         }
         state.complete(claim);
+        recordIndex(claim, "SUCCESS");
     }
 
     private MemoryIndexCommand toCommand(MemoryOutboxClaim claim) {
@@ -92,5 +108,11 @@ public class MemoryIndexOutboxWorker {
     private LocalDateTime now() {
         return LocalDateTime.ofInstant(
                 clock.instant().truncatedTo(ChronoUnit.MILLIS), ZoneOffset.UTC);
+    }
+
+    private void recordIndex(MemoryOutboxClaim claim, String outcome) {
+        if (metrics != null) {
+            metrics.indexOperation(claim.operation().name(), outcome);
+        }
     }
 }

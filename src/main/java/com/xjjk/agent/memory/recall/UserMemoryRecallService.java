@@ -8,6 +8,7 @@ import com.xjjk.agent.memory.persistence.entity.UserMemorySettingEntity;
 import com.xjjk.agent.memory.persistence.mapper.MemorySuppressionMapper;
 import com.xjjk.agent.memory.persistence.mapper.UserMemoryMapper;
 import com.xjjk.agent.memory.persistence.mapper.UserMemorySettingMapper;
+import com.xjjk.agent.memory.observation.UserMemoryMetrics;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -41,6 +42,7 @@ public class UserMemoryRecallService {
     private final UserMemoryProperties memoryProperties;
     private final MemoryRetrievalProperties retrievalProperties;
     private final Clock clock;
+    private final UserMemoryMetrics metrics;
 
     @Autowired
     public UserMemoryRecallService(
@@ -51,9 +53,10 @@ public class UserMemoryRecallService {
             MemoryRecallGate gate,
             MemoryCandidateSelector selector,
             UserMemoryProperties memoryProperties,
-            MemoryRetrievalProperties retrievalProperties) {
+            MemoryRetrievalProperties retrievalProperties,
+            UserMemoryMetrics metrics) {
         this(settingMapper, memoryMapper, suppressionMapper, gateway, gate, selector,
-                memoryProperties, retrievalProperties, Clock.systemUTC());
+                memoryProperties, retrievalProperties, Clock.systemUTC(), metrics);
     }
 
     UserMemoryRecallService(
@@ -66,6 +69,21 @@ public class UserMemoryRecallService {
             UserMemoryProperties memoryProperties,
             MemoryRetrievalProperties retrievalProperties,
             Clock clock) {
+        this(settingMapper, memoryMapper, suppressionMapper, gateway, gate, selector,
+                memoryProperties, retrievalProperties, clock, null);
+    }
+
+    UserMemoryRecallService(
+            UserMemorySettingMapper settingMapper,
+            UserMemoryMapper memoryMapper,
+            MemorySuppressionMapper suppressionMapper,
+            MemoryRecallGateway gateway,
+            MemoryRecallGate gate,
+            MemoryCandidateSelector selector,
+            UserMemoryProperties memoryProperties,
+            MemoryRetrievalProperties retrievalProperties,
+            Clock clock,
+            UserMemoryMetrics metrics) {
         this.settingMapper = Objects.requireNonNull(settingMapper, "settingMapper");
         this.memoryMapper = Objects.requireNonNull(memoryMapper, "memoryMapper");
         this.suppressionMapper = Objects.requireNonNull(suppressionMapper, "suppressionMapper");
@@ -76,6 +94,7 @@ public class UserMemoryRecallService {
         this.retrievalProperties = Objects.requireNonNull(
                 retrievalProperties, "retrievalProperties");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.metrics = metrics;
     }
 
     public UserMemoryRecallResult recall(AgentIdentity identity, String query) {
@@ -111,11 +130,13 @@ public class UserMemoryRecallService {
         }
         long generation = setting.getMemoryGeneration();
         LocalDateTime now = now();
-        List<UserMemoryEntity> globals = memoryMapper.selectGlobalExplicit(
+        List<UserMemoryEntity> rawGlobals = memoryMapper.selectGlobalExplicit(
                 tenantId, userId, generation, now,
-                retrievalProperties.globalExplicitLimit()).stream()
+                retrievalProperties.globalExplicitLimit());
+        List<UserMemoryEntity> globals = rawGlobals.stream()
                 .filter(memory -> validGlobal(memory, tenantId, userId, generation, now))
                 .toList();
+        rejected("OWNER_OR_STATE", rawGlobals.size() - globals.size());
 
         boolean semanticAttempted = gate.shouldRetrieve(query);
         String semanticCode = semanticAttempted ? "NO_CANDIDATE" : "SKIPPED";
@@ -124,6 +145,10 @@ public class UserMemoryRecallService {
             MemoryRecallGatewayResult recalled = gateway.retrieve(
                     tenantId, userId, generation, query);
             semanticCode = recalled.resultCode();
+            if (metrics != null) {
+                metrics.recall(recalled.degradationMode(), recalled.resultCode());
+                metrics.candidateCount("INDEX", recalled.candidates().size());
+            }
             semantic = loadSemantic(tenantId, userId, generation, now, recalled.candidates());
         }
 
@@ -134,9 +159,12 @@ public class UserMemoryRecallService {
                 suppressionMapper.selectActiveKeys(
                         tenantId, userId, generation,
                         List.copyOf(keys), retrievalProperties.maxCandidates()));
+        rejected("SUPPRESSED", suppressed.size());
+        List<RecalledMemory> selected = selector.select(
+                globals, semantic, suppressed, retrievalProperties.maxSelected());
+        if (metrics != null) metrics.candidateCount("SELECTED", selected.size());
         return new UserMemoryRecallResult(
-                selector.select(globals, semantic, suppressed,
-                        retrievalProperties.maxSelected()),
+                selected,
                 semanticAttempted, semanticCode);
     }
 
@@ -162,14 +190,20 @@ public class UserMemoryRecallService {
             }
         }
         List<MemorySelectionCandidate> result = new ArrayList<>();
+        int versionRejected = 0;
         for (MemoryRecallCandidateSignal signal : bounded) {
             UserMemoryEntity row = byId.get(signal.memoryId());
             if (row != null && row.getVersion() != null
                     && row.getVersion() == signal.memoryVersion()) {
                 result.add(new MemorySelectionCandidate(
                         row, signal.score(), signal.rank(), false));
+            } else if (row != null) {
+                versionRejected++;
             }
         }
+        rejected("VERSION_MISMATCH", versionRejected);
+        rejected("OWNER_OR_STATE", bounded.size() - result.size() - versionRejected);
+        if (metrics != null) metrics.candidateCount("MYSQL_VALIDATED", result.size());
         return List.copyOf(result);
     }
 
@@ -212,5 +246,9 @@ public class UserMemoryRecallService {
     private LocalDateTime now() {
         return LocalDateTime.ofInstant(
                 clock.instant().truncatedTo(ChronoUnit.MILLIS), ZoneOffset.UTC);
+    }
+
+    private void rejected(String reason, int count) {
+        if (metrics != null) metrics.mysqlRejected(reason, count);
     }
 }

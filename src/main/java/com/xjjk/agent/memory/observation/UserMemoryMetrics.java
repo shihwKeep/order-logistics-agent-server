@@ -14,6 +14,20 @@ public class UserMemoryMetrics {
     private static final Set<String> OPERATIONS = Set.of(
             "explicit_save", "edit", "delete", "clear_explicit", "clear_all",
             "auto_extract", "expiry");
+    private static final Set<String> INDEX_OPERATIONS = Set.of(
+            "UPSERT", "DELETE", "DELETE_EXPLICIT_SCOPE", "CLEAR_GENERATION");
+    private static final Set<String> INDEX_OUTCOMES = Set.of("SUCCESS", "FAILURE");
+    private static final Set<String> OUTBOX_STATES = Set.of(
+            "DONE", "RETRY", "DEAD", "RECOVERED");
+    private static final Set<String> RECALL_DEGRADATIONS = Set.of(
+            "NONE", "KEYWORD_ONLY", "VECTOR_ONLY", "ALL_RECALL_UNAVAILABLE",
+            "DISABLED", "UNAVAILABLE");
+    private static final Set<String> RECALL_RESULTS = Set.of(
+            "OK", "NO_CANDIDATE", "DISABLED", "UNAVAILABLE", "SKIPPED");
+    private static final Set<String> CANDIDATE_STAGES = Set.of(
+            "INDEX", "MYSQL_VALIDATED", "SELECTED");
+    private static final Set<String> REJECTION_REASONS = Set.of(
+            "OWNER_OR_STATE", "VERSION_MISMATCH", "SUPPRESSED");
     private final MeterRegistry registry;
 
     public UserMemoryMetrics(MeterRegistry registry) {
@@ -36,6 +50,40 @@ public class UserMemoryMetrics {
         record(operation, "failure", requireCode(code));
     }
 
+    public void indexOperation(String operation, String outcome) {
+        registry.counter("agent.user.memory.index.operation",
+                "operation", require(operation, INDEX_OPERATIONS, "索引操作"),
+                "outcome", require(outcome, INDEX_OUTCOMES, "索引结果"))
+                .increment();
+    }
+
+    public void outboxTransition(String status) {
+        registry.counter("agent.user.memory.outbox.transition",
+                "status", require(status, OUTBOX_STATES, "Outbox状态"))
+                .increment();
+    }
+
+    public void recall(String degradation, String resultCode) {
+        registry.counter("agent.user.memory.recall",
+                "degradation", require(degradation, RECALL_DEGRADATIONS, "召回降级模式"),
+                "result", require(resultCode, RECALL_RESULTS, "召回结果"))
+                .increment();
+    }
+
+    public void candidateCount(String stage, int count) {
+        if (count < 0) throw new IllegalArgumentException("候选数量不能为负数");
+        registry.summary("agent.user.memory.recall.candidates",
+                "stage", require(stage, CANDIDATE_STAGES, "候选阶段"))
+                .record(count);
+    }
+
+    public void mysqlRejected(String reason, int count) {
+        if (count <= 0) return;
+        registry.counter("agent.user.memory.mysql.rejected",
+                "reason", require(reason, REJECTION_REASONS, "MySQL拒绝原因"))
+                .increment(count);
+    }
+
     private void record(String operation, String outcome, String code) {
         registry.counter("agent.user.memory.operation",
                 "operation", requireOperation(operation),
@@ -52,5 +100,12 @@ public class UserMemoryMetrics {
 
     private static String requireCode(ApiErrorCode code) {
         return Objects.requireNonNull(code, "code").code();
+    }
+
+    private static String require(String value, Set<String> allowed, String field) {
+        if (!allowed.contains(value)) {
+            throw new IllegalArgumentException("未知" + field);
+        }
+        return value;
     }
 }
