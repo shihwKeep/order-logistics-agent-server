@@ -13,6 +13,9 @@ import com.xjjk.agent.chat.service.summary.ChatSummaryTaskScheduler;
 import com.xjjk.agent.chat.stream.ChatStreamControl;
 import com.xjjk.agent.common.api.ApiErrorCode;
 import com.xjjk.agent.common.exception.BusinessException;
+import com.xjjk.agent.memory.recall.UserMemoryContextRenderer;
+import com.xjjk.agent.memory.recall.UserMemoryRecallService;
+import com.xjjk.agent.memory.recall.UserMemorySystemPromptPolicy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -35,6 +38,9 @@ public class ChatContextPreparationService {
     private final AiPromptProperties promptProperties;
     private final RecentOrderReferenceProvider orderReferenceProvider;
     private final ChatBusinessContextRenderer businessContextRenderer;
+    private final UserMemoryRecallService userMemoryRecallService;
+    private final UserMemoryContextRenderer userMemoryContextRenderer;
+    private final UserMemorySystemPromptPolicy userMemoryPromptPolicy;
 
     /** 生产构造器：由 Spring 注入完整的短期记忆、摘要和会话内业务引用能力。 */
     @Autowired
@@ -45,7 +51,10 @@ public class ChatContextPreparationService {
             ChatSummaryTaskScheduler summaryTaskScheduler,
             AiPromptProperties promptProperties,
             RecentOrderReferenceProvider orderReferenceProvider,
-            ChatBusinessContextRenderer businessContextRenderer
+            ChatBusinessContextRenderer businessContextRenderer,
+            UserMemoryRecallService userMemoryRecallService,
+            UserMemoryContextRenderer userMemoryContextRenderer,
+            UserMemorySystemPromptPolicy userMemoryPromptPolicy
     ) {
         this.snapshotProvider = snapshotProvider;
         this.summaryProvider = summaryProvider;
@@ -54,6 +63,9 @@ public class ChatContextPreparationService {
         this.promptProperties = promptProperties;
         this.orderReferenceProvider = orderReferenceProvider;
         this.businessContextRenderer = businessContextRenderer;
+        this.userMemoryRecallService = userMemoryRecallService;
+        this.userMemoryContextRenderer = userMemoryContextRenderer;
+        this.userMemoryPromptPolicy = userMemoryPromptPolicy;
     }
 
     /**
@@ -67,7 +79,8 @@ public class ChatContextPreparationService {
             AiPromptProperties promptProperties
     ) {
         this(snapshotProvider, summaryProvider, contextSelector,
-                summaryTaskScheduler, promptProperties, null, null);
+                summaryTaskScheduler, promptProperties, null, null,
+                null, null, null);
     }
 
     public ChatContextSelection prepare(
@@ -97,20 +110,31 @@ public class ChatContextPreparationService {
                 turn, snapshot.beforeSequence());
         checkStopped(control);
 
-        // 第四步：在统一 Token 预算内先保护最近原始轮次，再拼接低权限摘要和更早可容纳的原文。
+        // 第四步：按认证租户和用户读取跨会话记忆，失败时仅关闭本轮记忆增强。
+        String userMemoryContext = loadUserMemoryContextBestEffort(turn, message);
+        checkStopped(control);
+
+        // 第五步：在统一 Token 预算内先保护最近原始轮次，再拼接低权限摘要和更早可容纳的原文。
         // Selector 同时计算摘要覆盖边界与原文起点，显式标记二者之间是否存在上下文空档。
-        // 业务引用的优先级最低：只有在不挤占已选摘要和原始历史时才会进入模型上下文。
+        // 记忆优先级低于业务引用：只有在前述内容均选定后仍有预算才会进入。
         long startedAt = System.nanoTime();
-        ChatContextSelection selection = businessContext == null
+        String effectiveSystemPrompt = userMemoryPromptPolicy == null
+                ? promptProperties.system()
+                : userMemoryPromptPolicy.enhance(promptProperties.system());
+        ChatContextSelection selection = businessContext == null && userMemoryContext == null
                 ? contextSelector.select(
-                        promptProperties.system(), message, snapshot, summary)
-                : contextSelector.select(
-                        promptProperties.system(), message, snapshot, summary,
-                        businessContext);
+                        effectiveSystemPrompt, message, snapshot, summary)
+                : userMemoryContext == null
+                    ? contextSelector.select(
+                            effectiveSystemPrompt, message, snapshot, summary,
+                            businessContext)
+                    : contextSelector.select(
+                            effectiveSystemPrompt, message, snapshot, summary,
+                            businessContext, userMemoryContext);
         long durationMs = (System.nanoTime() - startedAt) / 1_000_000;
         checkStopped(control);
 
-        // 第五步：出现空档时只登记后台强制摘要信号；当前请求继续使用已经安全选中的上下文。
+        // 第六步：出现空档时只登记后台强制摘要信号；当前请求继续使用已经安全选中的上下文。
         requestContextPressureBestEffort(selection);
 
         // 表示选中结果将交给模型调用路径，不代表远端已经接收。
@@ -122,6 +146,24 @@ public class ChatContextPreparationService {
                 turn.requestId(), selection.strategyVersion(), promptProperties.version(),
                 selection.selectedTurns().size(), selection.estimatedInputTokens());
         return selection;
+    }
+
+    private String loadUserMemoryContextBestEffort(
+            ChatTurnContext turn, String message) {
+        if (userMemoryRecallService == null || userMemoryContextRenderer == null) {
+            return null;
+        }
+        try {
+            return userMemoryContextRenderer.render(
+                    userMemoryRecallService.recall(
+                            turn.tenantId(), turn.userId(), message).memories());
+        } catch (SecurityException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            log.warn("user_memory_context_load_failed requestId={}, exceptionType={}",
+                    turn.requestId(), exception.getClass().getSimpleName());
+            return null;
+        }
     }
 
     private String loadBusinessContextBestEffort(

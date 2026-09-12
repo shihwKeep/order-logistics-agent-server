@@ -80,7 +80,11 @@ public class UserMemoryRecallService {
 
     public UserMemoryRecallResult recall(AgentIdentity identity, String query) {
         Objects.requireNonNull(identity, "identity");
-        if (identity.tenantId() <= 0 || identity.userId() <= 0
+        return recall(identity.tenantId(), identity.userId(), query);
+    }
+
+    public UserMemoryRecallResult recall(long tenantId, long userId, String query) {
+        if (tenantId <= 0 || userId <= 0
                 || query == null || query.isBlank() || query.length() > 2_000) {
             return UserMemoryRecallResult.empty();
         }
@@ -88,7 +92,7 @@ public class UserMemoryRecallService {
             return UserMemoryRecallResult.empty();
         }
         try {
-            return recallSafely(identity, query.strip());
+            return recallSafely(tenantId, userId, query.strip());
         } catch (RuntimeException failure) {
             // 记忆是可选增强；数据库终审异常时整批失效，不能阻断普通聊天。
             log.warn("user_memory_recall result=DEGRADED errorCode=MYSQL_VALIDATION_FAILED exceptionType={}",
@@ -97,9 +101,9 @@ public class UserMemoryRecallService {
         }
     }
 
-    private UserMemoryRecallResult recallSafely(AgentIdentity identity, String query) {
+    private UserMemoryRecallResult recallSafely(long tenantId, long userId, String query) {
         UserMemorySettingEntity setting = settingMapper.selectOwned(
-                identity.tenantId(), identity.userId());
+                tenantId, userId);
         if (setting == null || !Boolean.TRUE.equals(setting.getMemoryEnabled())
                 || setting.getMemoryGeneration() == null
                 || setting.getMemoryGeneration() <= 0) {
@@ -108,9 +112,9 @@ public class UserMemoryRecallService {
         long generation = setting.getMemoryGeneration();
         LocalDateTime now = now();
         List<UserMemoryEntity> globals = memoryMapper.selectGlobalExplicit(
-                identity.tenantId(), identity.userId(), generation, now,
+                tenantId, userId, generation, now,
                 retrievalProperties.globalExplicitLimit()).stream()
-                .filter(memory -> validGlobal(memory, identity, generation, now))
+                .filter(memory -> validGlobal(memory, tenantId, userId, generation, now))
                 .toList();
 
         boolean semanticAttempted = gate.shouldRetrieve(query);
@@ -118,9 +122,9 @@ public class UserMemoryRecallService {
         List<MemorySelectionCandidate> semantic = List.of();
         if (semanticAttempted) {
             MemoryRecallGatewayResult recalled = gateway.retrieve(
-                    identity.tenantId(), identity.userId(), generation, query);
+                    tenantId, userId, generation, query);
             semanticCode = recalled.resultCode();
-            semantic = loadSemantic(identity, generation, now, recalled.candidates());
+            semantic = loadSemantic(tenantId, userId, generation, now, recalled.candidates());
         }
 
         LinkedHashSet<String> keys = new LinkedHashSet<>();
@@ -128,7 +132,7 @@ public class UserMemoryRecallService {
         semantic.forEach(candidate -> keys.add(candidate.memory().getCanonicalKey()));
         Set<String> suppressed = keys.isEmpty() ? Set.of() : Set.copyOf(
                 suppressionMapper.selectActiveKeys(
-                        identity.tenantId(), identity.userId(), generation,
+                        tenantId, userId, generation,
                         List.copyOf(keys), retrievalProperties.maxCandidates()));
         return new UserMemoryRecallResult(
                 selector.select(globals, semantic, suppressed,
@@ -137,7 +141,8 @@ public class UserMemoryRecallService {
     }
 
     private List<MemorySelectionCandidate> loadSemantic(
-            AgentIdentity identity,
+            long tenantId,
+            long userId,
             long generation,
             LocalDateTime now,
             List<MemoryRecallCandidateSignal> signals) {
@@ -149,10 +154,10 @@ public class UserMemoryRecallService {
         List<String> ids = bounded.stream()
                 .map(MemoryRecallCandidateSignal::memoryId).distinct().toList();
         List<UserMemoryEntity> rows = memoryMapper.selectActiveCandidates(
-                identity.tenantId(), identity.userId(), generation, ids, now);
+                tenantId, userId, generation, ids, now);
         Map<String, UserMemoryEntity> byId = new HashMap<>();
         for (UserMemoryEntity row : rows) {
-            if (validOwned(row, identity, generation, now)) {
+            if (validOwned(row, tenantId, userId, generation, now)) {
                 byId.put(row.getMemoryId(), row);
             }
         }
@@ -170,10 +175,11 @@ public class UserMemoryRecallService {
 
     private boolean validGlobal(
             UserMemoryEntity memory,
-            AgentIdentity identity,
+            long tenantId,
+            long userId,
             long generation,
             LocalDateTime now) {
-        return validOwned(memory, identity, generation, now)
+        return validOwned(memory, tenantId, userId, generation, now)
                 && "USER_EXPLICIT".equals(memory.getSourceType())
                 && "VISIBLE".equals(memory.getVisibility())
                 && GLOBAL_CATEGORIES.contains(memory.getCategory());
@@ -181,12 +187,13 @@ public class UserMemoryRecallService {
 
     private boolean validOwned(
             UserMemoryEntity memory,
-            AgentIdentity identity,
+            long tenantId,
+            long userId,
             long generation,
             LocalDateTime now) {
         return memory != null
-                && Objects.equals(memory.getTenantId(), identity.tenantId())
-                && Objects.equals(memory.getUserId(), identity.userId())
+                && Objects.equals(memory.getTenantId(), tenantId)
+                && Objects.equals(memory.getUserId(), userId)
                 && Objects.equals(memory.getMemoryGeneration(), generation)
                 && memory.getMemoryId() != null && !memory.getMemoryId().isBlank()
                 && memory.getVersion() != null && memory.getVersion() > 0

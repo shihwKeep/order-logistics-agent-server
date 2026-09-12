@@ -83,6 +83,21 @@ public class ChatContextSelector {
             ChatSummarySnapshot summary,
             String businessContext
     ) {
+        return select(systemPrompt, currentMessage, source, summary,
+                businessContext, null);
+    }
+
+    /**
+     * 用户记忆优先级低于摘要、最近原文和业务引用；只能使用剩余预算。
+     */
+    public ChatContextSelection select(
+            String systemPrompt,
+            String currentMessage,
+            ChatHistorySnapshot source,
+            ChatSummarySnapshot summary,
+            String businessContext,
+            String userMemoryContext
+    ) {
         Objects.requireNonNull(source, "历史快照不能为空");
         Objects.requireNonNull(summary, "摘要快照不能为空");
         checkInterrupted();
@@ -214,6 +229,27 @@ public class ChatContextSelector {
                 businessContextBudgetTruncated = true;
             }
         }
+        String selectedUserMemoryContext = null;
+        long userMemoryEstimatedTokens = 0L;
+        boolean userMemoryBudgetTruncated = false;
+        if (userMemoryContext != null && !userMemoryContext.isBlank()) {
+            long withUserMemory = tokenEstimator.estimate(
+                    systemPrompt,
+                    selectedSummary,
+                    selectedBusinessContext,
+                    userMemoryContext,
+                    selectedTurns,
+                    currentMessage
+            );
+            if (withUserMemory <= budget.usableInputTokens()) {
+                selectedUserMemoryContext = userMemoryContext;
+                userMemoryEstimatedTokens = Math.subtractExact(
+                        withUserMemory, selectedEstimatedTokens);
+                selectedEstimatedTokens = withUserMemory;
+            } else {
+                userMemoryBudgetTruncated = true;
+            }
+        }
         long selectedFrom = selectedTurns.isEmpty()
                 ? 0L : selectedTurns.get(0).userSequence();
         long selectedUntil = selectedTurns.isEmpty()
@@ -250,7 +286,11 @@ public class ChatContextSelector {
                 budget,
                 selectedEstimatedTokens,
                 tokenBudgetTruncated,
-                tokenEstimator.strategyVersion()
+                tokenEstimator.strategyVersion(),
+                systemPrompt,
+                selectedUserMemoryContext,
+                userMemoryEstimatedTokens,
+                userMemoryBudgetTruncated
         );
     }
 

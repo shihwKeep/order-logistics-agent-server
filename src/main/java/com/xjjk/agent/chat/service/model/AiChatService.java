@@ -133,6 +133,8 @@ public class AiChatService {
 
             return chatClient
                     .prompt()
+                    // 与 Token 估算使用同一个已增强系统提示词，避免预算漂移。
+                    .system(selection.effectiveSystemPrompt())
                     .user(message)
                     // 工具只注册在本次请求，ToolContext 中的可信身份、requestId
                     // 和 SSE 发布器不会进入模型提示词，也不能由模型参数覆盖。

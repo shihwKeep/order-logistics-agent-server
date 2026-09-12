@@ -4,6 +4,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import com.xjjk.agent.chat.service.model.AiModelRuntimeSettings;
+import com.xjjk.agent.memory.recall.UserMemorySystemPromptPolicy;
 
 @Configuration(proxyBeanMethods = false)
 // Bean 之间通过参数注入依赖，可以使用 proxyBeanMethods=false；如果依赖直接调用其他 @Bean 方法来获取容器中的实例，就需要注意保留代理
@@ -13,10 +14,11 @@ public class AiChatConfiguration {
     public ChatClient agentChatClient(
             ChatClient.Builder builder,
             AiPromptProperties promptProperties,
-            AiModelRuntimeSettings runtimeSettings
+            AiModelRuntimeSettings runtimeSettings,
+            UserMemorySystemPromptPolicy memoryPromptPolicy
     ) {
         return builder
-                .defaultSystem(promptProperties.system())
+                .defaultSystem(memoryPromptPolicy.enhance(promptProperties.system()))
                 .defaultOptions(runtimeSettings.createChatOptions())
                 .build();
     }

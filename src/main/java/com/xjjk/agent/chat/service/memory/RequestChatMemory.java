@@ -50,6 +50,11 @@ public final class RequestChatMemory implements ChatMemory {
             messages.add(new UserMessage(selection.selectedBusinessReference()));
         }
 
+        if (selection.selectedUserMemoryContext() != null) {
+            // 跨会话记忆保持 USER 低权限，并位于会话原文之前。
+            messages.add(new UserMessage(selection.selectedUserMemoryContext()));
+        }
+
         for (ChatHistoryTurn turn : selection.selectedTurns()) {
             messages.add(new UserMessage(turn.userContent()));
             messages.add(new AssistantMessage(turn.assistantContent()));

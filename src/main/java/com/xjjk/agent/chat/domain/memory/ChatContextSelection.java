@@ -46,7 +46,11 @@ public record ChatContextSelection(
         ChatContextBudget budget,
         long estimatedInputTokens,
         boolean tokenBudgetTruncated,
-        String strategyVersion
+        String strategyVersion,
+        String effectiveSystemPrompt,
+        String selectedUserMemoryContext,
+        long userMemoryEstimatedTokens,
+        boolean userMemoryBudgetTruncated
 ) {
 
     public ChatContextSelection {
@@ -58,6 +62,9 @@ public record ChatContextSelection(
 
         if (strategyVersion == null || strategyVersion.isBlank()) {
             throw new IllegalArgumentException("估算策略版本不能为空");
+        }
+        if (effectiveSystemPrompt == null || effectiveSystemPrompt.isBlank()) {
+            throw new IllegalArgumentException("实际系统提示词不能为空");
         }
 
         if (estimatedInputTokens <= 0
@@ -89,6 +96,17 @@ public record ChatContextSelection(
         if (selectedBusinessReference != null
                 && selectedBusinessReference.isBlank()) {
             throw new IllegalArgumentException("业务引用不能为空白文本");
+        }
+
+        if ((selectedUserMemoryContext == null) != (userMemoryEstimatedTokens == 0)
+                || userMemoryEstimatedTokens < 0) {
+            throw new IllegalArgumentException("用户记忆选择结果与估算值不一致");
+        }
+        if (selectedUserMemoryContext != null && selectedUserMemoryContext.isBlank()) {
+            throw new IllegalArgumentException("用户记忆上下文不能为空白文本");
+        }
+        if (selectedUserMemoryContext != null && userMemoryBudgetTruncated) {
+            throw new IllegalArgumentException("已选用户记忆不能同时标记预算舍弃");
         }
         if (selectedBusinessReference != null
                 && businessReferenceBudgetTruncated) {
@@ -164,6 +182,40 @@ public record ChatContextSelection(
         return selectedBusinessReference != null;
     }
 
+    public boolean hasUserMemoryContext() {
+        return selectedUserMemoryContext != null;
+    }
+
+    /** 兼容加入用户记忆字段之前的完整构造调用。 */
+    public ChatContextSelection(
+            ChatHistorySnapshot source,
+            List<ChatHistoryTurn> selectedTurns,
+            String selectedSummary,
+            long summaryEstimatedTokens,
+            long selectedSummaryVersion,
+            long selectedSummaryCoveredUntilSequence,
+            String selectedBusinessReference,
+            long businessReferenceEstimatedTokens,
+            boolean businessReferenceBudgetTruncated,
+            long selectedHistoryFromSequence,
+            long selectedHistoryUntilSequence,
+            boolean hasContextGap,
+            long gapFromSequence,
+            long gapUntilSequence,
+            ChatContextBudget budget,
+            long estimatedInputTokens,
+            boolean tokenBudgetTruncated,
+            String strategyVersion
+    ) {
+        this(source, selectedTurns, selectedSummary, summaryEstimatedTokens,
+                selectedSummaryVersion, selectedSummaryCoveredUntilSequence,
+                selectedBusinessReference, businessReferenceEstimatedTokens,
+                businessReferenceBudgetTruncated, selectedHistoryFromSequence,
+                selectedHistoryUntilSequence, hasContextGap, gapFromSequence,
+                gapUntilSequence, budget, estimatedInputTokens, tokenBudgetTruncated,
+                strategyVersion, "legacy-system-prompt", null, 0L, false);
+    }
+
     /** 兼容不包含业务引用的既有构造调用。 */
     public ChatContextSelection(
             ChatHistorySnapshot source,
@@ -188,7 +240,7 @@ public record ChatContextSelection(
                 selectedHistoryFromSequence, selectedHistoryUntilSequence,
                 hasContextGap, gapFromSequence, gapUntilSequence,
                 budget, estimatedInputTokens, tokenBudgetTruncated,
-                strategyVersion);
+                strategyVersion, "legacy-system-prompt", null, 0L, false);
     }
 
     /**
@@ -214,6 +266,9 @@ public record ChatContextSelection(
                 + businessReferenceEstimatedTokens
                 + ", businessReferenceBudgetTruncated="
                 + businessReferenceBudgetTruncated
+                + ", hasUserMemoryContext=" + hasUserMemoryContext()
+                + ", userMemoryEstimatedTokens=" + userMemoryEstimatedTokens
+                + ", userMemoryBudgetTruncated=" + userMemoryBudgetTruncated
                 + ", selectedHistoryFromSequence="
                 + selectedHistoryFromSequence
                 + ", selectedHistoryUntilSequence="

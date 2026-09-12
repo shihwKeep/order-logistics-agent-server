@@ -76,6 +76,22 @@ public class QwenChatTokenEstimator {
             List<ChatHistoryTurn> history,
             String currentMessage
     ) {
+        return estimate(systemPrompt, summaryContext, businessContext,
+                null, history, currentMessage);
+    }
+
+    /**
+     * 估算包含用户记忆的完整请求。低权限消息顺序固定为：摘要、业务引用、
+     * 跨会话记忆、原始历史。
+     */
+    public long estimate(
+            String systemPrompt,
+            String summaryContext,
+            String businessContext,
+            String userMemoryContext,
+            List<ChatHistoryTurn> history,
+            String currentMessage
+    ) {
         Assert.hasText(systemPrompt, "系统提示词不能为空");
         Assert.hasText(currentMessage, "当前问题不能为空");
         Objects.requireNonNull(history, "历史轮次列表不能为 null");
@@ -95,6 +111,11 @@ public class QwenChatTokenEstimator {
         if (businessContext != null) {
             Assert.hasText(businessContext, "业务引用上下文不能为空白文本");
             appendMessage(prompt, "user", businessContext);
+        }
+
+        if (userMemoryContext != null) {
+            Assert.hasText(userMemoryContext, "用户记忆上下文不能为空白文本");
+            appendMessage(prompt, "user", userMemoryContext);
         }
 
         long previousAssistantSequence = 0;
