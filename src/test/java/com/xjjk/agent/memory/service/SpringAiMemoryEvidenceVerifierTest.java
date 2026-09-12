@@ -81,7 +81,10 @@ class SpringAiMemoryEvidenceVerifierTest {
                 .contains("独立证据核验器")
                 .contains("SUPPORTED", "CONTRADICTED", "UNCERTAIN")
                 .contains("不得改写", "candidateId")
-                .contains("当前用户原文");
+                .contains("当前用户原文")
+                // OpenAI-compatible providers reject json_object requests unless
+                // the messages explicitly contain the lowercase token "json".
+                .contains("json");
     }
 
     @Test

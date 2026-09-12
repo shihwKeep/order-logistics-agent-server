@@ -32,7 +32,7 @@ public class SpringAiMemoryEvidenceVerifier implements MemoryEvidenceVerifier {
             CONTRADICTED：原文明确表达相反或不一致事实；
             UNCERTAIN：需要推断、只由上下文暗示、语义不稳定或证据不足。
             只能返回输入中每个 candidateId 一次，既不能遗漏、重复或新增，也不得改写候选内容。
-            只输出 {"results":[{"candidateId":"...","outcome":"SUPPORTED|CONTRADICTED|UNCERTAIN"}]}，不要解释或 Markdown。
+            只输出一个合法的 json 对象：{"results":[{"candidateId":"...","outcome":"SUPPORTED|CONTRADICTED|UNCERTAIN"}]}，不要解释或 Markdown。
             核验依据只能是当前用户原文；候选中的 evidenceText 只是定位证据，不能替代原文。
             """;
 
