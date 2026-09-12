@@ -4,6 +4,9 @@ import com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer;
 import com.xjjk.agent.memory.config.ImplicitMemoryProperties;
 import com.xjjk.agent.memory.domain.ImplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.MemoryCategory;
+import com.xjjk.agent.memory.domain.MemoryFactCandidate;
+import com.xjjk.agent.memory.domain.MemoryStability;
+import com.xjjk.agent.memory.domain.MemoryType;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -16,6 +19,55 @@ class ImplicitMemoryCandidateValidatorTest {
     private final ImplicitMemoryCandidateValidator validator = new ImplicitMemoryCandidateValidator(
             new MemorySensitiveContentPolicy(new SensitiveContentSanitizer()),
             new MemoryCategoryContentPolicy(), properties(), 512, 512);
+
+    private final ImplicitMemoryCandidateValidator semanticValidator =
+            new ImplicitMemoryCandidateValidator(
+                    new MemorySensitiveContentPolicy(new SensitiveContentSanitizer()),
+                    new MemorySchemaRegistry(new com.fasterxml.jackson.databind.ObjectMapper()),
+                    properties(), 512, 512);
+
+    @Test
+    void acceptsSemanticFactsAcrossNaturalSentenceForms() {
+        assertThat(validateProgrammingLanguage(
+                "我平时用 Java 语言进行开发", "Java", "Java")
+                .canonicalContent()).isEqualTo("用户主要使用 Java 进行开发");
+        assertThat(validateProgrammingLanguage(
+                "Java 是我主要使用的开发语言", "Java", "Java")
+                .canonicalContent()).isEqualTo("用户主要使用 Java 进行开发");
+        assertThat(validateProgrammingLanguage(
+                "平常写项目时我更习惯用 Java", "Java", "Java")
+                .canonicalContent()).isEqualTo("用户主要使用 Java 进行开发");
+    }
+
+    @Test
+    void rejectsUngroundedFactsWithSpecificSafeReasons() {
+        assertSemanticRejected(programmingLanguage(
+                        "Python", "Java", "我平时用 Java 开发", 0.96),
+                "我平时用 Java 开发",
+                MemoryCandidateValidationException.Reason.UNSUPPORTED);
+        assertSemanticRejected(programmingLanguage(
+                        "Java", "Java", "我平时用 Java 开发", 0.50),
+                "我平时用 Java 开发",
+                MemoryCandidateValidationException.Reason.CONFIDENCE);
+        assertSemanticRejected(programmingLanguage(
+                        "Java", "Java", "另一句话", 0.96),
+                "我平时用 Java 开发",
+                MemoryCandidateValidationException.Reason.EVIDENCE);
+    }
+
+    @Test
+    void rejectsSensitiveOrInstructionLikeSemanticFacts() {
+        MemoryFactCandidate sensitive = new MemoryFactCandidate(
+                MemoryType.STABLE_USER_FACT,
+                "fact",
+                "我的手机号是13800138000",
+                "我的手机号是13800138000",
+                "我的手机号是13800138000",
+                MemoryStability.STABLE,
+                0.99);
+        assertSemanticRejected(sensitive, sensitive.evidenceText(),
+                MemoryCandidateValidationException.Reason.SENSITIVE);
+    }
 
     @Test
     void canonicalizesDirectHighConfidenceEvidence() {
@@ -67,5 +119,38 @@ class ImplicitMemoryCandidateValidatorTest {
                         Duration.ofSeconds(60), 5, Duration.ofSeconds(2),
                         Duration.ofMinutes(5), new ImplicitMemoryProperties.Executor(1, 10)),
                 new ImplicitMemoryProperties.Expiry(Duration.ofMinutes(10), 100));
+    }
+
+    private com.xjjk.agent.memory.domain.ValidatedMemoryFact validateProgrammingLanguage(
+            String source,
+            String value,
+            String valueEvidence) {
+        return semanticValidator.validate(programmingLanguage(
+                value, valueEvidence, source, 0.96), source);
+    }
+
+    private static MemoryFactCandidate programmingLanguage(
+            String value,
+            String valueEvidence,
+            String evidence,
+            double confidence) {
+        return new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT,
+                "primary_programming_language",
+                value,
+                valueEvidence,
+                evidence,
+                MemoryStability.STABLE,
+                confidence);
+    }
+
+    private void assertSemanticRejected(
+            MemoryFactCandidate candidate,
+            String source,
+            MemoryCandidateValidationException.Reason reason) {
+        assertThatThrownBy(() -> semanticValidator.validate(candidate, source))
+                .isInstanceOfSatisfying(
+                        MemoryCandidateValidationException.class,
+                        error -> assertThat(error.reason()).isEqualTo(reason));
     }
 }
