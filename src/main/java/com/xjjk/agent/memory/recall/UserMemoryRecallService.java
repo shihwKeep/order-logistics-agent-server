@@ -3,6 +3,7 @@ package com.xjjk.agent.memory.recall;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.memory.config.MemoryRetrievalProperties;
 import com.xjjk.agent.memory.config.UserMemoryProperties;
+import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.persistence.entity.UserMemoryEntity;
 import com.xjjk.agent.memory.persistence.entity.UserMemorySettingEntity;
 import com.xjjk.agent.memory.persistence.mapper.MemorySuppressionMapper;
@@ -102,6 +103,28 @@ public class UserMemoryRecallService {
         return recall(identity.tenantId(), identity.userId(), query);
     }
 
+    public UserMemoryRecallResult recallByCategory(
+            AgentIdentity identity,
+            MemoryCategory category) {
+        Objects.requireNonNull(identity, "identity");
+        Objects.requireNonNull(category, "category");
+        if (identity.tenantId() <= 0 || identity.userId() <= 0) {
+            return UserMemoryRecallResult.invalidRequest();
+        }
+        if (!memoryProperties.enabled()) {
+            return UserMemoryRecallResult.disabled();
+        }
+        try {
+            return recallCategorySafely(
+                    identity.tenantId(), identity.userId(), category);
+        } catch (RuntimeException failure) {
+            log.warn("user_memory_category_recall result=DEGRADED "
+                            + "errorCode=MYSQL_VALIDATION_FAILED exceptionType={}",
+                    failure.getClass().getSimpleName());
+            return UserMemoryRecallResult.unavailable();
+        }
+    }
+
     public UserMemoryRecallResult recall(long tenantId, long userId, String query) {
         if (tenantId <= 0 || userId <= 0
                 || query == null || query.isBlank() || query.length() > 2_000) {
@@ -174,6 +197,50 @@ public class UserMemoryRecallService {
                 UserMemoryRecallStatus.AVAILABLE);
     }
 
+    private UserMemoryRecallResult recallCategorySafely(
+            long tenantId,
+            long userId,
+            MemoryCategory category) {
+        UserMemorySettingEntity setting = settingMapper.selectOwned(tenantId, userId);
+        if (setting == null) {
+            return UserMemoryRecallResult.notInitialized();
+        }
+        if (!Boolean.TRUE.equals(setting.getMemoryEnabled())) {
+            return UserMemoryRecallResult.disabled();
+        }
+        if (setting.getMemoryGeneration() == null
+                || setting.getMemoryGeneration() <= 0) {
+            return UserMemoryRecallResult.unavailable();
+        }
+        long generation = setting.getMemoryGeneration();
+        LocalDateTime now = now();
+        List<UserMemoryEntity> raw = memoryMapper.selectActiveByCategory(
+                tenantId, userId, generation, category.name(), now,
+                retrievalProperties.maxCandidates());
+        List<UserMemoryEntity> valid = raw.stream()
+                .filter(memory -> validOwned(
+                        memory, tenantId, userId, generation, now))
+                .filter(memory -> category.name().equals(memory.getCategory()))
+                .toList();
+        rejected("OWNER_OR_STATE", raw.size() - valid.size());
+        List<String> keys = valid.stream()
+                .map(UserMemoryEntity::getCanonicalKey).distinct().toList();
+        Set<String> suppressed = keys.isEmpty() ? Set.of() : Set.copyOf(
+                suppressionMapper.selectActiveKeys(
+                        tenantId, userId, generation, keys,
+                        retrievalProperties.maxCandidates()));
+        rejected("SUPPRESSED", suppressed.size());
+        List<RecalledMemory> selected = selector.selectAuthoritative(
+                valid, suppressed, retrievalProperties.maxSelected());
+        if (metrics != null) {
+            metrics.candidateCount("MYSQL_VALIDATED", valid.size());
+            metrics.candidateCount("SELECTED", selected.size());
+        }
+        return new UserMemoryRecallResult(
+                selected, false, "MYSQL_CATEGORY",
+                UserMemoryRecallStatus.AVAILABLE);
+    }
+
     private List<MemorySelectionCandidate> loadSemantic(
             long tenantId,
             long userId,
@@ -238,6 +305,10 @@ public class UserMemoryRecallService {
                 && memory.getMemoryId() != null && !memory.getMemoryId().isBlank()
                 && memory.getVersion() != null && memory.getVersion() > 0
                 && SOURCES.contains(memory.getSourceType())
+                && (("USER_EXPLICIT".equals(memory.getSourceType())
+                        && "VISIBLE".equals(memory.getVisibility()))
+                    || ("AUTO_EXTRACT".equals(memory.getSourceType())
+                        && "HIDDEN".equals(memory.getVisibility())))
                 && memory.getCategory() != null && !memory.getCategory().isBlank()
                 && memory.getCanonicalKey() != null && !memory.getCanonicalKey().isBlank()
                 && memory.getContent() != null && !memory.getContent().isBlank()

@@ -21,6 +21,13 @@ public class MemoryCandidateSelector {
             "PROFILE_PREFERRED_NAME", "PREFERENCE_LANGUAGE", "PREFERENCE_ANSWER_STYLE");
     private static final double TEXT_DUPLICATE_THRESHOLD = 0.88D;
 
+    public List<RecalledMemory> selectAuthoritative(
+            List<UserMemoryEntity> authoritative,
+            Set<String> suppressedKeys,
+            int maxSelected) {
+        return select(authoritative, List.of(), suppressedKeys, maxSelected);
+    }
+
     public List<RecalledMemory> select(
             List<UserMemoryEntity> globalExplicit,
             List<MemorySelectionCandidate> semantic,

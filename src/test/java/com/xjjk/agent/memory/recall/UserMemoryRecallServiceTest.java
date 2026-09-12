@@ -3,6 +3,7 @@ package com.xjjk.agent.memory.recall;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.memory.config.MemoryRetrievalProperties;
 import com.xjjk.agent.memory.config.UserMemoryProperties;
+import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.persistence.entity.UserMemoryEntity;
 import com.xjjk.agent.memory.persistence.entity.UserMemorySettingEntity;
 import com.xjjk.agent.memory.persistence.mapper.MemorySuppressionMapper;
@@ -23,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class UserMemoryRecallServiceTest {
@@ -116,6 +118,65 @@ class UserMemoryRecallServiceTest {
 
         when(settings.selectOwned(7L, 9L)).thenThrow(new IllegalStateException("db down"));
         assertThat(service.recall(IDENTITY, "我的编程语言是什么？").status())
+                .isEqualTo(UserMemoryRecallStatus.UNAVAILABLE);
+    }
+
+    @Test
+    void recallsExactCategoryFromMysqlWithoutSemanticGateway() {
+        UserMemorySettingMapper settings = mock(UserMemorySettingMapper.class);
+        UserMemoryMapper memories = mock(UserMemoryMapper.class);
+        MemorySuppressionMapper suppressions = mock(MemorySuppressionMapper.class);
+        MemoryRecallGateway gateway = mock(MemoryRecallGateway.class);
+        when(settings.selectOwned(7L, 9L)).thenReturn(setting(true, 3L));
+        UserMemoryEntity java = memory("java", 1L, "AUTO_EXTRACT",
+                "WORK_COMMON_SCOPE", "work.common_scope.java",
+                "用户常用工作范围是Java开发");
+        UserMemoryEntity malformed = memory("malformed", 1L, "AUTO_EXTRACT",
+                "WORK_COMMON_SCOPE", "work.common_scope.python",
+                "用户常用工作范围是Python开发");
+        malformed.setVisibility("VISIBLE");
+        when(memories.selectActiveByCategory(
+                7L, 9L, 3L, "WORK_COMMON_SCOPE", NOW, 20))
+                .thenReturn(List.of(java, malformed));
+        when(suppressions.selectActiveKeys(
+                7L, 9L, 3L, List.of("work.common_scope.java"), 20))
+                .thenReturn(List.of());
+
+        UserMemoryRecallResult result = service(
+                settings, memories, suppressions, gateway, true)
+                .recallByCategory(IDENTITY, MemoryCategory.WORK_COMMON_SCOPE);
+
+        assertThat(result.status()).isEqualTo(UserMemoryRecallStatus.AVAILABLE);
+        assertThat(result.memories()).extracting(RecalledMemory::memoryId)
+                .containsExactly("java");
+        assertThat(result.semanticAttempted()).isFalse();
+        assertThat(result.semanticResultCode()).isEqualTo("MYSQL_CATEGORY");
+        verifyNoInteractions(gateway);
+    }
+
+    @Test
+    void categoryRecallDistinguishesUninitializedDisabledAndDatabaseFailure() {
+        UserMemorySettingMapper settings = mock(UserMemorySettingMapper.class);
+        UserMemoryMapper memories = mock(UserMemoryMapper.class);
+        MemorySuppressionMapper suppressions = mock(MemorySuppressionMapper.class);
+        MemoryRecallGateway gateway = mock(MemoryRecallGateway.class);
+        UserMemoryRecallService service = service(
+                settings, memories, suppressions, gateway, true);
+
+        when(settings.selectOwned(7L, 9L)).thenReturn(null);
+        assertThat(service.recallByCategory(
+                IDENTITY, MemoryCategory.WORK_COMMON_SCOPE).status())
+                .isEqualTo(UserMemoryRecallStatus.NOT_INITIALIZED);
+
+        when(settings.selectOwned(7L, 9L)).thenReturn(setting(false, 3L));
+        assertThat(service.recallByCategory(
+                IDENTITY, MemoryCategory.WORK_COMMON_SCOPE).status())
+                .isEqualTo(UserMemoryRecallStatus.DISABLED);
+
+        when(settings.selectOwned(7L, 9L))
+                .thenThrow(new IllegalStateException("db down"));
+        assertThat(service.recallByCategory(
+                IDENTITY, MemoryCategory.WORK_COMMON_SCOPE).status())
                 .isEqualTo(UserMemoryRecallStatus.UNAVAILABLE);
     }
 
