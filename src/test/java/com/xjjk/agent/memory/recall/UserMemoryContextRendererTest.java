@@ -56,7 +56,10 @@ class UserMemoryContextRendererTest {
                 .contains("用户询问自己的偏好、习惯、称呼或长期背景")
                 .contains("直接依据匹配的历史用户记忆回答")
                 .contains("不得声称无法获取或无法记忆")
-                .contains("没有匹配记忆时");
+                .contains("没有匹配记忆时")
+                .contains("不得猜测或用常识补全")
+                .contains("无论是否命中记忆")
+                .contains("不得向用户暴露内部来源类型、标识、分数或存储实现");
     }
 
     @Test
