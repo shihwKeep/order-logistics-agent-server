@@ -105,10 +105,10 @@ public class UserMemoryRecallService {
     public UserMemoryRecallResult recall(long tenantId, long userId, String query) {
         if (tenantId <= 0 || userId <= 0
                 || query == null || query.isBlank() || query.length() > 2_000) {
-            return UserMemoryRecallResult.empty();
+            return UserMemoryRecallResult.invalidRequest();
         }
         if (!memoryProperties.enabled()) {
-            return UserMemoryRecallResult.empty();
+            return UserMemoryRecallResult.disabled();
         }
         try {
             return recallSafely(tenantId, userId, query.strip());
@@ -116,17 +116,22 @@ public class UserMemoryRecallService {
             // 记忆是可选增强；数据库终审异常时整批失效，不能阻断普通聊天。
             log.warn("user_memory_recall result=DEGRADED errorCode=MYSQL_VALIDATION_FAILED exceptionType={}",
                     failure.getClass().getSimpleName());
-            return UserMemoryRecallResult.empty();
+            return UserMemoryRecallResult.unavailable();
         }
     }
 
     private UserMemoryRecallResult recallSafely(long tenantId, long userId, String query) {
         UserMemorySettingEntity setting = settingMapper.selectOwned(
                 tenantId, userId);
-        if (setting == null || !Boolean.TRUE.equals(setting.getMemoryEnabled())
-                || setting.getMemoryGeneration() == null
+        if (setting == null) {
+            return UserMemoryRecallResult.notInitialized();
+        }
+        if (!Boolean.TRUE.equals(setting.getMemoryEnabled())) {
+            return UserMemoryRecallResult.disabled();
+        }
+        if (setting.getMemoryGeneration() == null
                 || setting.getMemoryGeneration() <= 0) {
-            return UserMemoryRecallResult.empty();
+            return UserMemoryRecallResult.unavailable();
         }
         long generation = setting.getMemoryGeneration();
         LocalDateTime now = now();
@@ -165,7 +170,8 @@ public class UserMemoryRecallService {
         if (metrics != null) metrics.candidateCount("SELECTED", selected.size());
         return new UserMemoryRecallResult(
                 selected,
-                semanticAttempted, semanticCode);
+                semanticAttempted, semanticCode,
+                UserMemoryRecallStatus.AVAILABLE);
     }
 
     private List<MemorySelectionCandidate> loadSemantic(

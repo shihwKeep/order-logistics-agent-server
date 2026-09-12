@@ -86,6 +86,40 @@ class UserMemoryRecallServiceTest {
     }
 
     @Test
+    void distinguishesEmptyUninitializedDisabledInvalidAndUnavailableResults() {
+        UserMemorySettingMapper settings = mock(UserMemorySettingMapper.class);
+        UserMemoryMapper memories = mock(UserMemoryMapper.class);
+        MemorySuppressionMapper suppressions = mock(MemorySuppressionMapper.class);
+        MemoryRecallGateway gateway = mock(MemoryRecallGateway.class);
+        UserMemoryRecallService service = service(
+                settings, memories, suppressions, gateway, true);
+
+        assertThat(service.recall(0L, 9L, "我的编程语言是什么？").status())
+                .isEqualTo(UserMemoryRecallStatus.INVALID_REQUEST);
+
+        when(settings.selectOwned(7L, 9L)).thenReturn(setting(true, 3L));
+        when(memories.selectGlobalExplicit(7L, 9L, 3L, NOW, 3))
+                .thenReturn(List.of());
+        when(gateway.retrieve(7L, 9L, 3L, "我的编程语言是什么？"))
+                .thenReturn(new MemoryRecallGatewayResult(
+                        true, List.of(), "v1", "NONE", "NO_CANDIDATE"));
+        assertThat(service.recall(IDENTITY, "我的编程语言是什么？").status())
+                .isEqualTo(UserMemoryRecallStatus.AVAILABLE);
+
+        when(settings.selectOwned(7L, 9L)).thenReturn(null);
+        assertThat(service.recall(IDENTITY, "我的编程语言是什么？").status())
+                .isEqualTo(UserMemoryRecallStatus.NOT_INITIALIZED);
+
+        when(settings.selectOwned(7L, 9L)).thenReturn(setting(false, 3L));
+        assertThat(service.recall(IDENTITY, "我的编程语言是什么？").status())
+                .isEqualTo(UserMemoryRecallStatus.DISABLED);
+
+        when(settings.selectOwned(7L, 9L)).thenThrow(new IllegalStateException("db down"));
+        assertThat(service.recall(IDENTITY, "我的编程语言是什么？").status())
+                .isEqualTo(UserMemoryRecallStatus.UNAVAILABLE);
+    }
+
+    @Test
     void skipsSemanticGatewayForUnrelatedQueryButStillLoadsGlobalPreferences() {
         UserMemorySettingMapper settings = mock(UserMemorySettingMapper.class);
         UserMemoryMapper memories = mock(UserMemoryMapper.class);
