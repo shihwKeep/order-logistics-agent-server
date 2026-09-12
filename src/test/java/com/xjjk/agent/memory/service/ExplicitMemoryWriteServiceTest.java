@@ -8,6 +8,7 @@ import com.xjjk.agent.memory.config.UserMemoryProperties;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.domain.MemoryRetentionType;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xjjk.agent.memory.persistence.entity.MemoryOutboxEntity;
 import com.xjjk.agent.memory.persistence.entity.UserMemoryEntity;
 import com.xjjk.agent.memory.persistence.entity.UserMemorySettingEntity;
@@ -48,7 +49,8 @@ class ExplicitMemoryWriteServiceTest {
     void setUp() {
         service = new ExplicitMemoryWriteService(
                 settingMapper, memoryMapper, suppressionMapper, outboxMapper,
-                messageMapper, properties(), new UserMemoryPolicyService(settingMapper), Clock.fixed(
+                messageMapper, properties(), new UserMemoryPolicyService(settingMapper),
+                new MemorySchemaRegistry(new ObjectMapper()), Clock.fixed(
                         Instant.parse("2026-09-11T08:00:00Z"), ZoneOffset.UTC));
         UserMemorySettingEntity setting = new UserMemorySettingEntity();
         setting.setMemoryGeneration(7L);
@@ -84,6 +86,13 @@ class ExplicitMemoryWriteServiceTest {
         assertThat(memory.getValue().getSourceMessageSequence()).isEqualTo(11L);
         assertThat(memory.getValue().getExpiresAt()).isEqualTo("2027-09-11T08:00:00");
         assertThat(memory.getValue().getContentHash()).hasSize(64);
+        assertThat(memory.getValue().getSchemaVersion()).isEqualTo(2);
+        assertThat(memory.getValue().getMemoryType()).isEqualTo("RESPONSE_PREFERENCE");
+        assertThat(memory.getValue().getPredicateName()).isEqualTo("answer_style");
+        assertThat(memory.getValue().getValueJson()).isEqualTo("\"简洁\"");
+        assertThat(memory.getValue().getStability()).isEqualTo("STABLE");
+        assertThat(memory.getValue().getVerificationMethod())
+                .isEqualTo("EXPLICIT_DETERMINISTIC");
 
         ArgumentCaptor<MemoryOutboxEntity> outbox = ArgumentCaptor.forClass(MemoryOutboxEntity.class);
         verify(outboxMapper, org.mockito.Mockito.times(2)).insert(outbox.capture());

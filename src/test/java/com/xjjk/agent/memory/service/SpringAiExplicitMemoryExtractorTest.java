@@ -5,9 +5,13 @@ import com.xjjk.agent.memory.config.UserMemoryProperties;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.ExplicitMemoryResolution;
 import com.xjjk.agent.memory.domain.MemoryCategory;
+import com.xjjk.agent.memory.domain.MemoryFactCandidate;
 import com.xjjk.agent.memory.domain.MemoryRetentionType;
+import com.xjjk.agent.memory.domain.MemoryStability;
+import com.xjjk.agent.memory.domain.MemoryType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.client.ChatClient;
 
 import java.time.Duration;
@@ -24,6 +28,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class SpringAiExplicitMemoryExtractorTest {
@@ -36,24 +41,43 @@ class SpringAiExplicitMemoryExtractorTest {
     }
 
     @Test
-    void mapsSaveActionAndModelSuppliedRetention() {
+    void mapsGenericSemanticSaveActionAndModelSuppliedRetention() {
         SpringAiExplicitMemoryExtractor extractor = extractor(clientReturning("""
-                {"action":"SAVE","category":"PROFILE_PREFERRED_NAME",
-                 "canonicalKey":"profile.preferred_name","content":"用户希望被称为石海文",
-                 "evidenceText":"你以后都叫我石海文","retention":"NORMAL","confidence":0.98}
+                {"action":"SAVE","memoryType":"WORK_CONTEXT",
+                 "predicate":"technology_stack","value":"Spring AI",
+                 "valueEvidence":"Spring AI","evidenceText":"以后记着我长期使用 Spring AI",
+                 "stability":"STABLE","retention":"NORMAL","confidence":0.98}
                 """), properties(Duration.ofSeconds(1)), executor());
 
-        ExplicitMemoryResolution result = extractor.resolve("你以后都叫我石海文");
+        ExplicitMemoryResolution result = extractor.resolve("以后记着我长期使用 Spring AI");
 
-        assertThat(result).isEqualTo(ExplicitMemoryResolution.save(
-                new ExplicitMemoryCandidate(
-                        MemoryCategory.PROFILE_PREFERRED_NAME,
-                        "profile.preferred_name",
-                        "用户希望被称为石海文",
-                        "你以后都叫我石海文",
-                        MemoryRetentionType.NORMAL),
-                ExplicitMemoryResolution.Path.SEMANTIC_PATH,
-                0.98));
+        assertThat(result.action()).isEqualTo(ExplicitMemoryResolution.Action.SAVE);
+        assertThat(result.candidate().retentionType()).isEqualTo(MemoryRetentionType.NORMAL);
+        assertThat(result.candidate().semanticFact()).isEqualTo(new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT, "technology_stack", "Spring AI", "Spring AI",
+                "以后记着我长期使用 Spring AI", MemoryStability.STABLE, 0.98));
+    }
+
+    @Test
+    void promptUsesGeneralFactSchemaAndDoesNotTrustModelCanonicalContent() {
+        ChatClient client = mock(ChatClient.class);
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.CallResponseSpec responseSpec = mock(ChatClient.CallResponseSpec.class);
+        when(client.prompt()).thenReturn(requestSpec);
+        when(requestSpec.system(anyString())).thenReturn(requestSpec);
+        when(requestSpec.user(anyString())).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(responseSpec);
+        when(responseSpec.content()).thenReturn("{\"action\":\"NONE\",\"confidence\":0.99}");
+
+        extractor(client, properties(Duration.ofSeconds(1)), executor()).resolve("测试");
+
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(requestSpec).system(prompt.capture());
+        assertThat(prompt.getValue())
+                .contains("memoryType", "predicate", "value", "valueEvidence", "stability")
+                .contains("不要求固定触发词")
+                .contains("服务端生成")
+                .doesNotContain("category 只能是");
     }
 
     @Test

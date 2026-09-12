@@ -4,6 +4,10 @@ import com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.domain.MemoryRetentionType;
+import com.xjjk.agent.memory.domain.MemoryFactCandidate;
+import com.xjjk.agent.memory.domain.MemoryStability;
+import com.xjjk.agent.memory.domain.MemoryType;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -14,9 +18,26 @@ class ExplicitMemoryCandidateValidatorTest {
 
     private final ExplicitMemoryCandidateValidator validator = new ExplicitMemoryCandidateValidator(
             new MemorySensitiveContentPolicy(new SensitiveContentSanitizer()),
+            new MemorySchemaRegistry(new ObjectMapper()),
             512,
             512
     );
+
+    @Test
+    void canonicalizesGeneralSemanticCandidateThroughServerRegistry() {
+        MemoryFactCandidate fact = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT, "technology_stack", "Spring AI", "Spring AI",
+                "以后记着我长期使用 Spring AI", MemoryStability.STABLE, 0.98);
+
+        ExplicitMemoryCandidate result = validator.validate(
+                ExplicitMemoryCandidate.semantic(fact, MemoryRetentionType.NORMAL),
+                "以后记着我长期使用 Spring AI", false);
+
+        assertThat(result.canonicalKey()).isEqualTo("work.technology_stack");
+        assertThat(result.content()).isEqualTo("用户常用技术栈是Spring AI");
+        assertThat(result.category()).isEqualTo(MemoryCategory.WORK_COMMON_SCOPE);
+        assertThat(result.semanticFact()).isEqualTo(fact);
+    }
 
     @Test
     void normalizesAndAcceptsMatchingCandidate() {

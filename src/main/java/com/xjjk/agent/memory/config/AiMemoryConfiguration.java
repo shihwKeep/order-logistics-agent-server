@@ -10,6 +10,7 @@ import com.xjjk.agent.memory.service.ExplicitMemoryExtractor;
 import com.xjjk.agent.memory.service.HybridExplicitMemoryResolver;
 import com.xjjk.agent.memory.service.MemorySensitiveContentPolicy;
 import com.xjjk.agent.memory.service.MemoryCategoryContentPolicy;
+import com.xjjk.agent.memory.service.MemorySchemaRegistry;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.ResponseFormat;
@@ -95,11 +96,13 @@ public class AiMemoryConfiguration {
     public ExplicitMemoryCandidateValidator explicitMemoryCandidateValidator(
             MemorySensitiveContentPolicy policy,
             MemoryCategoryContentPolicy categoryContentPolicy,
+            MemorySchemaRegistry schemaRegistry,
             UserMemoryProperties properties
     ) {
         return new ExplicitMemoryCandidateValidator(
                 policy,
                 categoryContentPolicy,
+                schemaRegistry,
                 properties.maxContentLength(),
                 properties.maxEvidenceLength()
         );

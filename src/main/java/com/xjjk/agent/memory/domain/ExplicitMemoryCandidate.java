@@ -6,6 +6,22 @@ public record ExplicitMemoryCandidate(
         String canonicalKey,
         String content,
         String evidenceText,
-        MemoryRetentionType retentionType
+        MemoryRetentionType retentionType,
+        MemoryFactCandidate semanticFact
 ) {
+    public ExplicitMemoryCandidate(
+            MemoryCategory category,
+            String canonicalKey,
+            String content,
+            String evidenceText,
+            MemoryRetentionType retentionType) {
+        this(category, canonicalKey, content, evidenceText, retentionType, null);
+    }
+
+    public static ExplicitMemoryCandidate semantic(
+            MemoryFactCandidate fact,
+            MemoryRetentionType retentionType) {
+        return new ExplicitMemoryCandidate(
+                null, null, null, fact.evidenceText(), retentionType, fact);
+    }
 }

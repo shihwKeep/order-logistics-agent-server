@@ -6,12 +6,15 @@ import com.xjjk.agent.common.api.ApiErrorCode;
 import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.memory.config.UserMemoryProperties;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCandidate;
+import com.xjjk.agent.memory.domain.MemoryFactCandidate;
 import com.xjjk.agent.memory.domain.MemoryOutboxOperation;
 import com.xjjk.agent.memory.domain.MemoryOutboxStatus;
 import com.xjjk.agent.memory.domain.MemoryRetentionType;
 import com.xjjk.agent.memory.domain.MemorySourceType;
 import com.xjjk.agent.memory.domain.MemoryStatus;
 import com.xjjk.agent.memory.domain.MemoryVisibility;
+import com.xjjk.agent.memory.domain.MemoryStability;
+import com.xjjk.agent.memory.domain.MemoryType;
 import com.xjjk.agent.memory.persistence.entity.MemoryOutboxEntity;
 import com.xjjk.agent.memory.persistence.entity.UserMemoryEntity;
 import com.xjjk.agent.memory.persistence.entity.UserMemorySettingEntity;
@@ -41,6 +44,7 @@ public class ExplicitMemoryWriteService {
     private final AgentMessageMapper messageMapper;
     private final UserMemoryProperties properties;
     private final UserMemoryPolicyService policy;
+    private final MemorySchemaRegistry schemaRegistry;
     private final Clock clock;
 
     @Autowired
@@ -51,10 +55,11 @@ public class ExplicitMemoryWriteService {
             MemoryOutboxMapper outboxMapper,
             AgentMessageMapper messageMapper,
             UserMemoryProperties properties,
-            UserMemoryPolicyService policy
+            UserMemoryPolicyService policy,
+            MemorySchemaRegistry schemaRegistry
     ) {
         this(settingMapper, memoryMapper, suppressionMapper, outboxMapper,
-                messageMapper, properties, policy, Clock.systemUTC());
+                messageMapper, properties, policy, schemaRegistry, Clock.systemUTC());
     }
 
     ExplicitMemoryWriteService(
@@ -65,6 +70,7 @@ public class ExplicitMemoryWriteService {
             AgentMessageMapper messageMapper,
             UserMemoryProperties properties,
             UserMemoryPolicyService policy,
+            MemorySchemaRegistry schemaRegistry,
             Clock clock
     ) {
         this.settingMapper = Objects.requireNonNull(settingMapper, "settingMapper");
@@ -74,6 +80,7 @@ public class ExplicitMemoryWriteService {
         this.messageMapper = Objects.requireNonNull(messageMapper, "messageMapper");
         this.properties = Objects.requireNonNull(properties, "properties");
         this.policy = Objects.requireNonNull(policy, "policy");
+        this.schemaRegistry = Objects.requireNonNull(schemaRegistry, "schemaRegistry");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -122,6 +129,15 @@ public class ExplicitMemoryWriteService {
         memory.setMemoryGeneration(generation);
         memory.setSourceType(MemorySourceType.USER_EXPLICIT.name());
         memory.setCategory(candidate.category().name());
+        MemoryFactCandidate structuredFact = structuredFact(candidate);
+        MemorySchemaRegistry.SchemaResolution structured = schemaRegistry.resolve(structuredFact);
+        memory.setSchemaVersion(2);
+        memory.setMemoryType(structuredFact.memoryType().name());
+        memory.setPredicateName(structuredFact.predicate());
+        memory.setValueJson(structured.valueJson());
+        memory.setStability(structuredFact.stability().name());
+        memory.setVerificationMethod(candidate.semanticFact() == null
+                ? "EXPLICIT_DETERMINISTIC" : "EXPLICIT_SEMANTIC");
         memory.setCanonicalKey(candidate.canonicalKey());
         memory.setContent(candidate.content());
         memory.setContentHash(MemoryHashing.sha256(candidate.content()));
@@ -148,6 +164,49 @@ public class ExplicitMemoryWriteService {
         insertOutbox(turn.tenantId(), turn.userId(), generation,
                 version, memoryId, MemoryOutboxOperation.UPSERT, now);
         return new SaveResult(memoryId, candidate.content());
+    }
+
+    private static MemoryFactCandidate structuredFact(ExplicitMemoryCandidate candidate) {
+        if (candidate.semanticFact() != null) {
+            return candidate.semanticFact();
+        }
+        String content = candidate.content();
+        String value;
+        MemoryType type;
+        String predicate;
+        switch (candidate.category()) {
+            case PROFILE_PREFERRED_NAME -> {
+                value = suffix(content, "用户希望被称为", "");
+                type = MemoryType.PROFILE;
+                predicate = "preferred_name";
+            }
+            case PREFERENCE_LANGUAGE -> {
+                value = suffix(content, "用户偏好使用", "交流");
+                type = MemoryType.COMMUNICATION_PREFERENCE;
+                predicate = "answer_language";
+            }
+            case PREFERENCE_ANSWER_STYLE -> {
+                value = suffix(content, "用户偏好", "回答");
+                type = MemoryType.RESPONSE_PREFERENCE;
+                predicate = "answer_style";
+            }
+            case WORK_COMMON_SCOPE -> {
+                value = suffix(content, "用户常用工作范围是", "");
+                type = MemoryType.WORK_CONTEXT;
+                predicate = "common_scope";
+            }
+            default -> throw new IllegalArgumentException("MEMORY_CONTENT_REJECTED");
+        }
+        return new MemoryFactCandidate(type, predicate, value, value,
+                candidate.evidenceText(), MemoryStability.STABLE, 1.0);
+    }
+
+    private static String suffix(String content, String prefix, String suffix) {
+        if (content == null || !content.startsWith(prefix) || !content.endsWith(suffix)
+                || content.length() <= prefix.length() + suffix.length()) {
+            throw new IllegalArgumentException("MEMORY_CONTENT_REJECTED");
+        }
+        return content.substring(prefix.length(), content.length() - suffix.length()).strip();
     }
 
     private void insertOutbox(long tenantId, long userId, long generation, long version,
