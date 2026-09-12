@@ -2,7 +2,10 @@ package com.xjjk.agent.memory.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xjjk.agent.memory.config.ImplicitMemoryProperties;
-import com.xjjk.agent.memory.domain.MemoryCategory;
+import com.xjjk.agent.memory.domain.MemoryDecision;
+import com.xjjk.agent.memory.domain.MemoryExplicitness;
+import com.xjjk.agent.memory.domain.MemoryStability;
+import com.xjjk.agent.memory.domain.MemoryType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -35,24 +38,45 @@ class SpringAiImplicitMemoryModelClientTest {
     }
 
     @Test
-    void parsesBoundedCandidateArray() {
+    void parsesBoundedGeneralSemanticDecision() {
         SpringAiImplicitMemoryModelClient client = clientReturning("""
-                {"candidates":[
-                  {"category":"WORK_COMMON_SCOPE","canonicalKey":"work.common_scope","content":"用户常用工作范围是Java开发","evidenceText":"Java开发","confidence":0.93},
-                  {"category":"PREFERENCE_ANSWER_STYLE","canonicalKey":"preference.answer_style","content":"用户偏好简洁回答","evidenceText":"回答简短一些","confidence":0.91},
-                  {"category":"PREFERENCE_LANGUAGE","canonicalKey":"preference.language","content":"用户偏好使用中文交流","evidenceText":"中文交流","confidence":0.90}
-                ]}
+                {
+                  "decision":"LONG_TERM",
+                  "explicitness":"IMPLICIT",
+                  "candidates":[
+                    {"memoryType":"WORK_CONTEXT","predicate":"primary_programming_language","value":"Java","valueEvidence":"Java","evidenceText":"我平时用 Java 语言进行开发","stability":"STABLE","confidence":0.96},
+                    {"memoryType":"RESPONSE_PREFERENCE","predicate":"answer_style","value":"简洁","valueEvidence":"简洁","evidenceText":"我喜欢简洁回答","stability":"STABLE","confidence":0.93},
+                    {"memoryType":"WORK_CONTEXT","predicate":"occupation","value":"后端开发","valueEvidence":"后端开发","evidenceText":"我是一名后端开发","stability":"STABLE","confidence":0.91}
+                  ]
+                }
                 """, properties(Duration.ofSeconds(1), 2), executor());
 
-        var result = client.extract(new ImplicitMemoryModelClient.Request(
-                "request-1", "我是Java开发，希望回答简短一些", null));
+        var result = client.analyze(new ImplicitMemoryModelClient.Request(
+                "request-1", "我平时用 Java 语言进行开发，也喜欢简洁回答", null));
 
-        assertThat(result).hasSize(2);
-        assertThat(result.getFirst().category()).isEqualTo(MemoryCategory.WORK_COMMON_SCOPE);
+        assertThat(result.decision()).isEqualTo(MemoryDecision.LONG_TERM);
+        assertThat(result.explicitness()).isEqualTo(MemoryExplicitness.IMPLICIT);
+        assertThat(result.candidates()).hasSize(2);
+        assertThat(result.candidates().getFirst().memoryType())
+                .isEqualTo(MemoryType.WORK_CONTEXT);
+        assertThat(result.candidates().getFirst().stability())
+                .isEqualTo(MemoryStability.STABLE);
     }
 
     @Test
-    void definesStableWorkScopeWithValidatorCompatibleExample() {
+    void parsesIgnoreAndSessionOnlyWithoutCandidates() {
+        assertThat(clientReturning(
+                "{\"decision\":\"IGNORE\",\"candidates\":[]}",
+                properties(Duration.ofSeconds(1), 3), executor())
+                .analyze(request()).decision()).isEqualTo(MemoryDecision.IGNORE);
+        assertThat(clientReturning(
+                "{\"decision\":\"SESSION_ONLY\",\"candidates\":[]}",
+                properties(Duration.ofSeconds(1), 3), executor())
+                .analyze(request()).decision()).isEqualTo(MemoryDecision.SESSION_ONLY);
+    }
+
+    @Test
+    void promptDefinesSemanticLifecycleInsteadOfFixedPhrases() {
         ChatClient chatClient = mock(ChatClient.class);
         ChatClient.ChatClientRequestSpec requestSpec =
                 mock(ChatClient.ChatClientRequestSpec.class);
@@ -62,39 +86,46 @@ class SpringAiImplicitMemoryModelClientTest {
         when(requestSpec.system(anyString())).thenReturn(requestSpec);
         when(requestSpec.user(anyString())).thenReturn(requestSpec);
         when(requestSpec.call()).thenReturn(responseSpec);
-        when(responseSpec.content()).thenReturn("{\"candidates\":[]}");
+        when(responseSpec.content()).thenReturn(
+                "{\"decision\":\"IGNORE\",\"candidates\":[]}");
         SpringAiImplicitMemoryModelClient client = new SpringAiImplicitMemoryModelClient(
-                chatClient, properties(Duration.ofSeconds(1), 3), executor(), new ObjectMapper());
+                chatClient, properties(Duration.ofSeconds(1), 3), executor(),
+                new ObjectMapper());
 
-        client.extract(new ImplicitMemoryModelClient.Request(
-                "request-1", "我平时主要做 Java 开发。", null));
+        client.analyze(new ImplicitMemoryModelClient.Request(
+                "request-1", "我平时用 Java 语言进行开发", null));
 
         ArgumentCaptor<String> systemPrompt = ArgumentCaptor.forClass(String.class);
         verify(requestSpec).system(systemPrompt.capture());
         assertThat(systemPrompt.getValue())
-                .contains("WORK_COMMON_SCOPE 表示用户直接明确表达、可长期复用的职业方向、常用技术栈或稳定业务范围")
-                .contains("我平时主要做 Java 开发。")
-                .contains("\"category\":\"WORK_COMMON_SCOPE\"")
-                .contains("\"canonicalKey\":\"work.common_scope\"")
-                .contains("\"content\":\"用户常用工作范围是Java开发\"")
-                .contains("禁止账号凭据、身份信息、健康信息、订单、退款、物流、支付、客户资料、企业制度、临时任务")
-                .contains("只输出 candidates JSON 数组");
+                .contains("IGNORE、SESSION_ONLY、LONG_TERM")
+                .contains("EXPLICIT", "IMPLICIT")
+                .contains("memoryType", "predicate", "value", "valueEvidence")
+                .contains("evidenceText", "stability", "confidence")
+                .contains("一条候选只表达一个原子事实")
+                .contains("不要求出现固定触发词")
+                .contains("禁止账号凭据、身份信息、健康信息、订单、退款、物流、支付、客户资料、企业制度")
+                .doesNotContain("category 只能是 PROFILE_PREFERRED_NAME");
     }
 
     @Test
-    void mapsMalformedAndTimeoutToStableCodes() {
+    void mapsMalformedUnknownEnumsAndTimeoutToStableCodes() {
         assertCode("not-json", properties(Duration.ofSeconds(1), 3),
+                ImplicitMemoryExtractionException.Code.MODEL_PROTOCOL_ERROR);
+        assertCode("{\"decision\":\"FOREVER\",\"candidates\":[]}",
+                properties(Duration.ofSeconds(1), 3),
                 ImplicitMemoryExtractionException.Code.MODEL_PROTOCOL_ERROR);
 
         ChatClient slow = mock(ChatClient.class, RETURNS_DEEP_STUBS);
         when(slow.prompt().system(anyString()).user(anyString()).call().content())
                 .thenAnswer(invocation -> {
                     Thread.sleep(500);
-                    return "{\"candidates\":[]}";
+                    return "{\"decision\":\"IGNORE\",\"candidates\":[]}";
                 });
         SpringAiImplicitMemoryModelClient client = new SpringAiImplicitMemoryModelClient(
-                slow, properties(Duration.ofMillis(20), 3), executor(), new ObjectMapper());
-        assertThatThrownBy(() -> extract(client))
+                slow, properties(Duration.ofMillis(20), 3), executor(),
+                new ObjectMapper());
+        assertThatThrownBy(() -> client.analyze(request()))
                 .isInstanceOfSatisfying(ImplicitMemoryExtractionException.class,
                         error -> assertThat(error.code())
                                 .isEqualTo(ImplicitMemoryExtractionException.Code.MODEL_TIMEOUT));
@@ -110,7 +141,7 @@ class SpringAiImplicitMemoryModelClientTest {
                 chatClientReturning("{}"), properties(Duration.ofSeconds(1), 3),
                 rejected, new ObjectMapper());
 
-        assertThatThrownBy(() -> extract(client))
+        assertThatThrownBy(() -> client.analyze(request()))
                 .isInstanceOfSatisfying(ImplicitMemoryExtractionException.class, error -> {
                     assertThat(error.code())
                             .isEqualTo(ImplicitMemoryExtractionException.Code.MODEL_CALL_FAILED);
@@ -118,27 +149,33 @@ class SpringAiImplicitMemoryModelClientTest {
                 });
     }
 
-    private void assertCode(String output, ImplicitMemoryProperties properties,
-                            ImplicitMemoryExtractionException.Code code) {
-        SpringAiImplicitMemoryModelClient client = clientReturning(output, properties, executor());
-        assertThatThrownBy(() -> extract(client))
+    private void assertCode(
+            String output,
+            ImplicitMemoryProperties properties,
+            ImplicitMemoryExtractionException.Code code) {
+        SpringAiImplicitMemoryModelClient client =
+                clientReturning(output, properties, executor());
+        assertThatThrownBy(() -> client.analyze(request()))
                 .isInstanceOfSatisfying(ImplicitMemoryExtractionException.class,
                         error -> assertThat(error.code()).isEqualTo(code));
     }
 
-    private void extract(SpringAiImplicitMemoryModelClient client) {
-        client.extract(new ImplicitMemoryModelClient.Request("request-1", "测试", null));
+    private ImplicitMemoryModelClient.Request request() {
+        return new ImplicitMemoryModelClient.Request("request-1", "测试", null);
     }
 
     private SpringAiImplicitMemoryModelClient clientReturning(
-            String output, ImplicitMemoryProperties properties, ExecutorService executor) {
+            String output,
+            ImplicitMemoryProperties properties,
+            ExecutorService executor) {
         return new SpringAiImplicitMemoryModelClient(
                 chatClientReturning(output), properties, executor, new ObjectMapper());
     }
 
     private ChatClient chatClientReturning(String output) {
         ChatClient client = mock(ChatClient.class, RETURNS_DEEP_STUBS);
-        when(client.prompt().system(anyString()).user(anyString()).call().content()).thenReturn(output);
+        when(client.prompt().system(anyString()).user(anyString()).call().content())
+                .thenReturn(output);
         return client;
     }
 
@@ -148,9 +185,11 @@ class SpringAiImplicitMemoryModelClientTest {
         return executor;
     }
 
-    private static ImplicitMemoryProperties properties(Duration timeout, int maxCandidates) {
+    private static ImplicitMemoryProperties properties(
+            Duration timeout,
+            int maxCandidates) {
         return new ImplicitMemoryProperties(
-                0.85, 180, maxCandidates, "memory-auto-v1", "qwen-plus", 0.0,
+                0.85, 180, maxCandidates, "memory-semantic-v2", "qwen-plus", 0.0,
                 timeout, new ImplicitMemoryProperties.Executor(1, 10),
                 new ImplicitMemoryProperties.Worker(
                         Duration.ofSeconds(2), Duration.ofSeconds(30), 10,
