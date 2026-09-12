@@ -32,6 +32,7 @@
 - Create `src/test/java/com/xjjk/agent/chat/service/stream/ChatTurnRunnerDeterministicMemoryTest.java`：验证 SSE、落库状态及模型旁路。
 - Modify `src/test/java/com/xjjk/agent/chat/service/stream/ChatTurnRunnerExplicitMemoryTest.java`：适配构造器并证明显式写入优先。
 - Modify `src/test/java/com/xjjk/agent/chat/service/stream/ChatTurnRunnerBusinessQueryTest.java`：适配构造器并证明业务请求优先。
+- Modify `src/test/java/com/xjjk/agent/chat/action/ChatActionDispatcherTest.java`：适配动作链直接构造的执行器。
 - Modify `docs/runbook/user-memory-index-recall-verification.md`：增加确定性直答、十次重复、清空和降级验收。
 
 ## 不变量
@@ -97,7 +98,7 @@ void distinguishesEmptyDisabledInvalidAndUnavailableResults() {
 Run:
 
 ```powershell
-.\mvnw.cmd -Dtest=UserMemoryRecallServiceTest test
+.\mvnw.cmd "-Dtest=UserMemoryRecallServiceTest" test
 ```
 
 Expected: FAIL，编译器提示 `UserMemoryRecallStatus` 或 `status()` 不存在。
@@ -210,7 +211,7 @@ return new UserMemoryRecallResult(
 Run:
 
 ```powershell
-.\mvnw.cmd -Dtest=UserMemoryRecallServiceTest test
+.\mvnw.cmd "-Dtest=UserMemoryRecallServiceTest" test
 ```
 
 Expected: `BUILD SUCCESS`，召回状态测试零失败；现有三参数构造器保持其他调用方兼容。
@@ -285,7 +286,7 @@ class DirectMemoryQuestionClassifierTest {
 Run:
 
 ```powershell
-.\mvnw.cmd -Dtest=DirectMemoryQuestionClassifierTest test
+.\mvnw.cmd "-Dtest=DirectMemoryQuestionClassifierTest" test
 ```
 
 Expected: FAIL，分类器和问题类型尚不存在。
@@ -389,7 +390,7 @@ public class DirectMemoryQuestionClassifier {
 Run:
 
 ```powershell
-.\mvnw.cmd -Dtest=DirectMemoryQuestionClassifierTest test
+.\mvnw.cmd "-Dtest=DirectMemoryQuestionClassifierTest" test
 ```
 
 Expected: `BUILD SUCCESS`，所有正例唯一分类，所有反例为空。
@@ -621,7 +622,7 @@ private RecalledMemory memory(String category, String content) {
 Run:
 
 ```powershell
-.\mvnw.cmd -Dtest=DeterministicMemoryAnswerRendererTest,DeterministicUserMemoryAnswerServiceTest,UserMemoryMetricsTest test
+.\mvnw.cmd "-Dtest=DeterministicMemoryAnswerRendererTest,DeterministicUserMemoryAnswerServiceTest,UserMemoryMetricsTest" test
 ```
 
 Expected: FAIL，新服务、结果和指标入口尚不存在。
@@ -779,17 +780,17 @@ public class DeterministicUserMemoryAnswerService {
         if (recalled.status() == UserMemoryRecallStatus.NOT_INITIALIZED) {
             return handled(requestId, type,
                     DeterministicUserMemoryAnswerResult.Outcome.NOT_REMEMBERED,
-                    renderer.notRemembered(type), null);
+                    renderer.notRemembered(type));
         }
         if (recalled.status() == UserMemoryRecallStatus.DISABLED) {
             return handled(requestId, type,
                     DeterministicUserMemoryAnswerResult.Outcome.DISABLED,
-                    DISABLED, null);
+                    DISABLED);
         }
         if (recalled.status() != UserMemoryRecallStatus.AVAILABLE) {
             return handled(requestId, type,
                     DeterministicUserMemoryAnswerResult.Outcome.UNAVAILABLE,
-                    UNAVAILABLE, null);
+                    UNAVAILABLE);
         }
 
         for (RecalledMemory memory : recalled.memories()) {
@@ -797,7 +798,7 @@ public class DeterministicUserMemoryAnswerService {
             if (rendered.isPresent()) {
                 return handled(requestId, type,
                         DeterministicUserMemoryAnswerResult.Outcome.ANSWERED,
-                        rendered.get(), memory.memoryId());
+                        rendered.get());
             }
         }
         if (!recalled.semanticAttempted()
@@ -805,22 +806,21 @@ public class DeterministicUserMemoryAnswerService {
                 || "DISABLED".equals(recalled.semanticResultCode())) {
             return handled(requestId, type,
                     DeterministicUserMemoryAnswerResult.Outcome.UNAVAILABLE,
-                    UNAVAILABLE, null);
+                    UNAVAILABLE);
         }
         return handled(requestId, type,
                 DeterministicUserMemoryAnswerResult.Outcome.NOT_REMEMBERED,
-                renderer.notRemembered(type), null);
+                renderer.notRemembered(type));
     }
 
     private DeterministicUserMemoryAnswerResult handled(
             String requestId,
             DirectMemoryQuestionType type,
             DeterministicUserMemoryAnswerResult.Outcome outcome,
-            String text,
-            String memoryId) {
+            String text) {
         metrics.directAnswer(type.name(), outcome.name());
-        log.info("user_memory_direct_answer requestId={} questionType={} outcome={} memoryId={}",
-                requestId, type.name(), outcome.name(), memoryId);
+        log.info("user_memory_direct_answer requestId={} questionType={} outcome={}",
+                requestId, type.name(), outcome.name());
         return new DeterministicUserMemoryAnswerResult(outcome, text);
     }
 }
@@ -852,7 +852,7 @@ public void directAnswer(String questionType, String outcome) {
 Run:
 
 ```powershell
-.\mvnw.cmd -Dtest=DeterministicMemoryAnswerRendererTest,DeterministicUserMemoryAnswerServiceTest,UserMemoryMetricsTest test
+.\mvnw.cmd "-Dtest=DeterministicMemoryAnswerRendererTest,DeterministicUserMemoryAnswerServiceTest,UserMemoryMetricsTest" test
 ```
 
 Expected: `BUILD SUCCESS`，所有分支和安全反例通过。
@@ -871,6 +871,7 @@ git commit -m "feat: add deterministic user memory answers"
 - Create: `src/test/java/com/xjjk/agent/chat/service/stream/ChatTurnRunnerDeterministicMemoryTest.java`
 - Modify: `src/test/java/com/xjjk/agent/chat/service/stream/ChatTurnRunnerExplicitMemoryTest.java`
 - Modify: `src/test/java/com/xjjk/agent/chat/service/stream/ChatTurnRunnerBusinessQueryTest.java`
+- Modify: `src/test/java/com/xjjk/agent/chat/action/ChatActionDispatcherTest.java`
 
 - [ ] **Step 1: 写执行链失败测试**
 
@@ -997,7 +998,7 @@ private ChatResponse response(String text) {
 Run:
 
 ```powershell
-.\mvnw.cmd -Dtest=ChatTurnRunnerDeterministicMemoryTest,ChatTurnRunnerExplicitMemoryTest,ChatTurnRunnerBusinessQueryTest test
+.\mvnw.cmd "-Dtest=ChatTurnRunnerDeterministicMemoryTest,ChatTurnRunnerExplicitMemoryTest,ChatTurnRunnerBusinessQueryTest" test
 ```
 
 Expected: FAIL，`ChatTurnRunner` 尚未注入和调用确定性直答服务。
@@ -1040,7 +1041,7 @@ if (queryPlan.mode() == BusinessQueryMode.GENERAL) {
 Run:
 
 ```powershell
-.\mvnw.cmd -Dtest=ChatTurnRunnerDeterministicMemoryTest,ChatTurnRunnerExplicitMemoryTest,ChatTurnRunnerBusinessQueryTest test
+.\mvnw.cmd "-Dtest=ChatTurnRunnerDeterministicMemoryTest,ChatTurnRunnerExplicitMemoryTest,ChatTurnRunnerBusinessQueryTest" test
 ```
 
 Expected: `BUILD SUCCESS`，直答不调用模型，显式命令和业务计划保持优先。
@@ -1050,7 +1051,7 @@ Expected: `BUILD SUCCESS`，直答不调用模型，显式命令和业务计划�
 Run:
 
 ```powershell
-.\mvnw.cmd -Dtest=ChatTurnRunner*Test,FreshBusinessResultGateTest test
+.\mvnw.cmd "-Dtest=ChatTurnRunner*Test,FreshBusinessResultGateTest" test
 ```
 
 Expected: `BUILD SUCCESS`，聊天、SSE、收尾、业务门禁与上下文测试零失败。
@@ -1058,7 +1059,7 @@ Expected: `BUILD SUCCESS`，聊天、SSE、收尾、业务门禁与上下文测�
 - [ ] **Step 6: 提交执行链接入**
 
 ```powershell
-git add src/main/java/com/xjjk/agent/chat/service/stream/ChatTurnRunner.java src/test/java/com/xjjk/agent/chat/service/stream/ChatTurnRunnerDeterministicMemoryTest.java src/test/java/com/xjjk/agent/chat/service/stream/ChatTurnRunnerExplicitMemoryTest.java src/test/java/com/xjjk/agent/chat/service/stream/ChatTurnRunnerBusinessQueryTest.java
+git add src/main/java/com/xjjk/agent/chat/service/stream/ChatTurnRunner.java src/test/java/com/xjjk/agent/chat/service/stream/ChatTurnRunnerDeterministicMemoryTest.java src/test/java/com/xjjk/agent/chat/service/stream/ChatTurnRunnerExplicitMemoryTest.java src/test/java/com/xjjk/agent/chat/service/stream/ChatTurnRunnerBusinessQueryTest.java src/test/java/com/xjjk/agent/chat/action/ChatActionDispatcherTest.java
 git commit -m "feat: route direct memory questions deterministically"
 ```
 

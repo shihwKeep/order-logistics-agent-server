@@ -84,6 +84,18 @@ ORDER BY id DESC LIMIT 10;
 5. 预期回答能够使用 Java 这一跨会话事实；`AUTO_EXTRACT / HIDDEN` 记录不得出现在“我的记忆”面板。
 6. 检查上下文选择日志，只应看到 `hasUserMemoryContext=true`、Token 数和固定结果码，不得出现记忆正文。记忆块最多 5 条，独立不超过 256 Token。
 
+## 确定性直答验收
+
+1. 确认当前用户存在 `ACTIVE / AUTO_EXTRACT / WORK_COMMON_SCOPE` 记忆，正文经安全方式核验为 Java 开发。
+2. 新建会话发送 `我平时主要使用什么编程语言？`，连续执行 10 次。
+3. 10 次回答都必须包含 `Java`，不得出现“无法获取或记忆”；每次助手消息为 `SUCCESS / MEMORY_RECALLED`。
+4. 对应 `chat_call_metrics` 的 `responseModel`、`inputTokens`、`outputTokens`、`totalTokens` 均为空；`agent.user.memory.direct.answer{question="PROGRAMMING_LANGUAGE",outcome="ANSWERED"}` 增加 10。
+5. 清空全部记忆后再次询问，必须返回 `我还没有记住您常用的编程语言。`。
+6. 恢复记忆后停止 Knowledge Service，再次询问必须返回 `记忆服务暂时不可用，请稍后重试。`。
+7. 发送 `签收后多久可以退款？` 和 `查询订单 C24101816040`，确认仍分别走知识库证据门禁和业务查询路径。
+
+日志与截图不得展示记忆正文、用户输入、Token、签名或数据库密码。
+
 ## 删除、世代与隔离验收
 
 1. 删除单条显式记忆后等待对应 `DELETE` Outbox 为 `DONE`，ES 与 Milvus 均不再返回旧 memory ID。
@@ -96,7 +108,7 @@ ORDER BY id DESC LIMIT 10;
 - 停止 Elasticsearch：预期 `VECTOR_ONLY`，聊天继续且可由 Milvus 候选回答。
 - 恢复 ES、停止 Milvus：预期 `KEYWORD_ONLY`，聊天继续且可由 ES 候选回答。
 - 同时停止 ES 与 Milvus：预期 `ALL_RECALL_UNAVAILABLE`，普通聊天继续，但助手不得声称记得用户事实。
-- 停止 Knowledge Service：Outbox 进入 `RETRY`；召回返回空候选，聊天主链路继续。
+- 停止 Knowledge Service：Outbox 进入 `RETRY`；普通聊天主链路继续，严格的本人记忆问句返回“记忆服务暂时不可用”，不得伪装成“尚未记住”。
 - 模拟 MySQL 终审失败：本轮所有跨会话记忆失效，普通聊天继续。
 
 ## 指标与自动回归
@@ -108,6 +120,7 @@ ORDER BY id DESC LIMIT 10;
 - `agent.user.memory.recall`
 - `agent.user.memory.recall.candidates`
 - `agent.user.memory.mysql.rejected`
+- `agent.user.memory.direct.answer`
 
 发布前在两个仓库分别执行：
 
