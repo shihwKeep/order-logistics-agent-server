@@ -12,6 +12,7 @@ import com.xjjk.agent.chat.service.turn.ChatTurnPreparationService;
 import com.xjjk.agent.chat.stream.ChatSseSession;
 import com.xjjk.agent.chat.stream.ChatStreamControl;
 import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.memory.answer.DeterministicUserMemoryAnswerService;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCommandResult;
 import com.xjjk.agent.memory.service.ExplicitMemoryCommandService;
 import org.junit.jupiter.api.Test;
@@ -34,6 +35,8 @@ class ChatTurnRunnerExplicitMemoryTest {
         ChatTurnFinalizer finalizer = mock(ChatTurnFinalizer.class);
         BusinessQueryPlanner planner = mock(BusinessQueryPlanner.class);
         ExplicitMemoryCommandService memoryService = mock(ExplicitMemoryCommandService.class);
+        DeterministicUserMemoryAnswerService directMemoryService =
+                mock(DeterministicUserMemoryAnswerService.class);
         ChatSseSession session = mock(ChatSseSession.class);
         AgentIdentity identity = new AgentIdentity(2L, "account", "name", 3L, 1L);
         ChatTurnContext turn = new ChatTurnContext(1L, 2L, "conversation", "request",
@@ -46,13 +49,14 @@ class ChatTurnRunnerExplicitMemoryTest {
         ChatTurnRunner runner = new ChatTurnRunner(
                 preparation, context, ai, finalizer,
                 mock(ChatToolResultRecorder.class), mock(ChatActionDispatcher.class),
-                planner, new FreshBusinessResultGate(), memoryService);
+                planner, new FreshBusinessResultGate(), memoryService,
+                directMemoryService);
         ChatStreamControl control = new ChatStreamControl();
         runner.run(new ChatStreamRequest(null, message, null), identity, control, session, "fallback");
 
         verify(session).generating();
         verify(session).delta("好的，已记住：用户偏好简洁回答");
-        verifyNoInteractions(planner, context, ai);
+        verifyNoInteractions(planner, context, ai, directMemoryService);
         ArgumentCaptor<ChatTurnExecution> captured = ArgumentCaptor.forClass(ChatTurnExecution.class);
         verify(finalizer).finish(captured.capture(), org.mockito.ArgumentMatchers.eq(control),
                 org.mockito.ArgumentMatchers.eq(session));

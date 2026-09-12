@@ -18,6 +18,8 @@ import com.xjjk.agent.chat.stream.ChatStreamControl;
 import com.xjjk.agent.chat.stream.ChatStreamError;
 import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.memory.answer.DeterministicUserMemoryAnswerResult;
+import com.xjjk.agent.memory.answer.DeterministicUserMemoryAnswerService;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCommandResult;
 import com.xjjk.agent.memory.service.ExplicitMemoryCommandService;
 import com.xjjk.agent.tool.AgentToolRequestContext;
@@ -52,6 +54,7 @@ public class ChatTurnRunner {
     private final BusinessQueryPlanner businessQueryPlanner;
     private final FreshBusinessResultGate freshBusinessResultGate;
     private final ExplicitMemoryCommandService explicitMemoryCommandService;
+    private final DeterministicUserMemoryAnswerService deterministicMemoryAnswerService;
 
     public void run(
             ChatStreamRequest request,
@@ -155,6 +158,25 @@ public class ChatTurnRunner {
                     session,
                     execution);
             return;
+        }
+
+        if (queryPlan.mode() == BusinessQueryMode.GENERAL) {
+            DeterministicUserMemoryAnswerResult memoryAnswer =
+                    deterministicMemoryAnswerService.answer(
+                            identity, request.message(), execution.requestId);
+            if (control.isStopRequested()) {
+                return;
+            }
+            if (memoryAnswer.handled()) {
+                session.generating();
+                execution.content.append(memoryAnswer.assistantText());
+                session.delta(memoryAnswer.assistantText());
+                execution.metrics.markFirstDeltaSent();
+                execution.finishReason = "MEMORY_RECALLED";
+                execution.status = MessageStatus.SUCCESS;
+                execution.error = null;
+                return;
+            }
         }
 
         // 第四步：基于 MySQL 稳定游标读取短期记忆，执行 Token 预算和上下文裁剪。

@@ -19,6 +19,7 @@ import com.xjjk.agent.chat.stream.ChatSseSession;
 import com.xjjk.agent.chat.stream.ChatStreamControl;
 import com.xjjk.agent.customer.service.CustomerOrderQueryService;
 import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.memory.answer.DeterministicUserMemoryAnswerService;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCommandResult;
 import com.xjjk.agent.memory.service.ExplicitMemoryCommandService;
 import com.xjjk.agent.order.service.OrderQueryGateway;
@@ -80,6 +81,8 @@ class ChatTurnRunnerBusinessQueryTest {
     @Mock
     private BusinessQueryPlanner planner;
     @Mock
+    private DeterministicUserMemoryAnswerService directMemoryService;
+    @Mock
     private ChatSseSession sessionOne;
     @Mock
     private ChatSseSession sessionTwo;
@@ -109,7 +112,7 @@ class ChatTurnRunnerBusinessQueryTest {
                 eq(AFTER_SALE_CODE), eq(IDENTITY), anyString());
         verify(sessionOne).result(any(ToolUiResult.class));
         verify(sessionTwo).result(any(ToolUiResult.class));
-        verifyNoInteractions(contextService, aiChatService);
+        verifyNoInteractions(contextService, aiChatService, directMemoryService);
     }
 
     @Test
@@ -183,7 +186,8 @@ class ChatTurnRunnerBusinessQueryTest {
                 dispatcher,
                 planner,
                 new FreshBusinessResultGate(),
-                memoryService);
+                memoryService,
+                directMemoryService);
     }
 
     private ChatTurnContext turn(

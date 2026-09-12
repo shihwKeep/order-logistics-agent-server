@@ -107,7 +107,9 @@ class ChatActionDispatcherTest {
                 finalizer, resultRecorder, dispatcher,
                 businessQueryPlanner, new FreshBusinessResultGate(),
                 org.mockito.Mockito.mock(
-                        com.xjjk.agent.memory.service.ExplicitMemoryCommandService.class));
+                        com.xjjk.agent.memory.service.ExplicitMemoryCommandService.class),
+                org.mockito.Mockito.mock(
+                        com.xjjk.agent.memory.answer.DeterministicUserMemoryAnswerService.class));
 
         runner.run(request, identity, new ChatStreamControl(), session, "fallback");
 
@@ -158,7 +160,9 @@ class ChatActionDispatcherTest {
                 finalizer, resultRecorder, dispatcher,
                 businessQueryPlanner, new FreshBusinessResultGate(),
                 org.mockito.Mockito.mock(
-                        com.xjjk.agent.memory.service.ExplicitMemoryCommandService.class));
+                        com.xjjk.agent.memory.service.ExplicitMemoryCommandService.class),
+                org.mockito.Mockito.mock(
+                        com.xjjk.agent.memory.answer.DeterministicUserMemoryAnswerService.class));
 
         runner.run(request, identity, new ChatStreamControl(), session, "fallback");
 
@@ -208,7 +212,9 @@ class ChatActionDispatcherTest {
                 finalizer, resultRecorder, dispatcher,
                 businessQueryPlanner, new FreshBusinessResultGate(),
                 org.mockito.Mockito.mock(
-                        com.xjjk.agent.memory.service.ExplicitMemoryCommandService.class));
+                        com.xjjk.agent.memory.service.ExplicitMemoryCommandService.class),
+                org.mockito.Mockito.mock(
+                        com.xjjk.agent.memory.answer.DeterministicUserMemoryAnswerService.class));
 
         runner.run(request, identity, new ChatStreamControl(), session, "fallback");
 
