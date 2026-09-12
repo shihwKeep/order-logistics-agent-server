@@ -52,6 +52,10 @@ public class MemorySchemaRegistry {
             Map.entry("专业", "专业"), Map.entry("口语", "口语化"),
             Map.entry("口语化", "口语化"), Map.entry("通俗", "口语化"),
             Map.entry("直接", "直接"));
+    private static final Set<String> DETERMINISTIC_ANSWER_LANGUAGES =
+            Set.copyOf(ANSWER_LANGUAGES.values());
+    private static final Set<String> DETERMINISTIC_ANSWER_STYLES =
+            Set.copyOf(ANSWER_STYLES.values());
     private static final Map<String, String> PROGRAMMING_ALIASES = Map.ofEntries(
             Map.entry("java", "Java"), Map.entry("python", "Python"),
             Map.entry("go", "Go"), Map.entry("golang", "Go"),
@@ -80,14 +84,16 @@ public class MemorySchemaRegistry {
                     candidate, "preferred_name", "profile.preferred_name",
                     "PROFILE_PREFERRED_NAME", this::safeName,
                     value -> "用户希望被称为" + value, false);
-            case COMMUNICATION_PREFERENCE -> stable(
+            case COMMUNICATION_PREFERENCE -> aliasedStable(
                     candidate, "answer_language", "communication.answer_language",
                     "PREFERENCE_LANGUAGE", this::answerLanguage,
-                    value -> "用户偏好使用" + value + "交流", false);
-            case RESPONSE_PREFERENCE -> stable(
+                    value -> "用户偏好使用" + value + "交流",
+                    DETERMINISTIC_ANSWER_LANGUAGES);
+            case RESPONSE_PREFERENCE -> aliasedStable(
                     candidate, "answer_style", "response.answer_style",
                     "PREFERENCE_ANSWER_STYLE", this::answerStyle,
-                    value -> "用户偏好" + value + "回答", false);
+                    value -> "用户偏好" + value + "回答",
+                    DETERMINISTIC_ANSWER_STYLES);
             case WORK_CONTEXT -> work(candidate);
             case STABLE_PREFERENCE -> open(
                     candidate, "STABLE_PREFERENCE", "用户的稳定偏好是");
@@ -137,6 +143,23 @@ public class MemorySchemaRegistry {
         requireEquivalent(candidate.value(), canonical, normalizer);
         return resolved(canonicalKey, renderer.apply(canonical), canonical,
                 legacyCategory, semanticVerification);
+    }
+
+    private SchemaResolution aliasedStable(
+            MemoryFactCandidate candidate,
+            String expectedPredicate,
+            String canonicalKey,
+            String legacyCategory,
+            Function<String, String> normalizer,
+            Function<String, String> renderer,
+            Set<String> deterministicValues) {
+        if (!expectedPredicate.equals(candidate.predicate())) {
+            throw rejected(SCHEMA);
+        }
+        String canonical = normalizer.apply(candidate.valueEvidence());
+        requireEquivalent(candidate.value(), canonical, normalizer);
+        return resolved(canonicalKey, renderer.apply(canonical), canonical,
+                legacyCategory, !deterministicValues.contains(canonical));
     }
 
     private SchemaResolution open(
@@ -192,19 +215,13 @@ public class MemorySchemaRegistry {
     private String answerLanguage(String raw) {
         String value = normalize(raw);
         String canonical = ANSWER_LANGUAGES.get(value);
-        if (canonical == null) {
-            throw rejected(UNSUPPORTED);
-        }
-        return canonical;
+        return canonical == null ? safeOpenValue(value) : canonical;
     }
 
     private String answerStyle(String raw) {
         String value = normalize(raw);
         String canonical = ANSWER_STYLES.get(value);
-        if (canonical == null) {
-            throw rejected(UNSUPPORTED);
-        }
-        return canonical;
+        return canonical == null ? safeOpenValue(value) : canonical;
     }
 
     private String programmingLanguage(String raw) {

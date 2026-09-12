@@ -45,6 +45,8 @@ Agent Server 的 Nacos 增量：
 
 ```properties
 agent.memory.enabled=true
+agent.memory.prompt-version=memory-explicit-semantic-v2
+agent.memory.auto-extract.prompt-version=memory-semantic-v2
 agent.memory.context-max-tokens=256
 agent.memory.index-worker.poll-interval=2s
 agent.memory.index-worker.recovery-interval=30s
@@ -66,7 +68,8 @@ agent.memory.retrieval.global-explicit-limit=3
 2. 等待异步抽取完成，检查：
 
 ```sql
-SELECT task_id, status, result_code, saved_memory_count, retry_count, last_error_code
+SELECT task_id, status, result_code, model_candidate_count,
+       accepted_candidate_count, saved_memory_count, retry_count, last_error_code
 FROM agent_memory_extraction_task
 WHERE tenant_id = 1 AND user_id = 74680
 ORDER BY id DESC LIMIT 5;
@@ -79,10 +82,26 @@ ORDER BY id DESC LIMIT 10;
 
 预期抽取任务为 `DONE / SAVED`，对应 Outbox 最终为 `DONE`。`RETRY` 应按指数退避重试；连续失败达到上限后为 `DEAD`，错误字段只能保存固定错误码。
 
+`DONE` 必须同时带具体结果码：`IGNORE`、`SESSION_ONLY`、`SAVED`、`NO_CHANGE`、`MODEL_PROTOCOL_REJECTED` 或 `REJECTED_*`。不允许再用一个模糊的 `DONE` 掩盖空候选、置信度拒绝、策略拒绝或证据核验失败。
+
+检查结构化事实字段：
+
+```sql
+SELECT source_type, visibility, schema_version, memory_type, predicate_name,
+       value_json, stability, verification_method, status
+FROM agent_user_memory
+WHERE tenant_id = 1 AND user_id = 74680
+ORDER BY id DESC LIMIT 10;
+```
+
+新写入记录预期 `schema_version = 2`、`stability = 'STABLE'`。已登记且可确定规范化的值使用 `DETERMINISTIC`；开放值必须通过独立证据模型后使用 `SEMANTIC_MODEL`。
+
 3. 查询 ES 别名 `agent-user-memory-active` 和 Milvus 集合 `agent_user_memory_v1`，确认记录的租户、用户、世代、memory ID 和版本与 MySQL 一致。不要在共享日志中输出正文。
 4. 新建会话 B，发送：`我平时主要使用什么编程语言？`
 5. 预期回答能够使用 Java 这一跨会话事实；`AUTO_EXTRACT / HIDDEN` 记录不得出现在“我的记忆”面板。
 6. 检查上下文选择日志，只应看到 `hasUserMemoryContext=true`、Token 数和固定结果码，不得出现记忆正文。记忆块最多 5 条，独立不超过 256 Token。
+
+再使用 Elixir、葡萄牙语或任意未登记的新安全值重复步骤 1—5。未登记值不应因缺少固定词表而被拒绝，而应进入 `SEMANTIC_MODEL` 证据核验。
 
 ## 确定性直答验收
 

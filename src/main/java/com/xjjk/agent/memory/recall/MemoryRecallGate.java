@@ -44,7 +44,8 @@ public class MemoryRecallGate {
             return false;
         }
         String normalized = query.strip().toLowerCase(Locale.ROOT);
-        return !containsAny(normalized, BUSINESS_ONLY);
+        return containsAny(normalized, FIRST_PERSON)
+                && !containsAny(normalized, BUSINESS_ONLY);
     }
 
     private boolean containsAny(String value, List<String> needles) {

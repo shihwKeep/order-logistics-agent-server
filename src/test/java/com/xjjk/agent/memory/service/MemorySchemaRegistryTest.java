@@ -52,6 +52,21 @@ class MemorySchemaRegistryTest {
     }
 
     @Test
+    void supportsOpenCommunicationLanguagesAndAnswerStylesWithoutEnumeratingThem() {
+        var language = registry.resolve(candidate(
+                MemoryType.COMMUNICATION_PREFERENCE, "answer_language",
+                "葡萄牙语", "葡萄牙语"));
+        var style = registry.resolve(candidate(
+                MemoryType.RESPONSE_PREFERENCE, "answer_style",
+                "苏格拉底式引导", "苏格拉底式引导"));
+
+        assertThat(language.canonicalContent()).isEqualTo("用户偏好使用葡萄牙语交流");
+        assertThat(language.requiresSemanticVerification()).isTrue();
+        assertThat(style.canonicalContent()).isEqualTo("用户偏好苏格拉底式引导回答");
+        assertThat(style.requiresSemanticVerification()).isTrue();
+    }
+
+    @Test
     void createsServerOwnedKeysForOpenFacts() {
         var result = registry.resolve(candidate(
                 MemoryType.STABLE_PREFERENCE, "arbitrary_model_key",

@@ -50,4 +50,14 @@ class MemoryRecallGateTest {
     void semanticFallbackStillExcludesBusinessOnlyQueries(String query) {
         assertThat(gate.allowsSemanticFallback(query)).isFalse();
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "你好",
+            "今天天气怎么样",
+            "介绍一下系统功能"
+    })
+    void semanticFallbackDoesNotQueryMemoryForUnrelatedGeneralMessages(String query) {
+        assertThat(gate.allowsSemanticFallback(query)).isFalse();
+    }
 }
