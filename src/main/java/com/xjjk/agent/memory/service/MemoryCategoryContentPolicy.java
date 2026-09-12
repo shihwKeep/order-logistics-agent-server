@@ -68,11 +68,32 @@ public class MemoryCategoryContentPolicy {
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
     );
     private static final Pattern PUNCTUATION = Pattern.compile("[\\s，,。.!！？?：:、；;（）()]+");
+    private static final Pattern INSTRUCTION_LIKE_NAME = Pattern.compile(
+            "(?:忽略|无视|删除|系统|规则|限制|指令|命令|prompt|system|memory|tool|"
+                    + "心脏病|癫痫|哮喘|孕妇|hiv|diabetic|pregnant|ignore|delete)",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
 
     public boolean isAllowed(MemoryCategory category, String evidence, String content) {
         Optional<String> evidenceValue = canonicalize(category, evidence);
         Optional<String> contentValue = canonicalize(category, content);
         return evidenceValue.isPresent() && evidenceValue.equals(contentValue);
+    }
+
+    /**
+     * Validates a semantic extractor candidate against its verbatim evidence without forcing the
+     * evidence itself through the deterministic fast-path grammar.
+     */
+    public boolean supportsCandidate(
+            MemoryCategory category, String evidence, String canonicalContent) {
+        Objects.requireNonNull(category, "category");
+        return switch (category) {
+            case PROFILE_PREFERRED_NAME -> supportsPreferredName(evidence, canonicalContent);
+            case PREFERENCE_LANGUAGE -> supportsKnownCanonicalGroup(
+                    evidence, canonicalContent, LANGUAGES, "用户偏好使用", "交流");
+            case PREFERENCE_ANSWER_STYLE -> supportsKnownCanonicalGroup(
+                    evidence, canonicalContent, ANSWER_STYLES, "用户偏好", "回答");
+            case WORK_COMMON_SCOPE -> supportsWorkScope(evidence, canonicalContent);
+        };
     }
 
     public Optional<String> canonicalize(MemoryCategory category, String value) {
@@ -97,6 +118,62 @@ public class MemoryCategoryContentPolicy {
             return Optional.empty();
         }
         return Optional.of("用户希望被称为" + matcher.group(1));
+    }
+
+    private static boolean supportsPreferredName(String evidence, String canonicalContent) {
+        String content = normalizeWhitespaceOnly(canonicalContent);
+        String prefix = "用户希望被称为";
+        if (!content.startsWith(prefix)) {
+            return false;
+        }
+        String name = content.substring(prefix.length());
+        int codePoints = name.codePointCount(0, name.length());
+        if (codePoints < 1 || codePoints > 32 || !name.equals(name.strip())
+                || INSTRUCTION_LIKE_NAME.matcher(name).find()) {
+            return false;
+        }
+        for (int offset = 0; offset < name.length();) {
+            int codePoint = name.codePointAt(offset);
+            offset += Character.charCount(codePoint);
+            if (!Character.isLetterOrDigit(codePoint)
+                    && codePoint != ' '
+                    && codePoint != '·'
+                    && codePoint != '_'
+                    && codePoint != '-') {
+                return false;
+            }
+        }
+        return normalizeWhitespaceOnly(evidence).contains(name);
+    }
+
+    private static boolean supportsKnownCanonicalGroup(
+            String evidence,
+            String canonicalContent,
+            List<SemanticGroup> groups,
+            String prefix,
+            String suffix
+    ) {
+        String normalizedEvidence = normalize(evidence);
+        String normalizedContent = normalize(canonicalContent);
+        List<SemanticGroup> evidenceGroups = matchingGroups(normalizedEvidence, groups);
+        if (evidenceGroups.size() != 1) {
+            return false;
+        }
+        String expected = normalize(prefix + evidenceGroups.getFirst().canonical() + suffix);
+        return normalizedContent.equals(expected);
+    }
+
+    private static boolean supportsWorkScope(String evidence, String canonicalContent) {
+        String normalizedEvidence = normalize(evidence);
+        String normalizedContent = normalize(canonicalContent);
+        List<SemanticGroup> evidenceGroups = matchingGroups(normalizedEvidence, WORK_SCOPES);
+        List<SemanticGroup> contentGroups = matchingGroups(normalizedContent, WORK_SCOPES);
+        if (evidenceGroups.isEmpty() || evidenceGroups.size() != contentGroups.size()) {
+            return false;
+        }
+        return evidenceGroups.stream().map(SemanticGroup::canonical).distinct().sorted().toList()
+                .equals(contentGroups.stream().map(SemanticGroup::canonical).distinct().sorted().toList())
+                && normalizedContent.startsWith(normalize("用户常用工作范围是"));
     }
 
     private static Optional<String> singleGroup(String value, List<SemanticGroup> groups,
@@ -164,6 +241,10 @@ public class MemoryCategoryContentPolicy {
     private static String normalize(String value) {
         return value == null ? "" : ExplicitMemoryCommandDetector.normalizeWhitespace(value)
                 .toLowerCase(Locale.ROOT);
+    }
+
+    private static String normalizeWhitespaceOnly(String value) {
+        return value == null ? "" : ExplicitMemoryCommandDetector.normalizeWhitespace(value);
     }
 
     private record SemanticGroup(String canonical, List<String> terms) {

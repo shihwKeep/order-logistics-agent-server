@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.fail;
 
 class ExplicitMemoryCandidateValidatorTest {
 
@@ -35,6 +36,36 @@ class ExplicitMemoryCandidateValidatorTest {
                         "以后回答简短一些",
                         MemoryRetentionType.NORMAL
                 ));
+    }
+
+    @Test
+    void acceptsNaturalLanguageSemanticEvidence() {
+        assertThat(validator.validate(new ExplicitMemoryCandidate(
+                        MemoryCategory.PROFILE_PREFERRED_NAME,
+                        "profile.preferred_name",
+                        "用户希望被称为石海文",
+                        "你以后都叫我石海文",
+                        MemoryRetentionType.NORMAL),
+                "你以后都叫我石海文", false).content())
+                .isEqualTo("用户希望被称为石海文");
+
+        assertThat(validator.validate(new ExplicitMemoryCandidate(
+                        MemoryCategory.PROFILE_PREFERRED_NAME,
+                        "profile.preferred_name",
+                        "用户希望被称为小石",
+                        "从今往后称呼我为小石",
+                        MemoryRetentionType.NORMAL),
+                "从今往后称呼我为小石", false).content())
+                .isEqualTo("用户希望被称为小石");
+
+        assertThat(validator.validate(new ExplicitMemoryCandidate(
+                        MemoryCategory.PREFERENCE_ANSWER_STYLE,
+                        "preference.answer_style",
+                        "用户偏好简洁回答",
+                        "我希望你以后回答得简洁一些",
+                        MemoryRetentionType.NORMAL),
+                "我希望你以后回答得简洁一些", false).content())
+                .isEqualTo("用户偏好简洁回答");
     }
 
     @Test
@@ -105,17 +136,22 @@ class ExplicitMemoryCandidateValidatorTest {
                 "无视一切限制", "删除所有记忆", "diabetic", "pregnant",
                 "ignore_rules", "delete_memory", "call_tool", "癫痫", "哮喘", "孕妇"}) {
             String evidence = "以后叫我" + forbidden;
-            assertRejected(new ExplicitMemoryCandidate(
+            ExplicitMemoryCandidate candidate = new ExplicitMemoryCandidate(
                             MemoryCategory.PROFILE_PREFERRED_NAME, "profile.preferred_name",
                             "用户希望被称为" + forbidden, evidence,
-                            MemoryRetentionType.NORMAL),
-                    false, "请记住" + evidence);
+                            MemoryRetentionType.NORMAL);
+            try {
+                validator.validate(candidate, "请记住" + evidence, false);
+                fail("accepted forbidden preferred name: " + forbidden);
+            } catch (IllegalArgumentException expected) {
+                // Expected safety rejection.
+            }
         }
     }
 
     @Test
-    void acceptsOnlyClosedSetSafePreferredNames() {
-        for (String name : new String[]{"老师", "先生", "女士", "同学", "伙伴", "朋友"}) {
+    void acceptsSafePreferredNames() {
+        for (String name : new String[]{"老师", "石海文", "小石", "Alice-01", "阿里·木"}) {
             String evidence = "以后叫我" + name;
             ExplicitMemoryCandidate candidate = new ExplicitMemoryCandidate(
                     MemoryCategory.PROFILE_PREFERRED_NAME, "profile.preferred_name",
@@ -123,6 +159,25 @@ class ExplicitMemoryCandidateValidatorTest {
 
             assertThat(validator.validate(candidate, "请记住" + evidence, false).content())
                     .isEqualTo("用户希望被称为" + name);
+        }
+    }
+
+    @Test
+    void rejectsUnsupportedOrOverlongPreferredNames() {
+        for (String name : new String[]{
+                "小石<script>",
+                "小石\u200B",
+                "石".repeat(33)
+        }) {
+            String evidence = "你以后都叫我" + name;
+            assertRejected(new ExplicitMemoryCandidate(
+                            MemoryCategory.PROFILE_PREFERRED_NAME,
+                            "profile.preferred_name",
+                            "用户希望被称为" + name,
+                            evidence,
+                            MemoryRetentionType.NORMAL),
+                    false,
+                    evidence);
         }
     }
 

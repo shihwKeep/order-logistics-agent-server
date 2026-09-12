@@ -64,12 +64,11 @@ public class ExplicitMemoryCandidateValidator {
         if (!sensitiveContentPolicy.isAllowed(content)
                 || !sensitiveContentPolicy.isAllowed(evidence)
                 || !sensitiveContentPolicy.isAllowed(original)
-                || !categoryContentPolicy.isAllowed(candidate.category(), evidence, content)) {
+                || !categoryContentPolicy.supportsCandidate(
+                        candidate.category(), evidence, content)) {
             throw invalid();
         }
-        String canonicalContent = categoryContentPolicy.canonicalize(candidate.category(), evidence)
-                .orElseThrow(ExplicitMemoryCandidateValidator::invalid);
-        return new ExplicitMemoryCandidate(candidate.category(), key, canonicalContent, evidence, expected);
+        return new ExplicitMemoryCandidate(candidate.category(), key, content, evidence, expected);
     }
 
     private static String normalize(String value) {
