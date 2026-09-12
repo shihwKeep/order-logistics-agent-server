@@ -8,11 +8,13 @@ import com.xjjk.agent.memory.domain.ImplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.ImplicitMemoryExtractionBatch;
 import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.domain.MemoryExtractionTaskClaim;
+import com.xjjk.agent.memory.domain.MemoryOutboxClaim;
 import com.xjjk.agent.memory.persistence.entity.MemoryOutboxEntity;
 import com.xjjk.agent.memory.persistence.mapper.MemoryOutboxMapper;
 import com.xjjk.agent.memory.service.UserMemoryManagementService;
 import com.xjjk.agent.memory.service.ImplicitMemoryCommitService;
 import com.xjjk.agent.memory.service.UserMemoryExpiryService;
+import com.xjjk.agent.memory.service.MemoryIndexOutboxStateService;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -67,6 +69,9 @@ class UserMemorySpringTransactionIntegrationTest {
 
     @Autowired
     private UserMemoryExpiryService expiryService;
+
+    @Autowired
+    private MemoryIndexOutboxStateService outboxState;
 
     @Autowired
     private JdbcTemplate jdbc;
@@ -199,6 +204,34 @@ class UserMemorySpringTransactionIntegrationTest {
         assertThat(count("status = 'ACTIVE' AND version = 1")).isEqualTo(1);
         assertThat(count("version = 2")).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM agent_memory_outbox", Long.class)).isZero();
+    }
+
+    @Test
+    void claimsAndCompletesOutboxWithRealMySqlLeaseCas() {
+        jdbc.update("""
+                INSERT INTO agent_memory_outbox (
+                    event_id, memory_id, tenant_id, user_id, memory_generation, memory_version,
+                    operation, status, retry_count, next_run_at, created_at, updated_at
+                ) VALUES (
+                    '10000000-0000-0000-0000-000000000099',
+                    '00000000-0000-0000-0000-000000000010', 1, 2, 7, 1,
+                    'UPSERT', 'PENDING', 0,
+                    UTC_TIMESTAMP(3) - INTERVAL 1 SECOND, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)
+                )
+                """);
+
+        MemoryOutboxClaim claim = outboxState.claimAvailable().getFirst();
+
+        assertThat(claim.eventId()).isEqualTo("10000000-0000-0000-0000-000000000099");
+        assertThat(jdbc.queryForObject("""
+                SELECT status FROM agent_memory_outbox WHERE event_id = ?
+                """, String.class, claim.eventId())).isEqualTo("PROCESSING");
+
+        outboxState.complete(claim);
+
+        assertThat(jdbc.queryForObject("""
+                SELECT status FROM agent_memory_outbox WHERE event_id = ?
+                """, String.class, claim.eventId())).isEqualTo("DONE");
     }
 
     @Test

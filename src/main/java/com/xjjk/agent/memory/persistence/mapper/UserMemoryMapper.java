@@ -21,6 +21,25 @@ public interface UserMemoryMapper extends BaseMapper<UserMemoryEntity> {
           AND user_id = #{userId}
           AND memory_generation = #{generation}
           AND memory_id = #{memoryId}
+          AND status = 'ACTIVE'
+          AND (expires_at IS NULL OR expires_at > #{now})
+        ORDER BY version DESC, id DESC
+        LIMIT 1
+        """)
+    UserMemoryEntity selectActiveIndexable(
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("generation") long generation,
+            @Param("memoryId") String memoryId,
+            @Param("now") LocalDateTime now);
+
+    @Select("""
+        SELECT *
+        FROM agent_user_memory
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND memory_generation = #{generation}
+          AND memory_id = #{memoryId}
           AND source_type = 'USER_EXPLICIT'
           AND visibility = 'VISIBLE'
           AND status = 'ACTIVE'
