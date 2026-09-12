@@ -28,6 +28,11 @@ public class UserMemoryMetrics {
             "INDEX", "MYSQL_VALIDATED", "SELECTED");
     private static final Set<String> REJECTION_REASONS = Set.of(
             "OWNER_OR_STATE", "VERSION_MISMATCH", "SUPPRESSED");
+    private static final Set<String> DIRECT_QUESTIONS = Set.of(
+            "PREFERRED_NAME", "PROGRAMMING_LANGUAGE", "WORK_SCOPE",
+            "ANSWER_LANGUAGE", "ANSWER_STYLE");
+    private static final Set<String> DIRECT_OUTCOMES = Set.of(
+            "ANSWERED", "NOT_REMEMBERED", "DISABLED", "UNAVAILABLE");
     private final MeterRegistry registry;
 
     public UserMemoryMetrics(MeterRegistry registry) {
@@ -82,6 +87,13 @@ public class UserMemoryMetrics {
         registry.counter("agent.user.memory.mysql.rejected",
                 "reason", require(reason, REJECTION_REASONS, "MySQL拒绝原因"))
                 .increment(count);
+    }
+
+    public void directAnswer(String questionType, String outcome) {
+        registry.counter("agent.user.memory.direct.answer",
+                "question", require(questionType, DIRECT_QUESTIONS, "直答问题类型"),
+                "outcome", require(outcome, DIRECT_OUTCOMES, "直答结果"))
+                .increment();
     }
 
     private void record(String operation, String outcome, String code) {

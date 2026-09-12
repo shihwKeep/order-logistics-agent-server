@@ -20,6 +20,7 @@ class UserMemoryMetricsTest {
         metrics.indexOperation("UPSERT", "SUCCESS");
         metrics.outboxTransition("DONE");
         metrics.recall("KEYWORD_ONLY", "OK");
+        metrics.directAnswer("PROGRAMMING_LANGUAGE", "ANSWERED");
         metrics.candidateCount("INDEX", 4);
         metrics.mysqlRejected("VERSION_MISMATCH", 2);
 
@@ -40,6 +41,9 @@ class UserMemoryMetricsTest {
                 });
         assertThat(registry.get("agent.user.memory.index.operation")
                 .tags("operation", "UPSERT", "outcome", "SUCCESS")
+                .counter().count()).isEqualTo(1.0);
+        assertThat(registry.get("agent.user.memory.direct.answer")
+                .tags("question", "PROGRAMMING_LANGUAGE", "outcome", "ANSWERED")
                 .counter().count()).isEqualTo(1.0);
         assertThat(registry.get("agent.user.memory.mysql.rejected")
                 .tag("reason", "VERSION_MISMATCH").counter().count()).isEqualTo(2.0);
