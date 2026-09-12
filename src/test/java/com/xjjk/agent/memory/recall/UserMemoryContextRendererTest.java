@@ -57,6 +57,9 @@ class UserMemoryContextRendererTest {
                 .contains("直接依据匹配的历史用户记忆回答")
                 .contains("不得声称无法获取或无法记忆")
                 .contains("没有匹配记忆时")
+                .contains("未经记忆写入服务返回成功结果，不得声称已保存、已记住或会永久遵守")
+                .contains("长期记忆没有命中时，必须继续依据当前会话历史")
+                .contains("只有两者都没有事实时才能说明尚不知道")
                 .contains("不得猜测或用常识补全")
                 .contains("无论是否命中记忆")
                 .contains("不得向用户暴露内部来源类型、标识、分数或存储实现");

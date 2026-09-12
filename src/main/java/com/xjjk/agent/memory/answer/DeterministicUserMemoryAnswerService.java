@@ -17,7 +17,6 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 public class DeterministicUserMemoryAnswerService {
-    private static final String DISABLED = "长期记忆已关闭，暂时无法回答。";
     private static final String UNAVAILABLE = "记忆服务暂时不可用，请稍后重试。";
 
     private final DirectMemoryQuestionClassifier classifier;
@@ -37,14 +36,10 @@ public class DeterministicUserMemoryAnswerService {
         UserMemoryRecallResult recalled = recallService.recallByCategory(
                 identity, type.memoryCategory());
         if (recalled.status() == UserMemoryRecallStatus.NOT_INITIALIZED) {
-            return handled(requestId, type,
-                    DeterministicUserMemoryAnswerResult.Outcome.NOT_REMEMBERED,
-                    renderer.notRemembered(type));
+            return fallThrough(requestId, type);
         }
         if (recalled.status() == UserMemoryRecallStatus.DISABLED) {
-            return handled(requestId, type,
-                    DeterministicUserMemoryAnswerResult.Outcome.DISABLED,
-                    DISABLED);
+            return fallThrough(requestId, type);
         }
         if (recalled.status() != UserMemoryRecallStatus.AVAILABLE) {
             return handled(requestId, type,
@@ -60,9 +55,7 @@ public class DeterministicUserMemoryAnswerService {
                         rendered.get());
             }
         }
-        return handled(requestId, type,
-                DeterministicUserMemoryAnswerResult.Outcome.NOT_REMEMBERED,
-                renderer.notRemembered(type));
+        return fallThrough(requestId, type);
     }
 
     private DeterministicUserMemoryAnswerResult handled(
@@ -74,5 +67,14 @@ public class DeterministicUserMemoryAnswerService {
         log.info("user_memory_direct_answer requestId={} questionType={} outcome={}",
                 requestId, type.name(), outcome.name());
         return new DeterministicUserMemoryAnswerResult(outcome, text);
+    }
+
+    private DeterministicUserMemoryAnswerResult fallThrough(
+            String requestId,
+            DirectMemoryQuestionType type) {
+        metrics.directAnswer(type.name(), "FALLTHROUGH");
+        log.info("user_memory_direct_answer requestId={} questionType={} outcome=FALLTHROUGH",
+                requestId, type.name());
+        return DeterministicUserMemoryAnswerResult.notHandled();
     }
 }

@@ -83,7 +83,7 @@ class DeterministicUserMemoryAnswerServiceTest {
     }
 
     @Test
-    void reportsDisabledWhenLongTermMemoryIsOff() {
+    void fallsThroughWhenLongTermMemoryIsOff() {
         classified();
         when(recallService.recallByCategory(
                 IDENTITY, MemoryCategory.WORK_COMMON_SCOPE))
@@ -92,43 +92,39 @@ class DeterministicUserMemoryAnswerServiceTest {
         DeterministicUserMemoryAnswerResult result = service.answer(
                 IDENTITY, QUERY, "request-disabled");
 
-        assertThat(result.outcome())
-                .isEqualTo(DeterministicUserMemoryAnswerResult.Outcome.DISABLED);
-        assertThat(result.assistantText()).isEqualTo("长期记忆已关闭，暂时无法回答。");
+        assertThat(result).isEqualTo(DeterministicUserMemoryAnswerResult.notHandled());
+        verify(metrics).directAnswer("PROGRAMMING_LANGUAGE", "FALLTHROUGH");
+        verifyNoInteractions(renderer);
     }
 
     @Test
-    void reportsNotRememberedOnlyAfterSuccessfulEmptyRecall() {
+    void fallsThroughAfterSuccessfulEmptyRecall() {
         classified();
         when(recallService.recallByCategory(
                 IDENTITY, MemoryCategory.WORK_COMMON_SCOPE))
                 .thenReturn(new UserMemoryRecallResult(
                         List.of(), false, "MYSQL_CATEGORY",
                         UserMemoryRecallStatus.AVAILABLE));
-        notRemembered();
-
         DeterministicUserMemoryAnswerResult result = service.answer(
                 IDENTITY, QUERY, "request-empty");
 
-        assertThat(result.outcome())
-                .isEqualTo(DeterministicUserMemoryAnswerResult.Outcome.NOT_REMEMBERED);
-        assertThat(result.assistantText())
-                .isEqualTo("我还没有记住您常用的编程语言。");
+        assertThat(result).isEqualTo(DeterministicUserMemoryAnswerResult.notHandled());
+        verify(metrics).directAnswer("PROGRAMMING_LANGUAGE", "FALLTHROUGH");
+        verifyNoInteractions(renderer);
     }
 
     @Test
-    void reportsNotRememberedWhenMemoryHasNeverBeenInitialized() {
+    void fallsThroughWhenMemoryHasNeverBeenInitialized() {
         classified();
         when(recallService.recallByCategory(
                 IDENTITY, MemoryCategory.WORK_COMMON_SCOPE))
                 .thenReturn(UserMemoryRecallResult.notInitialized());
-        notRemembered();
-
         DeterministicUserMemoryAnswerResult result = service.answer(
                 IDENTITY, QUERY, "request-new-user");
 
-        assertThat(result.outcome())
-                .isEqualTo(DeterministicUserMemoryAnswerResult.Outcome.NOT_REMEMBERED);
+        assertThat(result).isEqualTo(DeterministicUserMemoryAnswerResult.notHandled());
+        verify(metrics).directAnswer("PROGRAMMING_LANGUAGE", "FALLTHROUGH");
+        verifyNoInteractions(renderer);
     }
 
     @Test
@@ -145,7 +141,7 @@ class DeterministicUserMemoryAnswerServiceTest {
     }
 
     @Test
-    void rejectsUnrenderableCategoryInsteadOfInferringAnAnswer() {
+    void fallsThroughWhenRecalledCategoryCannotRenderAnAnswer() {
         RecalledMemory broadScope = memory(
                 "WORK_COMMON_SCOPE", "用户常用工作范围是后端开发");
         classified();
@@ -156,20 +152,14 @@ class DeterministicUserMemoryAnswerServiceTest {
                         UserMemoryRecallStatus.AVAILABLE));
         when(renderer.render(DirectMemoryQuestionType.PROGRAMMING_LANGUAGE, broadScope))
                 .thenReturn(Optional.empty());
-        notRemembered();
-
-        assertThat(service.answer(IDENTITY, QUERY, "request-broad").outcome())
-                .isEqualTo(DeterministicUserMemoryAnswerResult.Outcome.NOT_REMEMBERED);
+        assertThat(service.answer(IDENTITY, QUERY, "request-broad"))
+                .isEqualTo(DeterministicUserMemoryAnswerResult.notHandled());
+        verify(metrics).directAnswer("PROGRAMMING_LANGUAGE", "FALLTHROUGH");
     }
 
     private void classified() {
         when(classifier.classify(QUERY))
                 .thenReturn(Optional.of(DirectMemoryQuestionType.PROGRAMMING_LANGUAGE));
-    }
-
-    private void notRemembered() {
-        when(renderer.notRemembered(DirectMemoryQuestionType.PROGRAMMING_LANGUAGE))
-                .thenReturn("我还没有记住您常用的编程语言。");
     }
 
     private RecalledMemory memory(String category, String content) {

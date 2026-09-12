@@ -29,8 +29,6 @@ public record DeterministicUserMemoryAnswerResult(
     public enum Outcome {
         NOT_HANDLED,
         ANSWERED,
-        NOT_REMEMBERED,
-        DISABLED,
         UNAVAILABLE
     }
 }

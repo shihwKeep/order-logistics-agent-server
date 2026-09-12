@@ -32,7 +32,7 @@ public class UserMemoryMetrics {
             "PREFERRED_NAME", "PROGRAMMING_LANGUAGE", "WORK_SCOPE",
             "ANSWER_LANGUAGE", "ANSWER_STYLE");
     private static final Set<String> DIRECT_OUTCOMES = Set.of(
-            "ANSWERED", "NOT_REMEMBERED", "DISABLED", "UNAVAILABLE");
+            "ANSWERED", "FALLTHROUGH", "UNAVAILABLE");
     private static final Set<String> EXPLICIT_PATHS = Set.of(
             "FAST_PATH", "SEMANTIC_PATH", "NONE");
     private static final Set<String> EXPLICIT_OUTCOMES = Set.of(

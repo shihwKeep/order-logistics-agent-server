@@ -99,7 +99,7 @@ class ChatTurnRunnerDeterministicMemoryTest {
 
     @Test
     void notHandledMemoryQuestionContinuesToExistingModelPath() throws Exception {
-        String message = "你好";
+        String message = "你怎么称呼我？";
         ChatTurnContext turn = turn();
         ChatStreamControl control = new ChatStreamControl();
         ChatContextSelection selection = org.mockito.Mockito.mock(ChatContextSelection.class);
@@ -111,14 +111,14 @@ class ChatTurnRunnerDeterministicMemoryTest {
                 .thenReturn(DeterministicUserMemoryAnswerResult.notHandled());
         when(context.prepare(turn, message, control)).thenReturn(selection);
         when(ai.stream(eq(message), eq(selection), any(AgentToolRequestContext.class)))
-                .thenReturn(Flux.just(response("普通回答")));
+                .thenReturn(Flux.just(response("根据当前会话，我称呼您为石海文。")));
 
         runner().run(new ChatStreamRequest(null, message, null), IDENTITY,
                 control, session, "fallback");
 
         verify(context).prepare(turn, message, control);
         verify(ai).stream(eq(message), eq(selection), any(AgentToolRequestContext.class));
-        verify(session).delta("普通回答");
+        verify(session).delta("根据当前会话，我称呼您为石海文。");
     }
 
     @Test
