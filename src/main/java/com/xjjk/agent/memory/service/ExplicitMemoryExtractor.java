@@ -1,9 +1,7 @@
 package com.xjjk.agent.memory.service;
 
-import com.xjjk.agent.memory.domain.ExplicitMemoryCandidate;
+import com.xjjk.agent.memory.domain.ExplicitMemoryResolution;
 
 public interface ExplicitMemoryExtractor {
-    ExplicitMemoryCandidate extract(
-            ExplicitMemoryCommandDetector.CommandText command,
-            String originalMessage);
+    ExplicitMemoryResolution resolve(String originalMessage);
 }
