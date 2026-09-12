@@ -155,6 +155,63 @@ class UserMemoryRecallServiceTest {
     }
 
     @Test
+    void recallsStructuredPredicateFromMysqlWithExplicitPriority() {
+        UserMemorySettingMapper settings = mock(UserMemorySettingMapper.class);
+        UserMemoryMapper memories = mock(UserMemoryMapper.class);
+        MemorySuppressionMapper suppressions = mock(MemorySuppressionMapper.class);
+        MemoryRecallGateway gateway = mock(MemoryRecallGateway.class);
+        when(settings.selectOwned(7L, 9L)).thenReturn(setting(true, 3L));
+        UserMemoryEntity elixir = memory("elixir", 2L, "USER_EXPLICIT",
+                "WORK_COMMON_SCOPE", "work.primary_programming_language",
+                "用户主要使用 Elixir 进行开发");
+        elixir.setSchemaVersion(2);
+        elixir.setMemoryType("WORK_CONTEXT");
+        elixir.setPredicateName("primary_programming_language");
+        elixir.setValueJson("\"Elixir\"");
+        elixir.setStability("STABLE");
+        elixir.setVerificationMethod("EXPLICIT_SEMANTIC");
+        when(memories.selectActiveByPredicates(
+                7L, 9L, 3L, List.of("primary_programming_language"),
+                "WORK_COMMON_SCOPE", NOW, 20)).thenReturn(List.of(elixir));
+        when(suppressions.selectActiveKeys(
+                7L, 9L, 3L, List.of("work.primary_programming_language"), 20))
+                .thenReturn(List.of());
+
+        UserMemoryRecallResult result = service(
+                settings, memories, suppressions, gateway, true)
+                .recallByPredicates(IDENTITY,
+                        List.of("primary_programming_language"),
+                        MemoryCategory.WORK_COMMON_SCOPE);
+
+        assertThat(result.memories()).singleElement().satisfies(memory -> {
+            assertThat(memory.predicateName()).isEqualTo("primary_programming_language");
+            assertThat(memory.valueJson()).isEqualTo("\"Elixir\"");
+        });
+        assertThat(result.semanticResultCode()).isEqualTo("MYSQL_PREDICATE");
+        verifyNoInteractions(gateway);
+    }
+
+    @Test
+    void attemptsSemanticRecallForSafeQueryOutsideOldKeywordList() {
+        UserMemorySettingMapper settings = mock(UserMemorySettingMapper.class);
+        UserMemoryMapper memories = mock(UserMemoryMapper.class);
+        MemorySuppressionMapper suppressions = mock(MemorySuppressionMapper.class);
+        MemoryRecallGateway gateway = mock(MemoryRecallGateway.class);
+        when(settings.selectOwned(7L, 9L)).thenReturn(setting(true, 3L));
+        when(memories.selectGlobalExplicit(7L, 9L, 3L, NOW, 3)).thenReturn(List.of());
+        when(gateway.retrieve(7L, 9L, 3L, "这个方案适合我吗"))
+                .thenReturn(new MemoryRecallGatewayResult(
+                        true, List.of(), "v2", "NONE", "NO_CANDIDATE"));
+
+        UserMemoryRecallResult result = service(
+                settings, memories, suppressions, gateway, true)
+                .recall(IDENTITY, "这个方案适合我吗");
+
+        assertThat(result.semanticAttempted()).isTrue();
+        verify(gateway).retrieve(7L, 9L, 3L, "这个方案适合我吗");
+    }
+
+    @Test
     void categoryRecallDistinguishesUninitializedDisabledAndDatabaseFailure() {
         UserMemorySettingMapper settings = mock(UserMemorySettingMapper.class);
         UserMemoryMapper memories = mock(UserMemoryMapper.class);

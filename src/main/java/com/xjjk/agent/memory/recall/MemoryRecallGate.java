@@ -36,6 +36,17 @@ public class MemoryRecallGate {
         return !containsAny(normalized, BUSINESS_ONLY) || categorySpecific;
     }
 
+    /**
+     * 旧关键词只作为快速正信号；对非纯业务问题允许有界语义召回，避免关键词漏召回。
+     */
+    public boolean allowsSemanticFallback(String query) {
+        if (query == null || query.isBlank() || query.length() > 2_000) {
+            return false;
+        }
+        String normalized = query.strip().toLowerCase(Locale.ROOT);
+        return !containsAny(normalized, BUSINESS_ONLY);
+    }
+
     private boolean containsAny(String value, List<String> needles) {
         return needles.stream().anyMatch(value::contains);
     }

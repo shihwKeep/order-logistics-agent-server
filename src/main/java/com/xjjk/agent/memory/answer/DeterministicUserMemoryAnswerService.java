@@ -33,8 +33,8 @@ public class DeterministicUserMemoryAnswerService {
             return DeterministicUserMemoryAnswerResult.notHandled();
         }
         DirectMemoryQuestionType type = classified.get();
-        UserMemoryRecallResult recalled = recallService.recallByCategory(
-                identity, type.memoryCategory());
+        UserMemoryRecallResult recalled = recallService.recallByPredicates(
+                identity, type.predicateNames(), type.memoryCategory());
         if (recalled.status() == UserMemoryRecallStatus.NOT_INITIALIZED) {
             return fallThrough(requestId, type);
         }

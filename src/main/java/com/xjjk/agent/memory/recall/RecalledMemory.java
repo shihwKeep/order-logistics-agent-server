@@ -12,5 +12,24 @@ public record RecalledMemory(
         String canonicalKey,
         String content,
         BigDecimal confidence,
-        LocalDateTime updatedAt) {
+        LocalDateTime updatedAt,
+        Integer schemaVersion,
+        String memoryType,
+        String predicateName,
+        String valueJson,
+        String stability,
+        String verificationMethod) {
+
+    public RecalledMemory(
+            String memoryId,
+            long memoryVersion,
+            String sourceType,
+            String category,
+            String canonicalKey,
+            String content,
+            BigDecimal confidence,
+            LocalDateTime updatedAt) {
+        this(memoryId, memoryVersion, sourceType, category, canonicalKey, content,
+                confidence, updatedAt, null, null, null, null, null, null);
+    }
 }

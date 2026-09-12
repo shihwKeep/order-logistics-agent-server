@@ -32,6 +32,20 @@ class DeterministicMemoryAnswerRendererTest {
     }
 
     @Test
+    void rendersAnySafeStructuredProgrammingLanguageWithoutAWhitelist() {
+        RecalledMemory memory = new RecalledMemory(
+                "memory-2", 1L, "AUTO_EXTRACT", "WORK_COMMON_SCOPE",
+                "work.primary_programming_language", "用户主要使用 Elixir 进行开发",
+                new BigDecimal("0.95"), LocalDateTime.parse("2026-09-12T08:00:00"),
+                2, "WORK_CONTEXT", "primary_programming_language", "\"Elixir\"",
+                "STABLE", "SEMANTIC_MODEL");
+
+        assertThat(renderer.render(
+                DirectMemoryQuestionType.PROGRAMMING_LANGUAGE, memory))
+                .contains("根据您之前提供的信息，您平时主要使用 Elixir。");
+    }
+
+    @Test
     void rendersCanonicalNonProgrammingPreferenceAsSecondPersonText() {
         assertThat(renderer.render(
                 DirectMemoryQuestionType.ANSWER_LANGUAGE,

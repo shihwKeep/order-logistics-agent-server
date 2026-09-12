@@ -31,4 +31,23 @@ class MemoryRecallGateTest {
     void staysClosedForOrdinaryBusinessQuestions(String query) {
         assertThat(gate.shouldRetrieve(query)).isFalse();
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "结合你对我的了解给个建议",
+            "按我一贯的习惯来",
+            "这个方案适合我吗"
+    })
+    void allowsBoundedSemanticFallbackWhenOldKeywordsDoNotMatch(String query) {
+        assertThat(gate.allowsSemanticFallback(query)).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "查询订单 C24101816040",
+            "签收后多久可以退款"
+    })
+    void semanticFallbackStillExcludesBusinessOnlyQueries(String query) {
+        assertThat(gate.allowsSemanticFallback(query)).isFalse();
+    }
 }

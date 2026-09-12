@@ -49,8 +49,9 @@ class DeterministicUserMemoryAnswerServiceTest {
                 "WORK_COMMON_SCOPE", "用户常用工作范围是Java开发");
         when(classifier.classify(QUERY))
                 .thenReturn(Optional.of(DirectMemoryQuestionType.PROGRAMMING_LANGUAGE));
-        when(recallService.recallByCategory(
-                IDENTITY, MemoryCategory.WORK_COMMON_SCOPE))
+        when(recallService.recallByPredicates(
+                IDENTITY, List.of("primary_programming_language"),
+                MemoryCategory.WORK_COMMON_SCOPE))
                 .thenReturn(new UserMemoryRecallResult(
                         List.of(javaMemory), false, "MYSQL_CATEGORY",
                         UserMemoryRecallStatus.AVAILABLE));
@@ -65,8 +66,9 @@ class DeterministicUserMemoryAnswerServiceTest {
                 .isEqualTo(DeterministicUserMemoryAnswerResult.Outcome.ANSWERED);
         assertThat(result.assistantText()).contains("Java");
         verify(metrics).directAnswer("PROGRAMMING_LANGUAGE", "ANSWERED");
-        verify(recallService).recallByCategory(
-                IDENTITY, MemoryCategory.WORK_COMMON_SCOPE);
+        verify(recallService).recallByPredicates(
+                IDENTITY, List.of("primary_programming_language"),
+                MemoryCategory.WORK_COMMON_SCOPE);
         verify(recallService, never()).recall(any(), anyString());
     }
 
@@ -85,8 +87,9 @@ class DeterministicUserMemoryAnswerServiceTest {
     @Test
     void fallsThroughWhenLongTermMemoryIsOff() {
         classified();
-        when(recallService.recallByCategory(
-                IDENTITY, MemoryCategory.WORK_COMMON_SCOPE))
+        when(recallService.recallByPredicates(
+                IDENTITY, List.of("primary_programming_language"),
+                MemoryCategory.WORK_COMMON_SCOPE))
                 .thenReturn(UserMemoryRecallResult.disabled());
 
         DeterministicUserMemoryAnswerResult result = service.answer(
@@ -100,8 +103,9 @@ class DeterministicUserMemoryAnswerServiceTest {
     @Test
     void fallsThroughAfterSuccessfulEmptyRecall() {
         classified();
-        when(recallService.recallByCategory(
-                IDENTITY, MemoryCategory.WORK_COMMON_SCOPE))
+        when(recallService.recallByPredicates(
+                IDENTITY, List.of("primary_programming_language"),
+                MemoryCategory.WORK_COMMON_SCOPE))
                 .thenReturn(new UserMemoryRecallResult(
                         List.of(), false, "MYSQL_CATEGORY",
                         UserMemoryRecallStatus.AVAILABLE));
@@ -116,8 +120,9 @@ class DeterministicUserMemoryAnswerServiceTest {
     @Test
     void fallsThroughWhenMemoryHasNeverBeenInitialized() {
         classified();
-        when(recallService.recallByCategory(
-                IDENTITY, MemoryCategory.WORK_COMMON_SCOPE))
+        when(recallService.recallByPredicates(
+                IDENTITY, List.of("primary_programming_language"),
+                MemoryCategory.WORK_COMMON_SCOPE))
                 .thenReturn(UserMemoryRecallResult.notInitialized());
         DeterministicUserMemoryAnswerResult result = service.answer(
                 IDENTITY, QUERY, "request-new-user");
@@ -130,8 +135,9 @@ class DeterministicUserMemoryAnswerServiceTest {
     @Test
     void reportsUnavailableForMysqlFailure() {
         classified();
-        when(recallService.recallByCategory(
-                IDENTITY, MemoryCategory.WORK_COMMON_SCOPE))
+        when(recallService.recallByPredicates(
+                IDENTITY, List.of("primary_programming_language"),
+                MemoryCategory.WORK_COMMON_SCOPE))
                 .thenReturn(UserMemoryRecallResult.unavailable());
 
         assertThat(service.answer(IDENTITY, QUERY, "request-mysql").assistantText())
@@ -145,8 +151,9 @@ class DeterministicUserMemoryAnswerServiceTest {
         RecalledMemory broadScope = memory(
                 "WORK_COMMON_SCOPE", "用户常用工作范围是后端开发");
         classified();
-        when(recallService.recallByCategory(
-                IDENTITY, MemoryCategory.WORK_COMMON_SCOPE))
+        when(recallService.recallByPredicates(
+                IDENTITY, List.of("primary_programming_language"),
+                MemoryCategory.WORK_COMMON_SCOPE))
                 .thenReturn(new UserMemoryRecallResult(
                         List.of(broadScope), false, "MYSQL_CATEGORY",
                         UserMemoryRecallStatus.AVAILABLE));

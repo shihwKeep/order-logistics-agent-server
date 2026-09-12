@@ -125,6 +125,37 @@ public class UserMemoryRecallService {
         }
     }
 
+    public UserMemoryRecallResult recallByPredicates(
+            AgentIdentity identity,
+            List<String> predicateNames,
+            MemoryCategory legacyCategory) {
+        Objects.requireNonNull(identity, "identity");
+        Objects.requireNonNull(predicateNames, "predicateNames");
+        Objects.requireNonNull(legacyCategory, "legacyCategory");
+        List<String> predicates = predicateNames.stream()
+                .filter(Objects::nonNull)
+                .map(String::strip)
+                .filter(value -> value.matches("[a-z][a-z0-9_]{0,63}"))
+                .distinct()
+                .limit(8)
+                .toList();
+        if (identity.tenantId() <= 0 || identity.userId() <= 0 || predicates.isEmpty()) {
+            return UserMemoryRecallResult.invalidRequest();
+        }
+        if (!memoryProperties.enabled()) {
+            return UserMemoryRecallResult.disabled();
+        }
+        try {
+            return recallPredicatesSafely(identity.tenantId(), identity.userId(),
+                    predicates, legacyCategory);
+        } catch (RuntimeException failure) {
+            log.warn("user_memory_predicate_recall result=DEGRADED "
+                            + "errorCode=MYSQL_VALIDATION_FAILED exceptionType={}",
+                    failure.getClass().getSimpleName());
+            return UserMemoryRecallResult.unavailable();
+        }
+    }
+
     public UserMemoryRecallResult recall(long tenantId, long userId, String query) {
         if (tenantId <= 0 || userId <= 0
                 || query == null || query.isBlank() || query.length() > 2_000) {
@@ -166,7 +197,8 @@ public class UserMemoryRecallService {
                 .toList();
         rejected("OWNER_OR_STATE", rawGlobals.size() - globals.size());
 
-        boolean semanticAttempted = gate.shouldRetrieve(query);
+        boolean semanticAttempted = gate.shouldRetrieve(query)
+                || gate.allowsSemanticFallback(query);
         String semanticCode = semanticAttempted ? "NO_CANDIDATE" : "SKIPPED";
         List<MemorySelectionCandidate> semantic = List.of();
         if (semanticAttempted) {
@@ -239,6 +271,65 @@ public class UserMemoryRecallService {
         return new UserMemoryRecallResult(
                 selected, false, "MYSQL_CATEGORY",
                 UserMemoryRecallStatus.AVAILABLE);
+    }
+
+    private UserMemoryRecallResult recallPredicatesSafely(
+            long tenantId,
+            long userId,
+            List<String> predicateNames,
+            MemoryCategory legacyCategory) {
+        UserMemorySettingEntity setting = settingMapper.selectOwned(tenantId, userId);
+        if (setting == null) {
+            return UserMemoryRecallResult.notInitialized();
+        }
+        if (!Boolean.TRUE.equals(setting.getMemoryEnabled())) {
+            return UserMemoryRecallResult.disabled();
+        }
+        if (setting.getMemoryGeneration() == null
+                || setting.getMemoryGeneration() <= 0) {
+            return UserMemoryRecallResult.unavailable();
+        }
+        long generation = setting.getMemoryGeneration();
+        LocalDateTime now = now();
+        List<UserMemoryEntity> raw = memoryMapper.selectActiveByPredicates(
+                tenantId, userId, generation, predicateNames, legacyCategory.name(), now,
+                retrievalProperties.maxCandidates());
+        List<UserMemoryEntity> valid = raw.stream()
+                .filter(memory -> validOwned(memory, tenantId, userId, generation, now))
+                .filter(memory -> structuredPredicate(memory, predicateNames)
+                        || legacyCategory(memory, legacyCategory))
+                .toList();
+        rejected("OWNER_OR_STATE", raw.size() - valid.size());
+        List<String> keys = valid.stream()
+                .map(UserMemoryEntity::getCanonicalKey).distinct().toList();
+        Set<String> suppressed = keys.isEmpty() ? Set.of() : Set.copyOf(
+                suppressionMapper.selectActiveKeys(
+                        tenantId, userId, generation, keys,
+                        retrievalProperties.maxCandidates()));
+        rejected("SUPPRESSED", suppressed.size());
+        List<RecalledMemory> selected = selector.selectAuthoritative(
+                valid, suppressed, retrievalProperties.maxSelected());
+        if (metrics != null) {
+            metrics.candidateCount("MYSQL_VALIDATED", valid.size());
+            metrics.candidateCount("SELECTED", selected.size());
+        }
+        return new UserMemoryRecallResult(
+                selected, false, "MYSQL_PREDICATE",
+                UserMemoryRecallStatus.AVAILABLE);
+    }
+
+    private static boolean structuredPredicate(
+            UserMemoryEntity memory,
+            List<String> predicateNames) {
+        return Integer.valueOf(2).equals(memory.getSchemaVersion())
+                && predicateNames.contains(memory.getPredicateName());
+    }
+
+    private static boolean legacyCategory(
+            UserMemoryEntity memory,
+            MemoryCategory category) {
+        return memory.getSchemaVersion() == null
+                && category.name().equals(memory.getCategory());
     }
 
     private List<MemorySelectionCandidate> loadSemantic(
