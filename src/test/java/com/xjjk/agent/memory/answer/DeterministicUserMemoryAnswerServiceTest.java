@@ -1,6 +1,7 @@
 package com.xjjk.agent.memory.answer;
 
 import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.observation.UserMemoryMetrics;
 import com.xjjk.agent.memory.recall.RecalledMemory;
 import com.xjjk.agent.memory.recall.UserMemoryRecallResult;
@@ -18,7 +19,9 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.times;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -46,8 +49,11 @@ class DeterministicUserMemoryAnswerServiceTest {
                 "WORK_COMMON_SCOPE", "用户常用工作范围是Java开发");
         when(classifier.classify(QUERY))
                 .thenReturn(Optional.of(DirectMemoryQuestionType.PROGRAMMING_LANGUAGE));
-        when(recallService.recall(IDENTITY, QUERY)).thenReturn(new UserMemoryRecallResult(
-                List.of(javaMemory), true, "OK", UserMemoryRecallStatus.AVAILABLE));
+        when(recallService.recallByCategory(
+                IDENTITY, MemoryCategory.WORK_COMMON_SCOPE))
+                .thenReturn(new UserMemoryRecallResult(
+                        List.of(javaMemory), false, "MYSQL_CATEGORY",
+                        UserMemoryRecallStatus.AVAILABLE));
         when(renderer.render(DirectMemoryQuestionType.PROGRAMMING_LANGUAGE, javaMemory))
                 .thenReturn(Optional.of(
                         "根据您之前提供的信息，您平时主要使用 Java。"));
@@ -59,6 +65,9 @@ class DeterministicUserMemoryAnswerServiceTest {
                 .isEqualTo(DeterministicUserMemoryAnswerResult.Outcome.ANSWERED);
         assertThat(result.assistantText()).contains("Java");
         verify(metrics).directAnswer("PROGRAMMING_LANGUAGE", "ANSWERED");
+        verify(recallService).recallByCategory(
+                IDENTITY, MemoryCategory.WORK_COMMON_SCOPE);
+        verify(recallService, never()).recall(any(), anyString());
     }
 
     @Test
@@ -76,7 +85,8 @@ class DeterministicUserMemoryAnswerServiceTest {
     @Test
     void reportsDisabledWhenLongTermMemoryIsOff() {
         classified();
-        when(recallService.recall(IDENTITY, QUERY))
+        when(recallService.recallByCategory(
+                IDENTITY, MemoryCategory.WORK_COMMON_SCOPE))
                 .thenReturn(UserMemoryRecallResult.disabled());
 
         DeterministicUserMemoryAnswerResult result = service.answer(
@@ -90,8 +100,11 @@ class DeterministicUserMemoryAnswerServiceTest {
     @Test
     void reportsNotRememberedOnlyAfterSuccessfulEmptyRecall() {
         classified();
-        when(recallService.recall(IDENTITY, QUERY)).thenReturn(new UserMemoryRecallResult(
-                List.of(), true, "NO_CANDIDATE", UserMemoryRecallStatus.AVAILABLE));
+        when(recallService.recallByCategory(
+                IDENTITY, MemoryCategory.WORK_COMMON_SCOPE))
+                .thenReturn(new UserMemoryRecallResult(
+                        List.of(), false, "MYSQL_CATEGORY",
+                        UserMemoryRecallStatus.AVAILABLE));
         notRemembered();
 
         DeterministicUserMemoryAnswerResult result = service.answer(
@@ -106,7 +119,8 @@ class DeterministicUserMemoryAnswerServiceTest {
     @Test
     void reportsNotRememberedWhenMemoryHasNeverBeenInitialized() {
         classified();
-        when(recallService.recall(IDENTITY, QUERY))
+        when(recallService.recallByCategory(
+                IDENTITY, MemoryCategory.WORK_COMMON_SCOPE))
                 .thenReturn(UserMemoryRecallResult.notInitialized());
         notRemembered();
 
@@ -118,22 +132,15 @@ class DeterministicUserMemoryAnswerServiceTest {
     }
 
     @Test
-    void reportsUnavailableForMysqlOrSemanticRecallFailureOrDisabledIndex() {
+    void reportsUnavailableForMysqlFailure() {
         classified();
-        when(recallService.recall(IDENTITY, QUERY))
-                .thenReturn(UserMemoryRecallResult.unavailable())
-                .thenReturn(new UserMemoryRecallResult(
-                        List.of(), true, "UNAVAILABLE", UserMemoryRecallStatus.AVAILABLE))
-                .thenReturn(new UserMemoryRecallResult(
-                        List.of(), true, "DISABLED", UserMemoryRecallStatus.AVAILABLE));
+        when(recallService.recallByCategory(
+                IDENTITY, MemoryCategory.WORK_COMMON_SCOPE))
+                .thenReturn(UserMemoryRecallResult.unavailable());
 
         assertThat(service.answer(IDENTITY, QUERY, "request-mysql").assistantText())
                 .isEqualTo("记忆服务暂时不可用，请稍后重试。");
-        assertThat(service.answer(IDENTITY, QUERY, "request-index").assistantText())
-                .isEqualTo("记忆服务暂时不可用，请稍后重试。");
-        assertThat(service.answer(IDENTITY, QUERY, "request-index-disabled").assistantText())
-                .isEqualTo("记忆服务暂时不可用，请稍后重试。");
-        verify(metrics, times(3))
+        verify(metrics)
                 .directAnswer("PROGRAMMING_LANGUAGE", "UNAVAILABLE");
     }
 
@@ -142,24 +149,17 @@ class DeterministicUserMemoryAnswerServiceTest {
         RecalledMemory broadScope = memory(
                 "WORK_COMMON_SCOPE", "用户常用工作范围是后端开发");
         classified();
-        when(recallService.recall(IDENTITY, QUERY)).thenReturn(new UserMemoryRecallResult(
-                List.of(broadScope), true, "OK", UserMemoryRecallStatus.AVAILABLE));
+        when(recallService.recallByCategory(
+                IDENTITY, MemoryCategory.WORK_COMMON_SCOPE))
+                .thenReturn(new UserMemoryRecallResult(
+                        List.of(broadScope), false, "MYSQL_CATEGORY",
+                        UserMemoryRecallStatus.AVAILABLE));
         when(renderer.render(DirectMemoryQuestionType.PROGRAMMING_LANGUAGE, broadScope))
                 .thenReturn(Optional.empty());
         notRemembered();
 
         assertThat(service.answer(IDENTITY, QUERY, "request-broad").outcome())
                 .isEqualTo(DeterministicUserMemoryAnswerResult.Outcome.NOT_REMEMBERED);
-    }
-
-    @Test
-    void reportsUnavailableWhenRecallGateUnexpectedlySkipsDirectQuestion() {
-        classified();
-        when(recallService.recall(IDENTITY, QUERY)).thenReturn(new UserMemoryRecallResult(
-                List.of(), false, "SKIPPED", UserMemoryRecallStatus.AVAILABLE));
-
-        assertThat(service.answer(IDENTITY, QUERY, "request-skipped").outcome())
-                .isEqualTo(DeterministicUserMemoryAnswerResult.Outcome.UNAVAILABLE);
     }
 
     private void classified() {

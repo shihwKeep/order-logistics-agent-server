@@ -34,7 +34,8 @@ public class DeterministicUserMemoryAnswerService {
             return DeterministicUserMemoryAnswerResult.notHandled();
         }
         DirectMemoryQuestionType type = classified.get();
-        UserMemoryRecallResult recalled = recallService.recall(identity, query);
+        UserMemoryRecallResult recalled = recallService.recallByCategory(
+                identity, type.memoryCategory());
         if (recalled.status() == UserMemoryRecallStatus.NOT_INITIALIZED) {
             return handled(requestId, type,
                     DeterministicUserMemoryAnswerResult.Outcome.NOT_REMEMBERED,
@@ -58,13 +59,6 @@ public class DeterministicUserMemoryAnswerService {
                         DeterministicUserMemoryAnswerResult.Outcome.ANSWERED,
                         rendered.get());
             }
-        }
-        if (!recalled.semanticAttempted()
-                || "UNAVAILABLE".equalsIgnoreCase(recalled.semanticResultCode())
-                || "DISABLED".equalsIgnoreCase(recalled.semanticResultCode())) {
-            return handled(requestId, type,
-                    DeterministicUserMemoryAnswerResult.Outcome.UNAVAILABLE,
-                    UNAVAILABLE);
         }
         return handled(requestId, type,
                 DeterministicUserMemoryAnswerResult.Outcome.NOT_REMEMBERED,
