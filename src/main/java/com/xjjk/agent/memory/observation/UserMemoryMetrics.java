@@ -33,6 +33,11 @@ public class UserMemoryMetrics {
             "ANSWER_LANGUAGE", "ANSWER_STYLE");
     private static final Set<String> DIRECT_OUTCOMES = Set.of(
             "ANSWERED", "NOT_REMEMBERED", "DISABLED", "UNAVAILABLE");
+    private static final Set<String> EXPLICIT_PATHS = Set.of(
+            "FAST_PATH", "SEMANTIC_PATH", "NONE");
+    private static final Set<String> EXPLICIT_OUTCOMES = Set.of(
+            "SAVED", "NONE", "CLARIFY", "POLICY_REJECTED", "MODEL_FAILURE",
+            "PERSISTENCE_FAILURE", "DISABLED");
     private final MeterRegistry registry;
 
     public UserMemoryMetrics(MeterRegistry registry) {
@@ -93,6 +98,13 @@ public class UserMemoryMetrics {
         registry.counter("agent.user.memory.direct.answer",
                 "question", require(questionType, DIRECT_QUESTIONS, "直答问题类型"),
                 "outcome", require(outcome, DIRECT_OUTCOMES, "直答结果"))
+                .increment();
+    }
+
+    public void explicitResolution(String path, String outcome) {
+        registry.counter("agent.user.memory.explicit.resolution",
+                "path", require(path, EXPLICIT_PATHS, "显式记忆解析路径"),
+                "outcome", require(outcome, EXPLICIT_OUTCOMES, "显式记忆解析结果"))
                 .increment();
     }
 

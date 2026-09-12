@@ -5,6 +5,9 @@ import com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer;
 import com.xjjk.agent.memory.service.DeterministicExplicitMemoryCandidateParser;
 import com.xjjk.agent.memory.service.ExplicitMemoryCandidateValidator;
 import com.xjjk.agent.memory.service.ExplicitMemoryCommandDetector;
+import com.xjjk.agent.memory.service.ExplicitMemoryCandidateGate;
+import com.xjjk.agent.memory.service.ExplicitMemoryExtractor;
+import com.xjjk.agent.memory.service.HybridExplicitMemoryResolver;
 import com.xjjk.agent.memory.service.MemorySensitiveContentPolicy;
 import com.xjjk.agent.memory.service.MemoryCategoryContentPolicy;
 import org.springframework.ai.chat.client.ChatClient;
@@ -53,6 +56,22 @@ public class AiMemoryConfiguration {
     @Bean
     public ExplicitMemoryCommandDetector explicitMemoryCommandDetector(UserMemoryProperties properties) {
         return new ExplicitMemoryCommandDetector(properties.maxContentLength());
+    }
+
+    @Bean
+    public ExplicitMemoryCandidateGate explicitMemoryCandidateGate(UserMemoryProperties properties) {
+        return new ExplicitMemoryCandidateGate(properties.maxContentLength());
+    }
+
+    @Bean
+    public HybridExplicitMemoryResolver hybridExplicitMemoryResolver(
+            ExplicitMemoryCommandDetector detector,
+            DeterministicExplicitMemoryCandidateParser parser,
+            ExplicitMemoryCandidateGate gate,
+            ExplicitMemoryExtractor extractor,
+            ExplicitMemorySemanticProperties properties
+    ) {
+        return new HybridExplicitMemoryResolver(detector, parser, gate, extractor, properties);
     }
 
     @Bean

@@ -1,9 +1,12 @@
 package com.xjjk.agent.memory.service;
 
 import com.xjjk.agent.chat.domain.ChatTurnContext;
+import com.xjjk.agent.common.api.ApiErrorCode;
+import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.memory.config.UserMemoryProperties;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCommandResult;
+import com.xjjk.agent.memory.domain.ExplicitMemoryResolution;
 import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.domain.MemoryRetentionType;
 import com.xjjk.agent.memory.observation.UserMemoryMetrics;
@@ -18,17 +21,16 @@ import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ExplicitMemoryCommandServiceTest {
 
-    private final DeterministicExplicitMemoryCandidateParser parser =
-            new DeterministicExplicitMemoryCandidateParser(new MemoryCategoryContentPolicy());
+    private final HybridExplicitMemoryResolver resolver = mock(HybridExplicitMemoryResolver.class);
+    private final MemorySensitiveContentPolicy sensitivePolicy = mock(MemorySensitiveContentPolicy.class);
     private final ExplicitMemoryCandidateValidator validator = mock(ExplicitMemoryCandidateValidator.class);
     private final ExplicitMemoryWriteService writer = mock(ExplicitMemoryWriteService.class);
     private final UserMemoryPolicyService policy = mock(UserMemoryPolicyService.class);
@@ -39,163 +41,168 @@ class ExplicitMemoryCommandServiceTest {
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
         when(policy.isMemoryEnabled(1L, 2L)).thenReturn(true);
-        service = new ExplicitMemoryCommandService(
-                properties(true), new ExplicitMemoryCommandDetector(512),
-                new MemorySensitiveContentPolicy(new com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer()),
-                parser, validator, writer, policy, new UserMemoryMetrics(meterRegistry));
+        when(sensitivePolicy.isAllowed(org.mockito.ArgumentMatchers.anyString())).thenReturn(true);
+        service = service(properties(true));
     }
 
     @Test
-    void ignoresNormalConversation() {
+    void noneContinuesNormalChatPath() {
+        when(resolver.mightContainExplicitMemory("今天下雨吗")).thenReturn(false);
+
         assertThat(service.handle(turn(), "今天下雨吗"))
                 .isEqualTo(ExplicitMemoryCommandResult.notHandled());
+        verify(resolver, never()).resolve(org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test
-    void extractsValidatesPersistsAndAcknowledgesPureCommand() {
-        String message = "请记住以后回答简短一些";
-        ExplicitMemoryCandidate candidate = candidate();
-        when(validator.validate(candidate, message, false)).thenReturn(candidate);
-        when(writer.save(turn(), candidate))
-                .thenReturn(new ExplicitMemoryWriteService.SaveResult("memory-1", "用户偏好简洁回答"));
+    void semanticNoneContinuesNormalChatPath() {
+        String message = "以后订单退款要怎么处理";
+        when(resolver.mightContainExplicitMemory(message)).thenReturn(true);
+        when(resolver.resolve(message)).thenReturn(ExplicitMemoryResolution.none());
 
         assertThat(service.handle(turn(), message))
-                .isEqualTo(new ExplicitMemoryCommandResult(
-                        true, true, "好的，已记住：用户偏好简洁回答", "memory-1"));
-        assertThat(operationCount("explicit_save", "success", "NONE")).isEqualTo(1.0);
+                .isEqualTo(ExplicitMemoryCommandResult.notHandled());
+        assertThat(resolutionCount("NONE", "NONE")).isEqualTo(1.0);
     }
 
     @Test
-    void savesSupportedPermanentPreferredNameWithoutDependingOnModelWording() {
-        String message = "请永久记住：叫我老师。";
-        ExplicitMemoryCandidateValidator strictValidator = new ExplicitMemoryCandidateValidator(
-                new MemorySensitiveContentPolicy(
-                        new com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer()),
-                512,
-                512
-        );
-        ExplicitMemoryCommandService strictService = new ExplicitMemoryCommandService(
-                properties(true), new ExplicitMemoryCommandDetector(512),
-                new MemorySensitiveContentPolicy(
-                        new com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer()),
-                parser, strictValidator, writer, policy, new UserMemoryMetrics(meterRegistry));
-        when(writer.save(eq(turn()), any())).thenReturn(
-                new ExplicitMemoryWriteService.SaveResult("memory-1", "用户希望被称为老师")
-        );
+    void clarificationIsHandledWithoutWriting() {
+        String message = "以后这样就行";
+        when(resolver.mightContainExplicitMemory(message)).thenReturn(true);
+        when(resolver.resolve(message)).thenReturn(ExplicitMemoryResolution.clarify(
+                ExplicitMemoryResolution.Path.SEMANTIC_PATH));
 
-        ExplicitMemoryCommandResult result = strictService.handle(turn(), message);
+        ExplicitMemoryCommandResult result = service.handle(turn(), message);
 
         assertThat(result.handled()).isTrue();
-        assertThat(result.saved()).isTrue();
-        assertThat(result.assistantText()).isEqualTo("好的，已记住：用户希望被称为老师");
-        org.mockito.ArgumentCaptor<ExplicitMemoryCandidate> candidate =
-                org.mockito.ArgumentCaptor.forClass(ExplicitMemoryCandidate.class);
-        verify(writer).save(eq(turn()), candidate.capture());
-        assertThat(candidate.getValue()).isEqualTo(new ExplicitMemoryCandidate(
-                MemoryCategory.PROFILE_PREFERRED_NAME,
-                "profile.preferred_name",
-                "用户希望被称为老师",
-                "叫我老师",
-                MemoryRetentionType.PERMANENT
-        ));
+        assertThat(result.saved()).isFalse();
+        assertThat(result.assistantText()).isEqualTo("你希望我记住什么？请把需要长期记住的内容说清楚。");
+        verifyNoInteractions(validator, writer);
+        assertThat(resolutionCount("SEMANTIC_PATH", "CLARIFY")).isEqualTo(1.0);
     }
 
     @Test
-    void sensitiveExplicitCommandIsHandledButNotSaved() {
+    void validatesPersistsAndAcknowledgesOnlyAfterWriterSucceeds() {
+        String message = "你以后都叫我石海文";
+        ExplicitMemoryCandidate candidate = candidate();
+        when(resolver.mightContainExplicitMemory(message)).thenReturn(true);
+        when(resolver.resolve(message)).thenReturn(ExplicitMemoryResolution.save(candidate,
+                ExplicitMemoryResolution.Path.SEMANTIC_PATH, 0.98));
+        when(validator.validate(candidate, message, false)).thenReturn(candidate);
+        when(writer.save(turn(), candidate)).thenReturn(
+                new ExplicitMemoryWriteService.SaveResult("memory-1", "用户希望被称为石海文"));
+
+        assertThat(service.handle(turn(), message)).isEqualTo(new ExplicitMemoryCommandResult(
+                true, true, "好的，已记住：用户希望被称为石海文", "memory-1"));
+        verify(writer).save(turn(), candidate);
+        assertThat(resolutionCount("SEMANTIC_PATH", "SAVED")).isEqualTo(1.0);
+    }
+
+    @Test
+    void rejectsSensitiveCandidateBeforeSemanticModelCall() {
         String message = "请记住我的手机号是13800138000";
-        assertThat(service.handle(turn(), message))
-                .isEqualTo(new ExplicitMemoryCommandResult(
-                        true, false, "这类内容不适合作为长期记忆保存。", null));
-        assertThat(operationCount("explicit_save", "rejected", "MEMORY_CONTENT_REJECTED")).isEqualTo(1.0);
+        when(resolver.mightContainExplicitMemory(message)).thenReturn(true);
+        when(sensitivePolicy.isAllowed(message)).thenReturn(false);
+
+        assertThat(service.handle(turn(), message)).isEqualTo(new ExplicitMemoryCommandResult(
+                true, false, "这类内容不适合作为长期记忆保存。", null));
+        verify(resolver, never()).resolve(message);
+        verifyNoInteractions(validator, writer);
+        assertThat(resolutionCount("NONE", "POLICY_REJECTED")).isEqualTo(1.0);
     }
 
     @Test
-    void featureFlagDisablesCommandHandling() {
-        service = new ExplicitMemoryCommandService(
-                properties(false), new ExplicitMemoryCommandDetector(512),
-                new MemorySensitiveContentPolicy(new com.xjjk.agent.chat.service.summary.SensitiveContentSanitizer()),
-                parser, validator, writer, policy, new UserMemoryMetrics(meterRegistry));
-        assertThat(service.handle(turn(), "请记住以后回答简短一些"))
+    void modelFailureNeverReturnsSuccessWording() {
+        String message = "你以后都叫我石海文";
+        when(resolver.mightContainExplicitMemory(message)).thenReturn(true);
+        when(resolver.resolve(message)).thenThrow(new ExplicitMemoryExtractionException(
+                ExplicitMemoryExtractionException.Code.MODEL_TIMEOUT, "timeout"));
+
+        assertThatThrownBy(() -> service.handle(turn(), message))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        error -> assertThat(error.errorCode()).isEqualTo(ApiErrorCode.MEMORY_WRITE_FAILED));
+        verifyNoInteractions(validator, writer);
+        assertThat(resolutionCount("NONE", "MODEL_FAILURE")).isEqualTo(1.0);
+    }
+
+    @Test
+    void databaseFailureNeverReturnsSuccessWording() {
+        String message = "你以后都叫我石海文";
+        ExplicitMemoryCandidate candidate = candidate();
+        when(resolver.mightContainExplicitMemory(message)).thenReturn(true);
+        when(resolver.resolve(message)).thenReturn(ExplicitMemoryResolution.save(candidate,
+                ExplicitMemoryResolution.Path.SEMANTIC_PATH, 0.98));
+        when(validator.validate(candidate, message, false)).thenReturn(candidate);
+        when(writer.save(turn(), candidate)).thenThrow(
+                new DataAccessResourceFailureException("database unavailable"));
+
+        assertThatThrownBy(() -> service.handle(turn(), message))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        error -> assertThat(error.errorCode()).isEqualTo(ApiErrorCode.MEMORY_WRITE_FAILED));
+        assertThat(resolutionCount("SEMANTIC_PATH", "PERSISTENCE_FAILURE")).isEqualTo(1.0);
+    }
+
+    @Test
+    void globalFlagSkipsCandidateGateModelAndWrite() {
+        service = service(properties(false));
+
+        assertThat(service.handle(turn(), "你以后都叫我石海文"))
                 .isEqualTo(ExplicitMemoryCommandResult.notHandled());
+        verifyNoInteractions(resolver, validator, writer);
     }
 
     @Test
-    void explainsHowToEnableMemoryWithoutParsingOrWritingWhenUserSwitchIsOff() {
+    void userSwitchSkipsModelAndWrite() {
+        String message = "你以后都叫我石海文";
+        when(resolver.mightContainExplicitMemory(message)).thenReturn(true);
         when(policy.isMemoryEnabled(1L, 2L)).thenReturn(false);
 
-        assertThat(service.handle(turn(), "请永久记住：叫我老师。"))
-                .isEqualTo(new ExplicitMemoryCommandResult(
-                        true, false, "记忆功能已关闭，可在“我的记忆”中开启。", null));
+        assertThat(service.handle(turn(), message)).isEqualTo(new ExplicitMemoryCommandResult(
+                true, false, "记忆功能已关闭，可在“我的记忆”中开启。", null));
+        verify(resolver, never()).resolve(message);
         verifyNoInteractions(validator, writer);
-        assertThat(operationCount("explicit_save", "rejected", "MEMORY_DISABLED"))
-                .isEqualTo(1.0);
     }
 
     @Test
-    void recordsUnexpectedPersistenceRuntimeFailureWithoutContentTags() {
-        String message = "请记住以后回答简短一些";
+    void defersSavedMetricsUntilOuterTransactionCommits() {
+        String message = "你以后都叫我石海文";
         ExplicitMemoryCandidate candidate = candidate();
+        when(resolver.mightContainExplicitMemory(message)).thenReturn(true);
+        when(resolver.resolve(message)).thenReturn(ExplicitMemoryResolution.save(candidate,
+                ExplicitMemoryResolution.Path.SEMANTIC_PATH, 0.98));
         when(validator.validate(candidate, message, false)).thenReturn(candidate);
-        when(writer.save(turn(), candidate)).thenThrow(new IllegalStateException("database failure"));
-
-        assertThatThrownBy(() -> service.handle(turn(), message))
-                .isInstanceOf(IllegalStateException.class);
-        assertThat(operationCount("explicit_save", "failure", "INTERNAL_SERVER_ERROR"))
-                .isEqualTo(1.0);
-    }
-
-    @Test
-    void mapsDatabaseFailureToStableMemoryWriteFailure() {
-        String message = "请记住以后回答简短一些";
-        ExplicitMemoryCandidate candidate = candidate();
-        when(validator.validate(candidate, message, false)).thenReturn(candidate);
-        when(writer.save(turn(), candidate))
-                .thenThrow(new DataAccessResourceFailureException("database unavailable"));
-
-        assertThatThrownBy(() -> service.handle(turn(), message))
-                .isInstanceOfSatisfying(com.xjjk.agent.common.exception.BusinessException.class,
-                        error -> assertThat(error.errorCode())
-                                .isEqualTo(com.xjjk.agent.common.api.ApiErrorCode.MEMORY_WRITE_FAILED));
-        assertThat(operationCount("explicit_save", "failure", "MEMORY_WRITE_FAILED"))
-                .isEqualTo(1.0);
-    }
-
-    @Test
-    void defersSuccessMetricUntilOuterTransactionCommitsAndRecordsRollback() {
-        String message = "请记住以后回答简短一些";
-        ExplicitMemoryCandidate candidate = candidate();
-        when(validator.validate(candidate, message, false)).thenReturn(candidate);
-        when(writer.save(turn(), candidate))
-                .thenReturn(new ExplicitMemoryWriteService.SaveResult("memory-1", "用户偏好简洁回答"));
+        when(writer.save(turn(), candidate)).thenReturn(
+                new ExplicitMemoryWriteService.SaveResult("memory-1", candidate.content()));
 
         TransactionSynchronizationManager.initSynchronization();
         try {
             assertThat(service.handle(turn(), message).saved()).isTrue();
-            assertThat(operationCount("explicit_save", "success", "NONE")).isZero();
-
+            assertThat(resolutionCount("SEMANTIC_PATH", "SAVED")).isZero();
             for (TransactionSynchronization synchronization
                     : TransactionSynchronizationManager.getSynchronizations()) {
-                synchronization.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+                synchronization.afterCommit();
+                synchronization.afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
             }
-
-            assertThat(operationCount("explicit_save", "success", "NONE")).isZero();
-            assertThat(operationCount("explicit_save", "failure", "MEMORY_WRITE_FAILED"))
-                    .isEqualTo(1.0);
+            assertThat(resolutionCount("SEMANTIC_PATH", "SAVED")).isEqualTo(1.0);
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
         }
     }
 
-    private double operationCount(String operation, String outcome, String code) {
-        var counter = meterRegistry.find("agent.user.memory.operation")
-                .tags("operation", operation, "outcome", outcome, "code", code)
-                .counter();
+    private ExplicitMemoryCommandService service(UserMemoryProperties properties) {
+        return new ExplicitMemoryCommandService(properties, resolver, sensitivePolicy,
+                validator, writer, policy, new UserMemoryMetrics(meterRegistry));
+    }
+
+    private double resolutionCount(String path, String outcome) {
+        var counter = meterRegistry.find("agent.user.memory.explicit.resolution")
+                .tags("path", path, "outcome", outcome).counter();
         return counter == null ? 0.0 : counter.count();
     }
 
     private ExplicitMemoryCandidate candidate() {
-        return new ExplicitMemoryCandidate(MemoryCategory.PREFERENCE_ANSWER_STYLE,
-                "preference.answer_style", "用户偏好简洁回答", "以后回答简短一些",
+        return new ExplicitMemoryCandidate(MemoryCategory.PROFILE_PREFERRED_NAME,
+                "profile.preferred_name", "用户希望被称为石海文", "你以后都叫我石海文",
                 MemoryRetentionType.NORMAL);
     }
 
