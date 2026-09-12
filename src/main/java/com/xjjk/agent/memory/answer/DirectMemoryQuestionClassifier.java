@@ -39,7 +39,7 @@ public class DirectMemoryQuestionClassifier {
                 query, List.of("回答", "回复", "交流", "沟通")))) {
             matches.add(DirectMemoryQuestionType.ANSWER_LANGUAGE);
         }
-        if (containsAny(query, List.of("编程语言", "技术栈"))
+        if (query.contains("编程语言")
                 || (query.contains("语言") && containsAny(
                 query, List.of("编程", "开发", "代码", "程序")))) {
             matches.add(DirectMemoryQuestionType.PROGRAMMING_LANGUAGE);
@@ -50,7 +50,7 @@ public class DirectMemoryQuestionClassifier {
             matches.add(DirectMemoryQuestionType.ANSWER_STYLE);
         }
         if (containsAny(query, List.of(
-                "做什么工作", "从事什么", "工作范围", "主要做什么", "职业"))) {
+                "做什么工作", "从事什么", "工作范围", "主要做什么", "职业", "技术栈"))) {
             matches.add(DirectMemoryQuestionType.WORK_SCOPE);
         }
         return matches.size() == 1 ? Optional.of(matches.getFirst()) : Optional.empty();

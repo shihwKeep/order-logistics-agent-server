@@ -15,7 +15,9 @@ class DirectMemoryQuestionClassifierTest {
     @CsvSource({
             "'你应该怎么称呼我？', PREFERRED_NAME",
             "'我平时主要使用什么编程语言？', PROGRAMMING_LANGUAGE",
+            "'我平时喜欢用什么语言开发？', PROGRAMMING_LANGUAGE",
             "'你记得我主要做什么工作吗？', WORK_SCOPE",
+            "'我常用的技术栈是什么？', WORK_SCOPE",
             "'我偏好用什么语言回答？', ANSWER_LANGUAGE",
             "'我喜欢什么回答风格？', ANSWER_STYLE"
     })
