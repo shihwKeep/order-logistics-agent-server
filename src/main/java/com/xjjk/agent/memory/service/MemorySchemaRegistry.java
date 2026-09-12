@@ -70,6 +70,15 @@ public class MemorySchemaRegistry {
             Map.entry("swift", "Swift"), Map.entry("objective-c", "Objective-C"));
     private static final Set<String> DETERMINISTIC_PROGRAMMING_LANGUAGES =
             Set.copyOf(PROGRAMMING_ALIASES.values());
+    private static final Map<String, MemoryType> AUTHORITATIVE_PREDICATE_TYPES =
+            Map.ofEntries(
+                    Map.entry("preferred_name", MemoryType.PROFILE),
+                    Map.entry("answer_language", MemoryType.COMMUNICATION_PREFERENCE),
+                    Map.entry("answer_style", MemoryType.RESPONSE_PREFERENCE),
+                    Map.entry("occupation", MemoryType.WORK_CONTEXT),
+                    Map.entry("primary_programming_language", MemoryType.WORK_CONTEXT),
+                    Map.entry("technology_stack", MemoryType.WORK_CONTEXT),
+                    Map.entry("common_scope", MemoryType.WORK_CONTEXT));
 
     private final ObjectMapper objectMapper;
 
@@ -78,28 +87,48 @@ public class MemorySchemaRegistry {
     }
 
     public SchemaResolution resolve(MemoryFactCandidate candidate) {
-        Objects.requireNonNull(candidate, "candidate");
-        return switch (candidate.memoryType()) {
+        MemoryFactCandidate normalized = normalizeCandidate(candidate);
+        return switch (normalized.memoryType()) {
             case PROFILE -> stable(
-                    candidate, "preferred_name", "profile.preferred_name",
+                    normalized, "preferred_name", "profile.preferred_name",
                     "PROFILE_PREFERRED_NAME", this::safeName,
                     value -> "用户希望被称为" + value, false);
             case COMMUNICATION_PREFERENCE -> aliasedStable(
-                    candidate, "answer_language", "communication.answer_language",
+                    normalized, "answer_language", "communication.answer_language",
                     "PREFERENCE_LANGUAGE", this::answerLanguage,
                     value -> "用户偏好使用" + value + "交流",
                     DETERMINISTIC_ANSWER_LANGUAGES);
             case RESPONSE_PREFERENCE -> aliasedStable(
-                    candidate, "answer_style", "response.answer_style",
+                    normalized, "answer_style", "response.answer_style",
                     "PREFERENCE_ANSWER_STYLE", this::answerStyle,
                     value -> "用户偏好" + value + "回答",
                     DETERMINISTIC_ANSWER_STYLES);
-            case WORK_CONTEXT -> work(candidate);
+            case WORK_CONTEXT -> work(normalized);
             case STABLE_PREFERENCE -> open(
-                    candidate, "STABLE_PREFERENCE", "用户的稳定偏好是");
+                    normalized, "STABLE_PREFERENCE", "用户的稳定偏好是");
             case STABLE_USER_FACT -> open(
-                    candidate, "STABLE_USER_FACT", "用户的稳定信息是");
+                    normalized, "STABLE_USER_FACT", "用户的稳定信息是");
         };
+    }
+
+    /**
+     * 已知 predicate 的归属类型由服务端模式决定，模型只负责抽取语义和值。
+     */
+    public MemoryFactCandidate normalizeCandidate(MemoryFactCandidate candidate) {
+        Objects.requireNonNull(candidate, "candidate");
+        MemoryType authoritativeType = AUTHORITATIVE_PREDICATE_TYPES.get(
+                candidate.predicate());
+        if (authoritativeType == null || authoritativeType == candidate.memoryType()) {
+            return candidate;
+        }
+        return new MemoryFactCandidate(
+                authoritativeType,
+                candidate.predicate(),
+                candidate.value(),
+                candidate.valueEvidence(),
+                candidate.evidenceText(),
+                candidate.stability(),
+                candidate.confidence());
     }
 
     private SchemaResolution work(MemoryFactCandidate candidate) {

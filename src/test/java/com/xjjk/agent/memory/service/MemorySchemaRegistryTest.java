@@ -79,9 +79,9 @@ class MemorySchemaRegistryTest {
     }
 
     @Test
-    void rejectsWrongPredicatesAndUnsupportedValueRewrites() {
+    void rejectsUnknownPredicatesAndUnsupportedValueRewrites() {
         assertThatThrownBy(() -> registry.resolve(candidate(
-                MemoryType.PROFILE, "answer_style", "简洁", "简洁")))
+                MemoryType.PROFILE, "unknown_profile_field", "简洁", "简洁")))
                 .isInstanceOf(MemoryCandidateValidationException.class)
                 .extracting(error -> ((MemoryCandidateValidationException) error).reason())
                 .isEqualTo(MemoryCandidateValidationException.Reason.SCHEMA);

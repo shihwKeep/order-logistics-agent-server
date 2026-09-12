@@ -115,8 +115,9 @@ public class ExplicitMemoryCandidateValidator {
                 || !sensitiveContentPolicy.isAllowed(candidate.semanticFact().value())) {
             throw invalid();
         }
+        var normalizedFact = schemaRegistry.normalizeCandidate(candidate.semanticFact());
         MemorySchemaRegistry.SchemaResolution resolution =
-                schemaRegistry.resolve(candidate.semanticFact());
+                schemaRegistry.resolve(normalizedFact);
         requireLength(resolution.canonicalContent(), maxContentCodePoints);
         if (!sensitiveContentPolicy.isAllowed(resolution.canonicalContent())) {
             throw invalid();
@@ -124,7 +125,7 @@ public class ExplicitMemoryCandidateValidator {
         return new ExplicitMemoryCandidate(
                 MemoryCategory.valueOf(resolution.legacyCategory()),
                 resolution.canonicalKey(), resolution.canonicalContent(),
-                evidence, expected, candidate.semanticFact());
+                evidence, expected, normalizedFact);
     }
 
     private static String normalize(String value) {

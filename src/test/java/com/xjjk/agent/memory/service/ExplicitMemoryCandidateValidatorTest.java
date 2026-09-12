@@ -40,6 +40,29 @@ class ExplicitMemoryCandidateValidatorTest {
     }
 
     @Test
+    void normalizesKnownPredicateTypeBeforeReturningValidatedSemanticFact() {
+        String source = "请记住我平时主要使用 Elixir 开发。";
+        MemoryFactCandidate modelFact = new MemoryFactCandidate(
+                MemoryType.PROFILE,
+                "primary_programming_language",
+                "Elixir",
+                "Elixir",
+                source,
+                MemoryStability.STABLE,
+                0.95);
+
+        ExplicitMemoryCandidate result = validator.validate(
+                ExplicitMemoryCandidate.semantic(modelFact, MemoryRetentionType.NORMAL),
+                source,
+                false);
+
+        assertThat(result.semanticFact().memoryType()).isEqualTo(MemoryType.WORK_CONTEXT);
+        assertThat(result.semanticFact().predicate())
+                .isEqualTo("primary_programming_language");
+        assertThat(result.content()).isEqualTo("用户主要使用 Elixir 进行开发");
+    }
+
+    @Test
     void normalizesAndAcceptsMatchingCandidate() {
         ExplicitMemoryCandidate candidate = new ExplicitMemoryCandidate(
                 MemoryCategory.PREFERENCE_ANSWER_STYLE,

@@ -129,7 +129,8 @@ public class ExplicitMemoryWriteService {
         memory.setMemoryGeneration(generation);
         memory.setSourceType(MemorySourceType.USER_EXPLICIT.name());
         memory.setCategory(candidate.category().name());
-        MemoryFactCandidate structuredFact = structuredFact(candidate);
+        MemoryFactCandidate structuredFact = schemaRegistry.normalizeCandidate(
+                structuredFact(candidate));
         MemorySchemaRegistry.SchemaResolution structured = schemaRegistry.resolve(structuredFact);
         memory.setSchemaVersion(2);
         memory.setMemoryType(structuredFact.memoryType().name());

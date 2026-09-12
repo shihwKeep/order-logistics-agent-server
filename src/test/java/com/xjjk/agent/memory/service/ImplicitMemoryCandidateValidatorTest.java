@@ -40,6 +40,26 @@ class ImplicitMemoryCandidateValidatorTest {
     }
 
     @Test
+    void usesKnownPredicateAsSchemaAuthorityWhenModelMisclassifiesMemoryType() {
+        String source = "我平时主要使用 Elixir 开发。";
+        MemoryFactCandidate modelCandidate = new MemoryFactCandidate(
+                MemoryType.PROFILE,
+                "primary_programming_language",
+                "Elixir",
+                "Elixir",
+                source,
+                MemoryStability.STABLE,
+                0.95);
+
+        var result = semanticValidator.validate(modelCandidate, source);
+
+        assertThat(result.candidate().memoryType()).isEqualTo(MemoryType.WORK_CONTEXT);
+        assertThat(result.candidate().predicate()).isEqualTo("primary_programming_language");
+        assertThat(result.canonicalContent()).isEqualTo("用户主要使用 Elixir 进行开发");
+        assertThat(result.verificationMethod()).isEqualTo("SEMANTIC_REQUIRED");
+    }
+
+    @Test
     void rejectsUngroundedFactsWithSpecificSafeReasons() {
         assertSemanticRejected(programmingLanguage(
                         "Python", "Java", "我平时用 Java 开发", 0.96),

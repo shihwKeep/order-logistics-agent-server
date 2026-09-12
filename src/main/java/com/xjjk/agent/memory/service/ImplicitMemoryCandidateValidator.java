@@ -75,13 +75,15 @@ public class ImplicitMemoryCandidateValidator {
                 || !sensitivePolicy.isAllowed(candidate.value())) {
             throw semanticRejected(MemoryCandidateValidationException.Reason.SENSITIVE);
         }
-        MemorySchemaRegistry.SchemaResolution resolution = schemaRegistry.resolve(candidate);
+        MemoryFactCandidate normalizedCandidate = schemaRegistry.normalizeCandidate(candidate);
+        MemorySchemaRegistry.SchemaResolution resolution =
+                schemaRegistry.resolve(normalizedCandidate);
         requireSemanticLength(resolution.canonicalContent(), maxContentCodePoints);
         if (!sensitivePolicy.isAllowed(resolution.canonicalContent())) {
             throw semanticRejected(MemoryCandidateValidationException.Reason.SENSITIVE);
         }
         return new ValidatedMemoryFact(
-                candidate,
+                normalizedCandidate,
                 resolution.canonicalKey(),
                 resolution.canonicalContent(),
                 resolution.valueJson(),
