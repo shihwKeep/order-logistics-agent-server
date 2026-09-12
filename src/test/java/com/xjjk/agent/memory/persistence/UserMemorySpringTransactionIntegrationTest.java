@@ -1,6 +1,7 @@
 package com.xjjk.agent.memory.persistence;
 
 import com.xjjk.agent.common.api.ApiErrorCode;
+import com.xjjk.agent.chat.domain.ChatTurnContext;
 import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.memory.domain.MemoryRetentionType;
@@ -9,11 +10,16 @@ import com.xjjk.agent.memory.domain.ImplicitMemoryExtractionBatch;
 import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.domain.MemoryExtractionTaskClaim;
 import com.xjjk.agent.memory.domain.MemoryOutboxClaim;
+import com.xjjk.agent.memory.domain.ExplicitMemoryCandidate;
+import com.xjjk.agent.memory.domain.ExplicitMemoryCommandResult;
+import com.xjjk.agent.memory.domain.ExplicitMemoryResolution;
 import com.xjjk.agent.memory.persistence.entity.MemoryOutboxEntity;
 import com.xjjk.agent.memory.persistence.mapper.MemoryOutboxMapper;
 import com.xjjk.agent.memory.persistence.mapper.MemorySuppressionMapper;
 import com.xjjk.agent.memory.persistence.mapper.UserMemoryMapper;
 import com.xjjk.agent.memory.service.UserMemoryManagementService;
+import com.xjjk.agent.memory.service.ExplicitMemoryCommandService;
+import com.xjjk.agent.memory.service.ExplicitMemoryExtractor;
 import com.xjjk.agent.memory.service.ImplicitMemoryCommitService;
 import com.xjjk.agent.memory.service.UserMemoryExpiryService;
 import com.xjjk.agent.memory.service.MemoryIndexOutboxStateService;
@@ -28,6 +34,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -36,6 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -43,6 +51,7 @@ import java.util.Map;
 
 @SpringBootTest(properties = {
         "spring.autoconfigure.exclude=",
+        "agent.memory.enabled=true",
         "integration.customer.base-url=http://127.0.0.1:1",
         "integration.customer.internal-token=test-internal-token"
 })
@@ -65,6 +74,12 @@ class UserMemorySpringTransactionIntegrationTest {
 
     @Autowired
     private UserMemoryManagementService service;
+
+    @Autowired
+    private ExplicitMemoryCommandService explicitMemoryCommandService;
+
+    @MockitoBean
+    private ExplicitMemoryExtractor explicitMemoryExtractor;
 
     @Autowired
     private ImplicitMemoryCommitService implicitMemoryCommitService;
@@ -164,6 +179,61 @@ class UserMemorySpringTransactionIntegrationTest {
         assertThat(((Number) task.get("model_candidate_count")).intValue()).isEqualTo(1);
         assertThat(((Number) task.get("accepted_candidate_count")).intValue()).isEqualTo(1);
         assertThat(((Number) task.get("saved_memory_count")).intValue()).isEqualTo(1);
+    }
+
+    @Test
+    void commitsNaturalExplicitMemoryAndUpsertOutboxInOneTransaction() {
+        String message = "你以后都叫我石海文";
+        ChatTurnContext turn = seedNaturalInstructionTurn(message);
+        ExplicitMemoryCandidate candidate = preferredNameCandidate(message);
+        when(explicitMemoryExtractor.resolve(message)).thenReturn(
+                ExplicitMemoryResolution.save(candidate,
+                        ExplicitMemoryResolution.Path.SEMANTIC_PATH, 0.98));
+
+        ExplicitMemoryCommandResult result = explicitMemoryCommandService.handle(turn, message);
+
+        assertThat(result.saved()).isTrue();
+        assertThat(result.assistantText()).isEqualTo("好的，已记住：用户希望被称为石海文");
+        Map<String, Object> memory = jdbc.queryForMap("""
+                SELECT memory_id, source_type, category, canonical_key, content, status
+                FROM agent_user_memory
+                WHERE tenant_id = 1 AND user_id = 2
+                  AND source_type = 'USER_EXPLICIT'
+                  AND category = 'PROFILE_PREFERRED_NAME'
+                  AND status = 'ACTIVE'
+                """);
+        assertThat(memory.get("source_type")).isEqualTo("USER_EXPLICIT");
+        assertThat(memory.get("category")).isEqualTo("PROFILE_PREFERRED_NAME");
+        assertThat(memory.get("canonical_key")).isEqualTo("profile.preferred_name");
+        assertThat(memory.get("content")).isEqualTo("用户希望被称为石海文");
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM agent_memory_outbox
+                WHERE memory_id = ? AND operation = 'UPSERT'
+                """, Long.class, memory.get("memory_id"))).isEqualTo(1L);
+    }
+
+    @Test
+    void rollsBackNaturalExplicitMemoryWhenOutboxInsertFails() {
+        String message = "你以后都叫我石海文";
+        ChatTurnContext turn = seedNaturalInstructionTurn(message);
+        ExplicitMemoryCandidate candidate = preferredNameCandidate(message);
+        when(explicitMemoryExtractor.resolve(message)).thenReturn(
+                ExplicitMemoryResolution.save(candidate,
+                        ExplicitMemoryResolution.Path.SEMANTIC_PATH, 0.98));
+        doReturn(0).when(outboxMapper).insert(any(MemoryOutboxEntity.class));
+
+        assertThatThrownBy(() -> explicitMemoryCommandService.handle(turn, message))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        error -> assertThat(error.errorCode())
+                                .isEqualTo(ApiErrorCode.MEMORY_WRITE_FAILED));
+
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM agent_user_memory
+                WHERE tenant_id = 1 AND user_id = 2
+                  AND category = 'PROFILE_PREFERRED_NAME'
+                """, Long.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM agent_memory_outbox", Long.class))
+                .isZero();
     }
 
     @Test
@@ -379,5 +449,44 @@ class UserMemorySpringTransactionIntegrationTest {
                 SELECT id FROM agent_memory_extraction_task
                 WHERE task_id = '50000000-0000-0000-0000-000000000010'
                 """, Long.class);
+    }
+
+    private ChatTurnContext seedNaturalInstructionTurn(String message) {
+        jdbc.update("""
+                INSERT INTO agent_conversation (
+                    conversation_id, tenant_id, user_id, org_id, title,
+                    last_message_sequence, memory_until_sequence, created_at, updated_at
+                ) VALUES (
+                    '21000000-0000-0000-0000-000000000001', 1, 2, 3, '自然记忆测试',
+                    1, 0, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)
+                )
+                """);
+        jdbc.update("""
+                INSERT INTO agent_message (
+                    message_id, conversation_id, tenant_id, user_id, request_id,
+                    message_sequence, role, content, status, created_at, updated_at
+                ) VALUES (
+                    '31000000-0000-0000-0000-000000000001',
+                    '21000000-0000-0000-0000-000000000001', 1, 2,
+                    '41000000-0000-0000-0000-000000000001', 1,
+                    'USER', ?, 'SUCCESS', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)
+                )
+                """, message);
+        return new ChatTurnContext(
+                1L, 2L,
+                "21000000-0000-0000-0000-000000000001",
+                "41000000-0000-0000-0000-000000000001",
+                "31000000-0000-0000-0000-000000000001",
+                "51000000-0000-0000-0000-000000000001",
+                "prompt-v1");
+    }
+
+    private ExplicitMemoryCandidate preferredNameCandidate(String evidence) {
+        return new ExplicitMemoryCandidate(
+                MemoryCategory.PROFILE_PREFERRED_NAME,
+                "profile.preferred_name",
+                "用户希望被称为石海文",
+                evidence,
+                MemoryRetentionType.NORMAL);
     }
 }
