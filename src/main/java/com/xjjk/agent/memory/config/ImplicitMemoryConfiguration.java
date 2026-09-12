@@ -8,7 +8,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.CustomizableThreadFactory;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import com.xjjk.agent.memory.service.ImplicitMemoryCandidateValidator;
-import com.xjjk.agent.memory.service.MemoryCategoryContentPolicy;
+import com.xjjk.agent.memory.service.MemorySchemaRegistry;
 import com.xjjk.agent.memory.service.MemorySensitiveContentPolicy;
 
 import java.util.Map;
@@ -63,12 +63,12 @@ public class ImplicitMemoryConfiguration {
     @Bean
     public ImplicitMemoryCandidateValidator implicitMemoryCandidateValidator(
             MemorySensitiveContentPolicy sensitivePolicy,
-            MemoryCategoryContentPolicy categoryPolicy,
+            MemorySchemaRegistry schemaRegistry,
             ImplicitMemoryProperties implicitProperties,
             UserMemoryProperties memoryProperties
     ) {
         return new ImplicitMemoryCandidateValidator(
-                sensitivePolicy, categoryPolicy, implicitProperties,
+                sensitivePolicy, schemaRegistry, implicitProperties,
                 memoryProperties.maxContentLength(), memoryProperties.maxEvidenceLength());
     }
 }
