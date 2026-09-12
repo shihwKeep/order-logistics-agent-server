@@ -5,6 +5,7 @@ import com.xjjk.agent.memory.config.ImplicitMemoryProperties;
 import com.xjjk.agent.memory.domain.MemoryCategory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.client.ChatClient;
 
 import java.time.Duration;
@@ -21,6 +22,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class SpringAiImplicitMemoryModelClientTest {
@@ -47,6 +49,36 @@ class SpringAiImplicitMemoryModelClientTest {
 
         assertThat(result).hasSize(2);
         assertThat(result.getFirst().category()).isEqualTo(MemoryCategory.WORK_COMMON_SCOPE);
+    }
+
+    @Test
+    void definesStableWorkScopeWithValidatorCompatibleExample() {
+        ChatClient chatClient = mock(ChatClient.class);
+        ChatClient.ChatClientRequestSpec requestSpec =
+                mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.CallResponseSpec responseSpec =
+                mock(ChatClient.CallResponseSpec.class);
+        when(chatClient.prompt()).thenReturn(requestSpec);
+        when(requestSpec.system(anyString())).thenReturn(requestSpec);
+        when(requestSpec.user(anyString())).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(responseSpec);
+        when(responseSpec.content()).thenReturn("{\"candidates\":[]}");
+        SpringAiImplicitMemoryModelClient client = new SpringAiImplicitMemoryModelClient(
+                chatClient, properties(Duration.ofSeconds(1), 3), executor(), new ObjectMapper());
+
+        client.extract(new ImplicitMemoryModelClient.Request(
+                "request-1", "我平时主要做 Java 开发。", null));
+
+        ArgumentCaptor<String> systemPrompt = ArgumentCaptor.forClass(String.class);
+        verify(requestSpec).system(systemPrompt.capture());
+        assertThat(systemPrompt.getValue())
+                .contains("WORK_COMMON_SCOPE 表示用户直接明确表达、可长期复用的职业方向、常用技术栈或稳定业务范围")
+                .contains("我平时主要做 Java 开发。")
+                .contains("\"category\":\"WORK_COMMON_SCOPE\"")
+                .contains("\"canonicalKey\":\"work.common_scope\"")
+                .contains("\"content\":\"用户常用工作范围是Java开发\"")
+                .contains("禁止账号凭据、身份信息、健康信息、订单、退款、物流、支付、客户资料、企业制度、临时任务")
+                .contains("只输出 candidates JSON 数组");
     }
 
     @Test
