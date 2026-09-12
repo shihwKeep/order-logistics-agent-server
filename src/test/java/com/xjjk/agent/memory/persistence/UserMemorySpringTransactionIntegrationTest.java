@@ -5,10 +5,13 @@ import com.xjjk.agent.chat.domain.ChatTurnContext;
 import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.memory.domain.MemoryRetentionType;
-import com.xjjk.agent.memory.domain.ImplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.ImplicitMemoryExtractionBatch;
 import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.domain.MemoryExtractionTaskClaim;
+import com.xjjk.agent.memory.domain.MemoryFactCandidate;
+import com.xjjk.agent.memory.domain.MemoryStability;
+import com.xjjk.agent.memory.domain.MemoryType;
+import com.xjjk.agent.memory.domain.ValidatedMemoryFact;
 import com.xjjk.agent.memory.domain.MemoryOutboxClaim;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCommandResult;
@@ -151,10 +154,14 @@ class UserMemorySpringTransactionIntegrationTest {
 
         int saved = implicitMemoryCommitService.commit(claim,
                 ImplicitMemoryExtractionBatch.observed(1, List.of(
-                        new ImplicitMemoryCandidate(
-                        MemoryCategory.PREFERENCE_LANGUAGE,
-                        "preference.language", "用户偏好中文回答",
-                        "希望使用中文回答", 0.95))));
+                        new ValidatedMemoryFact(
+                                new MemoryFactCandidate(
+                                        MemoryType.COMMUNICATION_PREFERENCE,
+                                        "answer_language", "中文", "中文",
+                                        "希望使用中文回答", MemoryStability.STABLE, 0.95),
+                                "communication.answer_language", "用户偏好使用中文交流",
+                                "\"中文\"", MemoryCategory.PREFERENCE_LANGUAGE.name(),
+                                "DETERMINISTIC"))));
 
         assertThat(saved).isEqualTo(1);
         assertThat(jdbc.queryForObject("""

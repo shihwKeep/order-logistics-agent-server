@@ -38,6 +38,13 @@ public class UserMemoryMetrics {
     private static final Set<String> EXPLICIT_OUTCOMES = Set.of(
             "SAVED", "NONE", "CLARIFY", "POLICY_REJECTED", "MODEL_FAILURE",
             "PERSISTENCE_FAILURE", "DISABLED");
+    private static final Set<String> EXTRACTION_DECISIONS = Set.of(
+            "IGNORE", "SESSION_ONLY", "LONG_TERM");
+    private static final Set<String> EXTRACTION_REJECTIONS = Set.of(
+            "SCHEMA", "EVIDENCE", "SENSITIVE", "STABILITY", "CONFIDENCE",
+            "UNSUPPORTED", "CONTRADICTED", "UNCERTAIN", "MULTIPLE");
+    private static final Set<String> VERIFICATION_OUTCOMES = Set.of(
+            "SUPPORTED", "CONTRADICTED", "UNCERTAIN");
     private final MeterRegistry registry;
 
     public UserMemoryMetrics(MeterRegistry registry) {
@@ -105,6 +112,24 @@ public class UserMemoryMetrics {
         registry.counter("agent.user.memory.explicit.resolution",
                 "path", require(path, EXPLICIT_PATHS, "显式记忆解析路径"),
                 "outcome", require(outcome, EXPLICIT_OUTCOMES, "显式记忆解析结果"))
+                .increment();
+    }
+
+    public void extractionDecision(String decision) {
+        registry.counter("agent.user.memory.extraction.decision",
+                "decision", require(decision, EXTRACTION_DECISIONS, "抽取决策"))
+                .increment();
+    }
+
+    public void extractionRejection(String reason) {
+        registry.counter("agent.user.memory.extraction.rejected",
+                "reason", require(reason, EXTRACTION_REJECTIONS, "抽取拒绝原因"))
+                .increment();
+    }
+
+    public void verificationOutcome(String outcome) {
+        registry.counter("agent.user.memory.verification",
+                "outcome", require(outcome, VERIFICATION_OUTCOMES, "证据核验结果"))
                 .increment();
     }
 

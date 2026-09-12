@@ -63,6 +63,24 @@ class UserMemoryMigrationContractTest {
                 .doesNotContain("model_output", "candidate_content", "evidence_text");
     }
 
+    @Test
+    void addsStructuredSemanticFactColumnsAndBoundedOutcomes() throws IOException {
+        String sql = readMigration(
+                "/db/migration/V14__add_structured_user_memory_facts.sql");
+        assertThat(sql)
+                .contains("ADD COLUMN schema_version SMALLINT UNSIGNED NULL")
+                .contains("ADD COLUMN memory_type VARCHAR(40)")
+                .contains("ADD COLUMN predicate_name VARCHAR(96)")
+                .contains("ADD COLUMN value_json JSON NULL")
+                .contains("ADD COLUMN stability VARCHAR(16)")
+                .contains("ADD COLUMN verification_method VARCHAR(32)")
+                .contains("KEY idx_memory_owner_predicate")
+                .contains("DROP CHECK chk_memory_extraction_result_code")
+                .contains("'IGNORE'", "'SESSION_ONLY'", "'REJECTED_EVIDENCE'")
+                .contains("'REJECTED_CONTRADICTED'", "'REJECTED_UNCERTAIN'")
+                .doesNotContain("source_message", "model_output", "candidate_content");
+    }
+
     private String readMigration(String path) throws IOException {
         try (var input = getClass().getResourceAsStream(path)) {
             assertThat(input).isNotNull();

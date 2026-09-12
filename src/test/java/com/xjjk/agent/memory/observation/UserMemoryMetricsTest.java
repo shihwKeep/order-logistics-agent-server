@@ -22,6 +22,9 @@ class UserMemoryMetricsTest {
         metrics.recall("KEYWORD_ONLY", "OK");
         metrics.directAnswer("PROGRAMMING_LANGUAGE", "ANSWERED");
         metrics.explicitResolution("SEMANTIC_PATH", "SAVED");
+        metrics.extractionDecision("LONG_TERM");
+        metrics.extractionRejection("EVIDENCE");
+        metrics.verificationOutcome("SUPPORTED");
         metrics.candidateCount("INDEX", 4);
         metrics.mysqlRejected("VERSION_MISMATCH", 2);
 
@@ -51,5 +54,11 @@ class UserMemoryMetricsTest {
                 .counter().count()).isEqualTo(1.0);
         assertThat(registry.get("agent.user.memory.mysql.rejected")
                 .tag("reason", "VERSION_MISMATCH").counter().count()).isEqualTo(2.0);
+        assertThat(registry.get("agent.user.memory.extraction.decision")
+                .tag("decision", "LONG_TERM").counter().count()).isEqualTo(1.0);
+        assertThat(registry.get("agent.user.memory.extraction.rejected")
+                .tag("reason", "EVIDENCE").counter().count()).isEqualTo(1.0);
+        assertThat(registry.get("agent.user.memory.verification")
+                .tag("outcome", "SUPPORTED").counter().count()).isEqualTo(1.0);
     }
 }

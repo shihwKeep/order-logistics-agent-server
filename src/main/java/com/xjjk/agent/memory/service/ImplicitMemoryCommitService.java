@@ -1,7 +1,6 @@
 package com.xjjk.agent.memory.service;
 
 import com.xjjk.agent.memory.config.ImplicitMemoryProperties;
-import com.xjjk.agent.memory.domain.ImplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.ImplicitMemoryExtractionBatch;
 import com.xjjk.agent.memory.domain.MemoryExtractionResultCode;
 import com.xjjk.agent.memory.domain.MemoryExtractionTaskClaim;
@@ -11,6 +10,7 @@ import com.xjjk.agent.memory.domain.MemoryRetentionType;
 import com.xjjk.agent.memory.domain.MemorySourceType;
 import com.xjjk.agent.memory.domain.MemoryStatus;
 import com.xjjk.agent.memory.domain.MemoryVisibility;
+import com.xjjk.agent.memory.domain.ValidatedMemoryFact;
 import com.xjjk.agent.memory.persistence.entity.MemoryExtractionTaskEntity;
 import com.xjjk.agent.memory.persistence.entity.MemoryOutboxEntity;
 import com.xjjk.agent.memory.persistence.entity.UserMemoryEntity;
@@ -105,7 +105,7 @@ public class ImplicitMemoryCommitService {
         }
 
         int saved = 0;
-        for (ImplicitMemoryCandidate candidate : deduplicate(batch.acceptedCandidates())) {
+        for (ValidatedMemoryFact candidate : deduplicate(batch.acceptedCandidates())) {
             if (suppressionMapper.existsOwnedActive(
                     claim.tenantId(), claim.userId(), claim.memoryGeneration(),
                     candidate.canonicalKey())) {
@@ -148,7 +148,7 @@ public class ImplicitMemoryCommitService {
 
     private UserMemoryEntity toEntity(
             MemoryExtractionTaskClaim claim,
-            ImplicitMemoryCandidate candidate,
+            ValidatedMemoryFact candidate,
             String memoryId,
             long version,
             LocalDateTime now
@@ -159,10 +159,16 @@ public class ImplicitMemoryCommitService {
         memory.setUserId(claim.userId());
         memory.setMemoryGeneration(claim.memoryGeneration());
         memory.setSourceType(MemorySourceType.AUTO_EXTRACT.name());
-        memory.setCategory(candidate.category().name());
+        memory.setCategory(candidate.legacyCategory());
+        memory.setSchemaVersion(2);
+        memory.setMemoryType(candidate.candidate().memoryType().name());
+        memory.setPredicateName(candidate.candidate().predicate());
+        memory.setValueJson(candidate.valueJson());
+        memory.setStability(candidate.candidate().stability().name());
+        memory.setVerificationMethod(candidate.verificationMethod());
         memory.setCanonicalKey(candidate.canonicalKey());
-        memory.setContent(candidate.content());
-        memory.setContentHash(MemoryHashing.sha256(candidate.content()));
+        memory.setContent(candidate.canonicalContent());
+        memory.setContentHash(MemoryHashing.sha256(candidate.canonicalContent()));
         memory.setConfidence(BigDecimal.valueOf(candidate.confidence())
                 .setScale(4, RoundingMode.HALF_UP));
         memory.setVisibility(MemoryVisibility.HIDDEN.name());
@@ -213,11 +219,11 @@ public class ImplicitMemoryCommitService {
         }
     }
 
-    private static List<ImplicitMemoryCandidate> deduplicate(List<ImplicitMemoryCandidate> candidates) {
-        Map<String, ImplicitMemoryCandidate> byKey = new LinkedHashMap<>();
+    private static List<ValidatedMemoryFact> deduplicate(List<ValidatedMemoryFact> candidates) {
+        Map<String, ValidatedMemoryFact> byKey = new LinkedHashMap<>();
         candidates.stream()
                 .filter(Objects::nonNull)
-                .sorted(Comparator.comparingDouble(ImplicitMemoryCandidate::confidence).reversed())
+                .sorted(Comparator.comparingDouble(ValidatedMemoryFact::confidence).reversed())
                 .forEach(candidate -> byKey.putIfAbsent(candidate.canonicalKey(), candidate));
         return List.copyOf(byKey.values());
     }

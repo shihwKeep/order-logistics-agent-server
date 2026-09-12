@@ -36,6 +36,24 @@ public class UserMemoryEntity {
     @TableField("category")
     private String category;
 
+    @TableField("schema_version")
+    private Integer schemaVersion;
+
+    @TableField("memory_type")
+    private String memoryType;
+
+    @TableField("predicate_name")
+    private String predicateName;
+
+    @TableField("value_json")
+    private String valueJson;
+
+    @TableField("stability")
+    private String stability;
+
+    @TableField("verification_method")
+    private String verificationMethod;
+
     @TableField("canonical_key")
     private String canonicalKey;
 

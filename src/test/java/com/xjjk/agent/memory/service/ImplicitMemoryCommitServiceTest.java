@@ -1,10 +1,12 @@
 package com.xjjk.agent.memory.service;
 
 import com.xjjk.agent.memory.config.ImplicitMemoryProperties;
-import com.xjjk.agent.memory.domain.ImplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.ImplicitMemoryExtractionBatch;
-import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.domain.MemoryExtractionTaskClaim;
+import com.xjjk.agent.memory.domain.MemoryFactCandidate;
+import com.xjjk.agent.memory.domain.MemoryStability;
+import com.xjjk.agent.memory.domain.MemoryType;
+import com.xjjk.agent.memory.domain.ValidatedMemoryFact;
 import com.xjjk.agent.memory.persistence.entity.MemoryExtractionTaskEntity;
 import com.xjjk.agent.memory.persistence.entity.MemoryOutboxEntity;
 import com.xjjk.agent.memory.persistence.entity.UserMemoryEntity;
@@ -75,6 +77,12 @@ class ImplicitMemoryCommitServiceTest {
             assertThat(row.getExpiresAt()).isEqualTo(LocalDateTime.parse("2027-03-10T14:00:00"));
             assertThat(row.getSourceConversationId()).isEqualTo("conversation-1");
             assertThat(row.getSourceMessageSequence()).isEqualTo(17L);
+            assertThat(row.getSchemaVersion()).isEqualTo(2);
+            assertThat(row.getMemoryType()).isEqualTo("WORK_CONTEXT");
+            assertThat(row.getPredicateName()).isEqualTo("primary_programming_language");
+            assertThat(row.getValueJson()).isEqualTo("\"Java\"");
+            assertThat(row.getStability()).isEqualTo("STABLE");
+            assertThat(row.getVerificationMethod()).isEqualTo("DETERMINISTIC");
         });
         verify(taskMapper).completeLease(
                 eq(10L), eq("lease-1"), eq("node-1"),
@@ -137,10 +145,13 @@ class ImplicitMemoryCommitServiceTest {
                 properties(), clock);
     }
 
-    private static ImplicitMemoryCandidate candidate(double confidence) {
-        return new ImplicitMemoryCandidate(
-                MemoryCategory.WORK_COMMON_SCOPE, "work.common_scope",
-                "用户常用工作范围是Java开发", "Java开发", confidence);
+    private static ValidatedMemoryFact candidate(double confidence) {
+        MemoryFactCandidate raw = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT, "primary_programming_language",
+                "Java", "Java", "我平时用 Java 开发", MemoryStability.STABLE, confidence);
+        return new ValidatedMemoryFact(raw, "work.common_scope",
+                "用户主要使用 Java 进行开发", "\"Java\"", "WORK_COMMON_SCOPE",
+                "DETERMINISTIC");
     }
 
     private MemoryExtractionTaskEntity taskEntity() {

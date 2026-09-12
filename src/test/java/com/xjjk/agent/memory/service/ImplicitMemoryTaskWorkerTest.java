@@ -2,9 +2,8 @@ package com.xjjk.agent.memory.service;
 
 import com.xjjk.agent.chat.persistence.entity.AgentMessageEntity;
 import com.xjjk.agent.chat.persistence.mapper.AgentMessageMapper;
-import com.xjjk.agent.memory.domain.ImplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.ImplicitMemoryExtractionBatch;
-import com.xjjk.agent.memory.domain.MemoryCategory;
+import com.xjjk.agent.memory.domain.MemoryDecision;
 import com.xjjk.agent.memory.domain.MemoryExplicitness;
 import com.xjjk.agent.memory.domain.MemoryExtractionDecision;
 import com.xjjk.agent.memory.domain.MemoryExtractionTaskClaim;
@@ -51,7 +50,7 @@ class ImplicitMemoryTaskWorkerTest {
                 MemoryExplicitness.IMPLICIT, List.of(raw)));
         when(validator.validate(raw, content)).thenReturn(validated);
         ImplicitMemoryExtractionBatch batch = ImplicitMemoryExtractionBatch.observed(
-                1, List.of(legacy(validated)));
+                1, List.of(validated));
         when(commitService.commit(claim, batch)).thenReturn(1);
 
         worker().process(claim);
@@ -84,7 +83,9 @@ class ImplicitMemoryTaskWorkerTest {
                 new MemoryEvidenceVerifier.Result("candidate-1",
                         MemoryEvidenceVerifier.Outcome.CONTRADICTED)));
         ImplicitMemoryExtractionBatch batch = ImplicitMemoryExtractionBatch.observed(
-                2, List.of(legacy(supported)));
+                2, List.of(validated(supportedRaw, "work.occupation",
+                        "用户的职业是供应链系统建设", "WORK_COMMON_SCOPE",
+                        "SEMANTIC_MODEL")));
         when(commitService.commit(claim, batch)).thenReturn(1);
 
         worker().process(claim);
@@ -97,19 +98,23 @@ class ImplicitMemoryTaskWorkerTest {
     void ignoreAndSessionOnlyCompleteWithoutMemoryOrVerification() {
         prepareSource("帮我查一下今天的订单");
         when(modelClient.analyze(any())).thenReturn(MemoryExtractionDecision.ignore());
-        ImplicitMemoryExtractionBatch empty = ImplicitMemoryExtractionBatch.observed(0, List.of());
-        when(commitService.commit(claim, empty)).thenReturn(0);
+        ImplicitMemoryExtractionBatch ignore =
+                ImplicitMemoryExtractionBatch.decision(MemoryDecision.IGNORE);
+        when(commitService.commit(claim, ignore)).thenReturn(0);
 
         worker().process(claim);
 
-        verify(commitService).commit(claim, empty);
+        verify(commitService).commit(claim, ignore);
         verify(validator, never()).validate(any(MemoryFactCandidate.class), any());
         verify(evidenceVerifier, never()).verify(any());
 
         prepareSource("这次回答简短一点");
         when(modelClient.analyze(any())).thenReturn(MemoryExtractionDecision.sessionOnly());
+        ImplicitMemoryExtractionBatch session =
+                ImplicitMemoryExtractionBatch.decision(MemoryDecision.SESSION_ONLY);
+        when(commitService.commit(claim, session)).thenReturn(0);
         worker().process(claim);
-        verify(commitService, org.mockito.Mockito.times(2)).commit(claim, empty);
+        verify(commitService).commit(claim, session);
     }
 
     @Test
@@ -122,7 +127,8 @@ class ImplicitMemoryTaskWorkerTest {
                 MemoryExplicitness.IMPLICIT, List.of(raw)));
         when(validator.validate(raw, content)).thenThrow(new MemoryCandidateValidationException(
                 MemoryCandidateValidationException.Reason.EVIDENCE));
-        ImplicitMemoryExtractionBatch rejected = ImplicitMemoryExtractionBatch.observed(1, List.of());
+        ImplicitMemoryExtractionBatch rejected = ImplicitMemoryExtractionBatch.rejected(
+                1, com.xjjk.agent.memory.domain.MemoryExtractionResultCode.REJECTED_EVIDENCE);
         when(commitService.commit(claim, rejected)).thenReturn(0);
 
         worker().process(claim);
@@ -203,8 +209,4 @@ class ImplicitMemoryTaskWorkerTest {
                 "\"" + raw.value() + "\"", category, verificationMethod);
     }
 
-    private static ImplicitMemoryCandidate legacy(ValidatedMemoryFact fact) {
-        return new ImplicitMemoryCandidate(MemoryCategory.valueOf(fact.legacyCategory()),
-                fact.canonicalKey(), fact.canonicalContent(), fact.evidenceText(), fact.confidence());
-    }
 }
