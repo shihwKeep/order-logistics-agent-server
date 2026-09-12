@@ -40,6 +40,31 @@ public interface UserMemoryMapper extends BaseMapper<UserMemoryEntity> {
             @Param("limit") int limit);
 
     @Select("""
+        SELECT *
+        FROM agent_user_memory
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND memory_generation = #{generation}
+          AND category = #{category}
+          AND status = 'ACTIVE'
+          AND (expires_at IS NULL OR expires_at > #{now})
+          AND (
+                (source_type = 'USER_EXPLICIT' AND visibility = 'VISIBLE')
+                OR (source_type = 'AUTO_EXTRACT' AND visibility = 'HIDDEN')
+          )
+        ORDER BY CASE WHEN source_type = 'USER_EXPLICIT' THEN 0 ELSE 1 END,
+                 confidence DESC, updated_at DESC, id DESC
+        LIMIT #{limit}
+        """)
+    List<UserMemoryEntity> selectActiveByCategory(
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("generation") long generation,
+            @Param("category") String category,
+            @Param("now") LocalDateTime now,
+            @Param("limit") int limit);
+
+    @Select("""
         <script>
         SELECT *
         FROM agent_user_memory

@@ -246,6 +246,37 @@ class UserMemorySpringTransactionIntegrationTest {
     void recallQueriesAreOwnerScopedAndExecutableOnRealMySql() {
         LocalDateTime now = LocalDateTime.now();
 
+        jdbc.update("""
+                INSERT INTO agent_user_memory (
+                    memory_id, tenant_id, user_id, memory_generation, source_type, category,
+                    canonical_key, content, content_hash, confidence, visibility, retention_type,
+                    status, evidence_text, version, expires_at, created_at, updated_at
+                ) VALUES
+                ('00000000-0000-0000-0000-000000000031', 1, 2, 7, 'AUTO_EXTRACT',
+                 'WORK_COMMON_SCOPE', 'work.common_scope.java', '用户常用工作范围是Java开发',
+                 REPEAT('e', 64), 0.9500, 'HIDDEN', 'NORMAL', 'ACTIVE', 'Java开发', 1,
+                 UTC_TIMESTAMP(3) + INTERVAL 365 DAY, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)),
+                ('00000000-0000-0000-0000-000000000032', 1, 2, 7, 'USER_EXPLICIT',
+                 'WORK_COMMON_SCOPE', 'work.common_scope.python', '用户常用工作范围是Python开发',
+                 REPEAT('f', 64), 1.0000, 'VISIBLE', 'PERMANENT', 'ACTIVE', 'Python开发', 1,
+                 NULL, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)),
+                ('00000000-0000-0000-0000-000000000033', 1, 99, 7, 'AUTO_EXTRACT',
+                 'WORK_COMMON_SCOPE', 'work.common_scope.other', '用户常用工作范围是Java开发',
+                 REPEAT('a', 64), 0.9900, 'HIDDEN', 'NORMAL', 'ACTIVE', 'Java开发', 1,
+                 NULL, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)),
+                ('00000000-0000-0000-0000-000000000034', 1, 2, 7, 'AUTO_EXTRACT',
+                 'WORK_COMMON_SCOPE', 'work.common_scope.expired', '用户常用工作范围是Java开发',
+                 REPEAT('b', 64), 0.9900, 'HIDDEN', 'NORMAL', 'ACTIVE', 'Java开发', 1,
+                 UTC_TIMESTAMP(3) - INTERVAL 1 SECOND, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
+                """);
+
+        assertThat(memoryMapper.selectActiveByCategory(
+                1L, 2L, 7L, "WORK_COMMON_SCOPE", now, 10))
+                .extracting(com.xjjk.agent.memory.persistence.entity.UserMemoryEntity::getMemoryId)
+                .containsExactly(
+                        "00000000-0000-0000-0000-000000000032",
+                        "00000000-0000-0000-0000-000000000031");
+
         assertThat(memoryMapper.selectGlobalExplicit(1L, 2L, 7L, now, 3))
                 .extracting(com.xjjk.agent.memory.persistence.entity.UserMemoryEntity::getMemoryId)
                 .containsExactly("00000000-0000-0000-0000-000000000010");
