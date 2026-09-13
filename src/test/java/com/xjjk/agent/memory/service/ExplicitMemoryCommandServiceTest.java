@@ -121,7 +121,9 @@ class ExplicitMemoryCommandServiceTest {
     @ValueSource(strings = {
             "请记住我长期从事Java开发",
             "我长期从事Java开发，请记住",
-            "请记住永久合同内容"
+            "请记住永久合同内容",
+            "请记住我一直保存阅读笔记",
+            "请记住我长期保留学习资料"
     })
     void doesNotUpgradeRetentionForOrdinaryLongTermFactWording(String message) {
         ExplicitMemoryCandidate candidate = prepareResolvedSave(message, false);
