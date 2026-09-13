@@ -170,6 +170,19 @@ class UserMemorySpringTransactionIntegrationTest {
                   AND source_type = 'AUTO_EXTRACT' AND visibility = 'HIDDEN'
                   AND retention_type = 'NORMAL' AND status = 'ACTIVE'
                 """, Long.class)).isEqualTo(1);
+        Map<String, Object> automatic = jdbc.queryForMap("""
+                SELECT schema_version, stability, temporal_scope,
+                       observed_at, valid_from, valid_to
+                FROM agent_user_memory
+                WHERE tenant_id = 1 AND user_id = 2 AND memory_generation = 7
+                  AND source_type = 'AUTO_EXTRACT' AND status = 'ACTIVE'
+                """);
+        assertThat(((Number) automatic.get("schema_version")).intValue()).isEqualTo(3);
+        assertThat(automatic.get("stability")).isEqualTo("STABLE");
+        assertThat(automatic.get("temporal_scope")).isEqualTo("CURRENT");
+        assertThat(automatic.get("observed_at")).isNotNull();
+        assertThat(automatic.get("valid_from")).isEqualTo(automatic.get("observed_at"));
+        assertThat(automatic.get("valid_to")).isNull();
         assertThat(jdbc.queryForObject("""
                 SELECT COUNT(*) FROM agent_memory_outbox
                 WHERE tenant_id = 1 AND user_id = 2 AND memory_generation = 7
@@ -202,7 +215,8 @@ class UserMemorySpringTransactionIntegrationTest {
         assertThat(result.saved()).isTrue();
         assertThat(result.assistantText()).isEqualTo("好的，已记住：用户希望被称为石海文");
         Map<String, Object> memory = jdbc.queryForMap("""
-                SELECT memory_id, source_type, category, canonical_key, content, status
+                SELECT memory_id, source_type, category, canonical_key, content, status,
+                       schema_version, temporal_scope, observed_at, valid_from, valid_to
                 FROM agent_user_memory
                 WHERE tenant_id = 1 AND user_id = 2
                   AND source_type = 'USER_EXPLICIT'
@@ -213,6 +227,11 @@ class UserMemorySpringTransactionIntegrationTest {
         assertThat(memory.get("category")).isEqualTo("PROFILE_PREFERRED_NAME");
         assertThat(memory.get("canonical_key")).isEqualTo("profile.preferred_name");
         assertThat(memory.get("content")).isEqualTo("用户希望被称为石海文");
+        assertThat(((Number) memory.get("schema_version")).intValue()).isEqualTo(3);
+        assertThat(memory.get("temporal_scope")).isEqualTo("CURRENT");
+        assertThat(memory.get("observed_at")).isNotNull();
+        assertThat(memory.get("valid_from")).isEqualTo(memory.get("observed_at"));
+        assertThat(memory.get("valid_to")).isNull();
         assertThat(jdbc.queryForObject("""
                 SELECT COUNT(*) FROM agent_memory_outbox
                 WHERE memory_id = ? AND operation = 'UPSERT'
@@ -379,6 +398,43 @@ class UserMemorySpringTransactionIntegrationTest {
         assertThat(suppressionMapper.selectActiveKeys(
                 1L, 2L, 7L, List.of("preference.answer_style"), 20))
                 .containsExactly("preference.answer_style");
+    }
+
+    @Test
+    void predicateRecallExecutesTemporalIsolationOnRealMySql() {
+        LocalDateTime now = LocalDateTime.now();
+        jdbc.update("""
+                INSERT INTO agent_user_memory (
+                    memory_id, tenant_id, user_id, memory_generation, source_type, category,
+                    schema_version, memory_type, predicate_name, value_json, stability,
+                    verification_method, canonical_key, content, content_hash, confidence,
+                    visibility, retention_type, status, evidence_text, version, expires_at,
+                    observed_at, valid_from, valid_to, temporal_scope, created_at, updated_at
+                ) VALUES
+                ('00000000-0000-0000-0000-000000000041', 1, 2, 7, 'AUTO_EXTRACT',
+                 'WORK_COMMON_SCOPE', 3, 'WORK_CONTEXT', 'occupation', '\"坐席\"',
+                 'TIME_BOUND', 'SEMANTIC_MODEL', 'work.occupation', '用户当前的职业是坐席',
+                 REPEAT('1', 64), 0.9500, 'HIDDEN', 'NORMAL', 'ACTIVE', '现在是坐席', 1,
+                 UTC_TIMESTAMP(3) + INTERVAL 365 DAY, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3),
+                 NULL, 'CURRENT', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)),
+                ('00000000-0000-0000-0000-000000000042', 1, 2, 7, 'AUTO_EXTRACT',
+                 'WORK_COMMON_SCOPE', 3, 'WORK_CONTEXT', 'occupation', '\"Java开发\"',
+                 'TIME_BOUND', 'SEMANTIC_MODEL', 'work.occupation.history.1',
+                 '用户过去的职业是Java开发', REPEAT('2', 64), 0.9500, 'HIDDEN', 'NORMAL',
+                 'ACTIVE', '以前是Java开发', 1, UTC_TIMESTAMP(3) + INTERVAL 365 DAY,
+                 UTC_TIMESTAMP(3), NULL, NULL, 'HISTORICAL', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
+                """);
+
+        assertThat(memoryMapper.selectActiveByPredicates(
+                1L, 2L, 7L, List.of("occupation"), "WORK_COMMON_SCOPE",
+                "CURRENT", now, 20))
+                .extracting(com.xjjk.agent.memory.persistence.entity.UserMemoryEntity::getMemoryId)
+                .containsExactly("00000000-0000-0000-0000-000000000041");
+        assertThat(memoryMapper.selectActiveByPredicates(
+                1L, 2L, 7L, List.of("occupation"), "WORK_COMMON_SCOPE",
+                "HISTORICAL", now, 20))
+                .extracting(com.xjjk.agent.memory.persistence.entity.UserMemoryEntity::getMemoryId)
+                .containsExactly("00000000-0000-0000-0000-000000000042");
     }
 
     @Test

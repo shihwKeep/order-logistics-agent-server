@@ -38,6 +38,24 @@ public interface AgentMessageMapper
     );
 
     @Select("""
+        SELECT created_at
+        FROM agent_message
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND conversation_id = #{conversationId}
+          AND message_id = #{messageId}
+          AND role = 'USER'
+          AND status = 'SUCCESS'
+        LIMIT 1
+        """)
+    java.time.LocalDateTime selectOwnedUserMessageCreatedAt(
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("conversationId") String conversationId,
+            @Param("messageId") String messageId
+    );
+
+    @Select("""
         SELECT * FROM agent_message
         WHERE tenant_id = #{tenantId}
           AND user_id = #{userId}

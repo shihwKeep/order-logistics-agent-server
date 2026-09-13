@@ -16,9 +16,9 @@ public record MemoryExtractionDecision(
             Objects.requireNonNull(explicitness, "explicitness");
             if (candidates.isEmpty()
                     || candidates.stream().anyMatch(candidate ->
-                    candidate == null || candidate.stability() != MemoryStability.STABLE)) {
+                    candidate == null || !supportsLongTerm(candidate.stability()))) {
                 throw new IllegalArgumentException(
-                        "long-term decision requires stable candidates");
+                        "long-term decision requires stable or time-bound candidates");
             }
         } else if (explicitness != null || !candidates.isEmpty()) {
             throw new IllegalArgumentException(
@@ -39,5 +39,10 @@ public record MemoryExtractionDecision(
             List<MemoryFactCandidate> candidates) {
         return new MemoryExtractionDecision(
                 MemoryDecision.LONG_TERM, explicitness, candidates);
+    }
+
+    private static boolean supportsLongTerm(MemoryStability stability) {
+        return stability == MemoryStability.STABLE
+                || stability == MemoryStability.TIME_BOUND;
     }
 }

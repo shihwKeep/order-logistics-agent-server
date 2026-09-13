@@ -22,6 +22,9 @@ class UserMemoryMetricsTest {
         metrics.recall("KEYWORD_ONLY", "OK");
         metrics.directAnswer("PROGRAMMING_LANGUAGE", "ANSWERED");
         metrics.directAnswer("CURRENT_EMPLOYER", "ANSWERED");
+        metrics.directAnswer("AGE", "ANSWERED");
+        metrics.directAnswer("CURRENT_OCCUPATION", "ANSWERED");
+        metrics.directAnswer("HISTORICAL_OCCUPATION", "ANSWERED");
         metrics.explicitResolution("SEMANTIC_PATH", "SAVED");
         metrics.extractionDecision("LONG_TERM");
         metrics.extractionRejection("EVIDENCE");

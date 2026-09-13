@@ -64,6 +64,65 @@ class UserMemoryMySqlIntegrationTest {
         }
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .target(MigrationVersion.fromVersion("14"))
+                .load()
+                .migrate();
+        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    INSERT INTO agent_user_memory (
+                        memory_id, tenant_id, user_id, memory_generation, source_type, category,
+                        schema_version, memory_type, predicate_name, value_json, stability,
+                        verification_method, canonical_key, content, content_hash, confidence,
+                        visibility, retention_type, status, source_conversation_id,
+                        source_message_sequence, evidence_text, version, expires_at,
+                        created_at, updated_at
+                    ) VALUES (
+                        '00000000-0000-0000-0000-000000000101', 1, 2, 7, 'USER_EXPLICIT',
+                        'WORK_COMMON_SCOPE', 2, 'WORK_CONTEXT', 'primary_programming_language',
+                        JSON_OBJECT('value', 'Java'), 'STABLE', 'DETERMINISTIC',
+                        'work.primary_programming_language', '用户主要使用 Java 进行开发',
+                        REPEAT('c', 64), 0.9600, 'VISIBLE', 'PERMANENT', 'ACTIVE', NULL, NULL,
+                        '我平时用 Java 语言进行开发', 1, NULL,
+                        '2026-09-01 01:02:03.456', '2026-09-01 01:02:03.456'
+                    )
+                    """);
+            statement.executeUpdate("""
+                    INSERT INTO agent_user_memory (
+                        memory_id, tenant_id, user_id, memory_generation, source_type, category,
+                        schema_version, memory_type, predicate_name, value_json, stability,
+                        verification_method, canonical_key, content, content_hash, confidence,
+                        visibility, retention_type, status, source_conversation_id,
+                        source_message_sequence, evidence_text, version, expires_at,
+                        created_at, updated_at
+                    ) VALUES (
+                        '00000000-0000-0000-0000-000000000103', 1, 2, 7, 'AUTO_EXTRACT',
+                        'WORK_COMMON_SCOPE', 2, NULL, 'incomplete_v2_fact',
+                        JSON_OBJECT('value', '保留'), 'STABLE', 'DETERMINISTIC',
+                        'work.incomplete_v2_fact', '需要保留的残缺 v2 事实内容',
+                        REPEAT('f', 64), 0.8800, 'HIDDEN', 'NORMAL', 'ACTIVE', NULL, NULL,
+                        '需要保留的残缺 v2 事实证据', 1, NULL,
+                        '2026-09-01 03:04:05.678', '2026-09-01 03:04:05.678'
+                    )
+                    """);
+            statement.executeUpdate("""
+                    INSERT INTO agent_user_memory (
+                        memory_id, tenant_id, user_id, memory_generation, source_type, category,
+                        canonical_key, content, content_hash, confidence, visibility, retention_type,
+                        status, source_conversation_id, source_message_sequence, evidence_text,
+                        version, expires_at, created_at, updated_at
+                    ) VALUES (
+                        '00000000-0000-0000-0000-000000000102', 1, 2, 7, 'USER_EXPLICIT',
+                        'PREFERENCE_ANSWER_STYLE', 'preference.answer_style', '用户偏好简洁回答',
+                        REPEAT('d', 64), 1.0000, 'VISIBLE', 'PERMANENT', 'ACTIVE', NULL, NULL,
+                        '用户偏好简洁回答', 1, NULL,
+                        '2026-09-01 02:03:04.567', '2026-09-01 02:03:04.567'
+                    )
+                    """);
+        } catch (Exception exception) {
+            throw new IllegalStateException("无法准备V14升级数据", exception);
+        }
+        Flyway.configure()
+                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .load()
                 .migrate();
     }
@@ -89,6 +148,144 @@ class UserMemoryMySqlIntegrationTest {
                      """)) {
             assertThat(result.next()).isTrue();
             assertThat(result.getBoolean("memory_enabled")).isTrue();
+        }
+    }
+
+    @Test
+    void upgradesStructuredFactsAndKeepsLegacyRowsCompatible() throws Exception {
+        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+            assertThat(count(statement, "information_schema.columns",
+                    "table_schema = DATABASE() AND table_name = 'agent_user_memory'"
+                            + " AND column_name IN ('observed_at', 'valid_from', 'valid_to',"
+                            + " 'temporal_scope')"))
+                    .isEqualTo(4);
+
+            try (ResultSet result = statement.executeQuery("""
+                    SELECT schema_version, observed_at, valid_from, valid_to,
+                           temporal_scope, created_at
+                    FROM agent_user_memory
+                    WHERE memory_id = '00000000-0000-0000-0000-000000000101'
+                    """)) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getInt("schema_version")).isEqualTo(3);
+                assertThat(result.getTimestamp("observed_at"))
+                        .isEqualTo(result.getTimestamp("created_at"));
+                assertThat(result.getTimestamp("valid_from"))
+                        .isEqualTo(result.getTimestamp("created_at"));
+                assertThat(result.getTimestamp("valid_to")).isNull();
+                assertThat(result.getString("temporal_scope")).isEqualTo("CURRENT");
+            }
+
+            try (ResultSet result = statement.executeQuery("""
+                    SELECT schema_version, observed_at, valid_from, valid_to, temporal_scope
+                    FROM agent_user_memory
+                    WHERE memory_id = '00000000-0000-0000-0000-000000000102'
+                    """)) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getObject("schema_version")).isNull();
+                assertThat(result.getTimestamp("observed_at")).isNull();
+                assertThat(result.getTimestamp("valid_from")).isNull();
+                assertThat(result.getTimestamp("valid_to")).isNull();
+                assertThat(result.getString("temporal_scope")).isNull();
+            }
+
+            try (ResultSet result = statement.executeQuery("""
+                    SELECT schema_version, memory_type, predicate_name, value_json, stability,
+                           verification_method, observed_at, valid_from, valid_to, temporal_scope,
+                           category, content, source_type, status
+                    FROM agent_user_memory
+                    WHERE memory_id = '00000000-0000-0000-0000-000000000103'
+                    """)) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getObject("schema_version")).isNull();
+                assertThat(result.getString("memory_type")).isNull();
+                assertThat(result.getString("predicate_name")).isNull();
+                assertThat(result.getString("value_json")).isNull();
+                assertThat(result.getString("stability")).isNull();
+                assertThat(result.getString("verification_method")).isNull();
+                assertThat(result.getTimestamp("observed_at")).isNull();
+                assertThat(result.getTimestamp("valid_from")).isNull();
+                assertThat(result.getTimestamp("valid_to")).isNull();
+                assertThat(result.getString("temporal_scope")).isNull();
+                assertThat(result.getString("category")).isEqualTo("WORK_COMMON_SCOPE");
+                assertThat(result.getString("content"))
+                        .isEqualTo("需要保留的残缺 v2 事实内容");
+                assertThat(result.getString("source_type")).isEqualTo("AUTO_EXTRACT");
+                assertThat(result.getString("status")).isEqualTo("ACTIVE");
+            }
+        }
+    }
+
+    @Test
+    void acceptsSupportedTemporalFactEnums() throws Exception {
+        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+            insertTemporalFact(statement, "00000000-0000-0000-0000-000000000111",
+                    "'WORK_CONTEXT'", "'STABLE'", "'DETERMINISTIC'", "'CURRENT'");
+            insertTemporalFact(statement, "00000000-0000-0000-0000-000000000112",
+                    "'WORK_CONTEXT'", "'TIME_BOUND'", "'SEMANTIC_MODEL'", "'HISTORICAL'");
+
+            assertThat(count(statement, "agent_user_memory",
+                    "memory_id IN ('00000000-0000-0000-0000-000000000111',"
+                            + " '00000000-0000-0000-0000-000000000112')"))
+                    .isEqualTo(2);
+        }
+    }
+
+    @Test
+    void acceptsEqualValidityBoundaryAndRejectsInvertedRange() throws Exception {
+        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+            insertTemporalFact(statement, "00000000-0000-0000-0000-000000000113",
+                    "'WORK_CONTEXT'", "'TIME_BOUND'", "'SEMANTIC_MODEL'", "'HISTORICAL'",
+                    "'2026-09-02 01:02:03.456'");
+
+            assertThat(count(statement, "agent_user_memory",
+                    "memory_id = '00000000-0000-0000-0000-000000000113'"))
+                    .isEqualTo(1);
+            assertThatThrownBy(() -> insertTemporalFact(
+                    statement, "00000000-0000-0000-0000-000000000129",
+                    "'WORK_CONTEXT'", "'TIME_BOUND'", "'SEMANTIC_MODEL'", "'HISTORICAL'",
+                    "'2026-09-02 01:02:03.455'"))
+                    .isInstanceOf(SQLException.class);
+        }
+    }
+
+    @Test
+    void allowsUnknownHistoricalStartButRequiresCurrentStart() throws Exception {
+        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+            insertTemporalFact(statement, "00000000-0000-0000-0000-000000000130",
+                    "'WORK_CONTEXT'", "'TIME_BOUND'", "'SEMANTIC_MODEL'", "'HISTORICAL'",
+                    "NULL", "NULL");
+            assertThat(count(statement, "agent_user_memory",
+                    "memory_id = '00000000-0000-0000-0000-000000000130'"))
+                    .isEqualTo(1);
+
+            assertThatThrownBy(() -> insertTemporalFact(
+                    statement, "00000000-0000-0000-0000-000000000131",
+                    "'WORK_CONTEXT'", "'TIME_BOUND'", "'SEMANTIC_MODEL'", "'CURRENT'",
+                    "NULL", "NULL"))
+                    .isInstanceOf(SQLException.class);
+        }
+    }
+
+    @Test
+    void rejectsNullAndUnsupportedTemporalFactEnums() throws Exception {
+        String[][] rejectedValues = {
+                {"00000000-0000-0000-0000-000000000121", "NULL", "'STABLE'", "'DETERMINISTIC'", "'CURRENT'"},
+                {"00000000-0000-0000-0000-000000000122", "'WORK_CONTEXT'", "NULL", "'DETERMINISTIC'", "'CURRENT'"},
+                {"00000000-0000-0000-0000-000000000123", "'WORK_CONTEXT'", "'STABLE'", "NULL", "'CURRENT'"},
+                {"00000000-0000-0000-0000-000000000124", "'WORK_CONTEXT'", "'STABLE'", "'DETERMINISTIC'", "NULL"},
+                {"00000000-0000-0000-0000-000000000125", "'UNSUPPORTED'", "'STABLE'", "'DETERMINISTIC'", "'CURRENT'"},
+                {"00000000-0000-0000-0000-000000000126", "'WORK_CONTEXT'", "'UNSUPPORTED'", "'DETERMINISTIC'", "'CURRENT'"},
+                {"00000000-0000-0000-0000-000000000127", "'WORK_CONTEXT'", "'STABLE'", "'UNSUPPORTED'", "'CURRENT'"},
+                {"00000000-0000-0000-0000-000000000128", "'WORK_CONTEXT'", "'STABLE'", "'DETERMINISTIC'", "'UNSUPPORTED'"}
+        };
+
+        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+            for (String[] values : rejectedValues) {
+                assertThatThrownBy(() -> insertTemporalFact(
+                        statement, values[0], values[1], values[2], values[3], values[4]))
+                        .isInstanceOf(SQLException.class);
+            }
         }
     }
 
@@ -259,6 +456,60 @@ class UserMemoryMySqlIntegrationTest {
 
     private static Connection connection() throws Exception {
         return DriverManager.getConnection(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
+    }
+
+    private static void insertTemporalFact(
+            Statement statement,
+            String memoryId,
+            String memoryType,
+            String stability,
+            String verificationMethod,
+            String temporalScope) throws SQLException {
+        insertTemporalFact(statement, memoryId, memoryType, stability,
+                verificationMethod, temporalScope, "NULL");
+    }
+
+    private static void insertTemporalFact(
+            Statement statement,
+            String memoryId,
+            String memoryType,
+            String stability,
+            String verificationMethod,
+            String temporalScope,
+            String validTo) throws SQLException {
+        insertTemporalFact(statement, memoryId, memoryType, stability,
+                verificationMethod, temporalScope,
+                "'2026-09-02 01:02:03.456'", validTo);
+    }
+
+    private static void insertTemporalFact(
+            Statement statement,
+            String memoryId,
+            String memoryType,
+            String stability,
+            String verificationMethod,
+            String temporalScope,
+            String validFrom,
+            String validTo) throws SQLException {
+        statement.executeUpdate("""
+                INSERT INTO agent_user_memory (
+                    memory_id, tenant_id, user_id, memory_generation, source_type, category,
+                    schema_version, memory_type, predicate_name, value_json, stability,
+                    observed_at, valid_from, valid_to, temporal_scope, verification_method,
+                    canonical_key, content, content_hash, confidence, visibility, retention_type,
+                    status, source_conversation_id, source_message_sequence, evidence_text,
+                    version, expires_at, created_at, updated_at
+                ) VALUES (
+                    '%s', 1, 2, 7, 'USER_EXPLICIT', 'WORK_COMMON_SCOPE',
+                    3, %s, 'primary_programming_language', JSON_OBJECT('value', 'Java'), %s,
+                    '2026-09-02 01:02:03.456', %s, %s, %s, %s,
+                    'work.primary_programming_language', '用户主要使用 Java 进行开发',
+                    REPEAT('e', 64), 0.9600, 'VISIBLE', 'PERMANENT', 'ACTIVE', NULL, NULL,
+                    '我平时用 Java 语言进行开发', 1, NULL,
+                    '2026-09-02 01:02:03.456', '2026-09-02 01:02:03.456'
+                )
+                """.formatted(memoryId, memoryType, stability, validFrom, validTo,
+                        temporalScope, verificationMethod));
     }
 
     private static long count(Statement statement, String table, String predicate) throws Exception {

@@ -1,6 +1,7 @@
 package com.xjjk.agent.memory.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.xjjk.agent.memory.config.UserMemoryProperties;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.ExplicitMemoryResolution;
@@ -8,6 +9,7 @@ import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.domain.MemoryFactCandidate;
 import com.xjjk.agent.memory.domain.MemoryRetentionType;
 import com.xjjk.agent.memory.domain.MemoryStability;
+import com.xjjk.agent.memory.domain.MemoryTemporalScope;
 import com.xjjk.agent.memory.domain.MemoryType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -46,7 +48,7 @@ class SpringAiExplicitMemoryExtractorTest {
                 {"action":"SAVE","memoryType":"WORK_CONTEXT",
                  "predicate":"technology_stack","value":"Spring AI",
                  "valueEvidence":"Spring AI","evidenceText":"以后记着我长期使用 Spring AI",
-                 "stability":"STABLE","retention":"NORMAL","confidence":0.98}
+                 "stability":"STABLE","temporalScope":"CURRENT","retention":"NORMAL","confidence":0.98}
                 """), properties(Duration.ofSeconds(1)), executor());
 
         ExplicitMemoryResolution result = extractor.resolve("以后记着我长期使用 Spring AI");
@@ -56,6 +58,79 @@ class SpringAiExplicitMemoryExtractorTest {
         assertThat(result.candidate().semanticFact()).isEqualTo(new MemoryFactCandidate(
                 MemoryType.WORK_CONTEXT, "technology_stack", "Spring AI", "Spring AI",
                 "以后记着我长期使用 Spring AI", MemoryStability.STABLE, 0.98));
+    }
+
+    @Test
+    void mapsExplicitCurrentAgeAsTimeBoundSave() {
+        SpringAiExplicitMemoryExtractor extractor = extractor(clientReturning("""
+                {"action":"SAVE","memoryType":"PROFILE","predicate":"age","value":"32",
+                 "valueEvidence":"32岁","evidenceText":"请记住我今年32岁",
+                 "stability":"TIME_BOUND","temporalScope":"CURRENT","retention":"NORMAL","confidence":0.98}
+                """), properties(Duration.ofSeconds(1)), executor());
+
+        MemoryFactCandidate fact = extractor.resolve("请记住我今年32岁")
+                .candidate().semanticFact();
+
+        assertThat(fact.predicate()).isEqualTo("age");
+        assertThat(fact.stability()).isEqualTo(MemoryStability.TIME_BOUND);
+        assertThat(fact.temporalScope()).isEqualTo(MemoryTemporalScope.CURRENT);
+    }
+
+    @Test
+    void mapsExplicitHistoricalOccupationIndependentlyFromRetention() {
+        SpringAiExplicitMemoryExtractor extractor = extractor(clientReturning("""
+                {"action":"SAVE","memoryType":"WORK_CONTEXT","predicate":"occupation","value":"Java开发",
+                 "valueEvidence":"Java开发","evidenceText":"请记住我以前是Java开发",
+                 "stability":"TIME_BOUND","temporalScope":"HISTORICAL","retention":"NORMAL","confidence":0.98}
+                """), properties(Duration.ofSeconds(1)), executor());
+
+        ExplicitMemoryResolution result = extractor.resolve("请记住我以前是Java开发");
+
+        assertThat(result.candidate().retentionType()).isEqualTo(MemoryRetentionType.NORMAL);
+        assertThat(result.candidate().semanticFact().temporalScope())
+                .isEqualTo(MemoryTemporalScope.HISTORICAL);
+    }
+
+    @Test
+    void rejectsSaveWithMissingOrInvalidTemporalScope() {
+        assertProtocolFailure("""
+                {"action":"SAVE","memoryType":"PROFILE","predicate":"age","value":"32",
+                 "valueEvidence":"32岁","evidenceText":"请记住我今年32岁",
+                 "stability":"TIME_BOUND","retention":"NORMAL","confidence":0.98}
+                """);
+        assertProtocolFailure("""
+                {"action":"SAVE","memoryType":"PROFILE","predicate":"age","value":"32",
+                 "valueEvidence":"32岁","evidenceText":"请记住我今年32岁",
+                 "stability":"TIME_BOUND","temporalScope":"RECENT","retention":"NORMAL","confidence":0.98}
+                """);
+    }
+
+    @Test
+    void rejectsTrailingProseAndSecondJsonValue() {
+        assertProtocolFailure("{\"action\":\"NONE\",\"confidence\":0.99} trailing prose");
+        assertProtocolFailure(
+                "{\"action\":\"NONE\",\"confidence\":0.99} {\"ignored\":true}");
+    }
+
+    @Test
+    void rejectsUnknownFieldsLocallyWithoutMutatingSharedMapper() {
+        ObjectMapper sharedMapper = new ObjectMapper()
+                .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        String outputTemplate = """
+                {"action":"SAVE","memoryType":"PROFILE","predicate":"age","value":"32",
+                 "valueEvidence":"32岁","evidenceText":"请记住我今年32岁",
+                 "stability":"TIME_BOUND","temporalScope":"CURRENT","retention":"NORMAL","confidence":0.98,%s}
+                """;
+        for (String unknownField : List.of(
+                "\"canonicalKey\":\"profile.age\"",
+                "\"category\":\"PROFILE_PERSONAL_FACT\"",
+                "\"content\":\"用户年龄为32岁\"",
+                "\"unexpected\":true")) {
+            assertProtocolFailure(outputTemplate.formatted(unknownField), sharedMapper);
+        }
+
+        assertThat(sharedMapper.isEnabled(
+                DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)).isFalse();
     }
 
     @Test
@@ -74,8 +149,15 @@ class SpringAiExplicitMemoryExtractorTest {
         ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
         verify(requestSpec).system(prompt.capture());
         assertThat(prompt.getValue())
-                .contains("memoryType", "predicate", "value", "valueEvidence", "stability")
+                .contains("memoryType", "predicate", "value", "valueEvidence", "stability", "temporalScope")
                 .contains("不要求固定触发词")
+                .contains("年龄", "职业", "工作单位", "技能", "技术栈", "沟通", "回答偏好", "称呼")
+                .contains("STABLE", "TIME_BOUND", "TEMPORARY", "UNKNOWN")
+                .contains("CURRENT", "HISTORICAL")
+                .contains("只有用户明确要求永久保存时才用 PERMANENT")
+                .contains("高风险身份凭证", "联系方式", "账户", "健康", "精确地址", "客户业务记录")
+                .contains("普通自述的年龄、职业和偏好可以进入候选")
+                .doesNotContain("禁止身份信息")
                 .contains("服务端生成")
                 .doesNotContain("category 只能是");
     }
@@ -153,8 +235,13 @@ class SpringAiExplicitMemoryExtractorTest {
     }
 
     private void assertProtocolFailure(String output) {
+        assertProtocolFailure(output, new ObjectMapper());
+    }
+
+    private void assertProtocolFailure(String output, ObjectMapper objectMapper) {
         SpringAiExplicitMemoryExtractor extractor = extractor(
-                clientReturning(output), properties(Duration.ofSeconds(1)), executor());
+                clientReturning(output), properties(Duration.ofSeconds(1)), executor(),
+                objectMapper);
         assertThatThrownBy(() -> extractor.resolve("你以后都叫我石海文"))
                 .isInstanceOfSatisfying(ExplicitMemoryExtractionException.class, error -> {
                     assertThat(error.code()).isEqualTo(
@@ -180,7 +267,16 @@ class SpringAiExplicitMemoryExtractorTest {
 
     private SpringAiExplicitMemoryExtractor extractor(
             ChatClient client, UserMemoryProperties properties, ExecutorService executor) {
-        return new SpringAiExplicitMemoryExtractor(client, properties, executor, new ObjectMapper());
+        return extractor(client, properties, executor, new ObjectMapper());
+    }
+
+    private SpringAiExplicitMemoryExtractor extractor(
+            ChatClient client,
+            UserMemoryProperties properties,
+            ExecutorService executor,
+            ObjectMapper objectMapper) {
+        return new SpringAiExplicitMemoryExtractor(
+                client, properties, executor, objectMapper);
     }
 
     private UserMemoryProperties properties(Duration timeout) {

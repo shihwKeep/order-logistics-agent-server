@@ -10,11 +10,13 @@ public record MemoryFactCandidate(
         String valueEvidence,
         String evidenceText,
         MemoryStability stability,
+        MemoryTemporalScope temporalScope,
         double confidence
 ) {
     public MemoryFactCandidate {
         Objects.requireNonNull(memoryType, "memoryType");
         Objects.requireNonNull(stability, "stability");
+        Objects.requireNonNull(temporalScope, "temporalScope");
         predicate = requireText(predicate, "predicate");
         value = requireText(value, "value");
         valueEvidence = requireText(valueEvidence, "valueEvidence");
@@ -22,6 +24,18 @@ public record MemoryFactCandidate(
         if (!Double.isFinite(confidence) || confidence < 0.0 || confidence > 1.0) {
             throw new IllegalArgumentException("confidence must be within [0,1]");
         }
+    }
+
+    public MemoryFactCandidate(
+            MemoryType memoryType,
+            String predicate,
+            String value,
+            String valueEvidence,
+            String evidenceText,
+            MemoryStability stability,
+            double confidence) {
+        this(memoryType, predicate, value, valueEvidence, evidenceText,
+                stability, MemoryTemporalScope.CURRENT, confidence);
     }
 
     private static String requireText(String value, String field) {

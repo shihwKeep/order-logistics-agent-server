@@ -3,6 +3,7 @@ package com.xjjk.agent.memory.answer;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xjjk.agent.memory.config.UserMemoryProperties;
+import com.xjjk.agent.memory.domain.MemoryTemporalScope;
 import com.xjjk.agent.memory.recall.RecalledMemory;
 import com.xjjk.agent.memory.service.MemoryCategoryContentPolicy;
 import org.springframework.stereotype.Component;
@@ -42,7 +43,8 @@ public class DeterministicMemoryAnswerRenderer {
                 || memory.content().codePoints().anyMatch(Character::isISOControl)) {
             return Optional.empty();
         }
-        if (Integer.valueOf(2).equals(memory.schemaVersion())) {
+        if (Integer.valueOf(2).equals(memory.schemaVersion())
+                || Integer.valueOf(3).equals(memory.schemaVersion())) {
             return renderStructured(type, memory);
         }
         Optional<String> canonical = contentPolicy.canonicalize(
@@ -68,10 +70,12 @@ public class DeterministicMemoryAnswerRenderer {
     private Optional<String> renderStructured(
             DirectMemoryQuestionType type,
             RecalledMemory memory) {
-        if (!"STABLE".equals(memory.stability())
+        if (!("STABLE".equals(memory.stability())
+                || "TIME_BOUND".equals(memory.stability()))
                 || memory.predicateName() == null
                 || !type.predicateNames().contains(memory.predicateName())
-                || memory.valueJson() == null) {
+                || memory.valueJson() == null
+                || !matchesTemporalScope(type, memory)) {
             return Optional.empty();
         }
         final String value;
@@ -90,12 +94,14 @@ public class DeterministicMemoryAnswerRenderer {
         }
         String fact = switch (type) {
             case PREFERRED_NAME -> "您希望被称为" + value;
+            case AGE -> renderAge(value);
             case PROGRAMMING_LANGUAGE -> "您平时主要使用 " + value;
             case CURRENT_EMPLOYER -> "您当前工作单位是" + value;
+            case CURRENT_OCCUPATION -> "您目前的职业是" + value;
+            case HISTORICAL_OCCUPATION -> "您以前从事过" + value;
             case ANSWER_LANGUAGE -> "您偏好使用" + value + "交流";
             case ANSWER_STYLE -> "您偏好" + value + "回答";
             case WORK_SCOPE -> switch (memory.predicateName()) {
-                case "occupation" -> "您的职业是" + value;
                 case "technology_stack" -> "您常用技术栈是" + value;
                 case "common_scope" -> "您常用工作范围是" + value;
                 default -> null;
@@ -105,11 +111,34 @@ public class DeterministicMemoryAnswerRenderer {
                 : Optional.of("根据您之前提供的信息，" + fact + "。");
     }
 
+    private boolean matchesTemporalScope(
+            DirectMemoryQuestionType type,
+            RecalledMemory memory) {
+        if (Integer.valueOf(2).equals(memory.schemaVersion())) {
+            return type.temporalScope() == MemoryTemporalScope.CURRENT;
+        }
+        return type.temporalScope().name().equals(memory.temporalScope())
+                && memory.observedAt() != null
+                && (type.temporalScope() == MemoryTemporalScope.HISTORICAL
+                    || memory.validFrom() != null);
+    }
+
+    private String renderAge(String value) {
+        if (!value.matches("[0-9]{1,3}")) {
+            return null;
+        }
+        int age = Integer.parseInt(value);
+        return age <= 120 ? "您当时" + age + "岁" : null;
+    }
+
     public String notRemembered(DirectMemoryQuestionType type) {
         return switch (Objects.requireNonNull(type, "问题类型不能为空")) {
             case PREFERRED_NAME -> "我还没有记住您偏好的称呼。";
+            case AGE -> "我还没有记住您此前提供的年龄。";
             case PROGRAMMING_LANGUAGE -> "我还没有记住您常用的编程语言。";
             case CURRENT_EMPLOYER -> "我还没有记住您的工作单位。";
+            case CURRENT_OCCUPATION -> "我还没有记住您当前的职业。";
+            case HISTORICAL_OCCUPATION -> "我还没有记住您过去的职业。";
             case WORK_SCOPE -> "我还没有记住您的工作范围。";
             case ANSWER_LANGUAGE -> "我还没有记住您的回答语言偏好。";
             case ANSWER_STYLE -> "我还没有记住您的回答风格偏好。";

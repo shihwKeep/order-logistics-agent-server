@@ -74,12 +74,36 @@ public interface UserMemoryMapper extends BaseMapper<UserMemoryEntity> {
           AND status = 'ACTIVE'
           AND (expires_at IS NULL OR expires_at > #{now})
           AND (
-              predicate_name IN
-              <foreach item="predicate" collection="predicateNames"
-                       open="(" separator="," close=")">
-                  #{predicate}
-              </foreach>
-              OR (schema_version IS NULL AND category = #{legacyCategory})
+              (#{temporalScope} = 'CURRENT' AND (
+                  (schema_version IS NULL AND category = #{legacyCategory})
+                  OR (schema_version = 2 AND predicate_name IN
+                      <foreach item="predicate" collection="predicateNames"
+                               open="(" separator="," close=")">
+                          #{predicate}
+                      </foreach>)
+                  OR (schema_version = 3
+                      AND temporal_scope = 'CURRENT'
+                      AND predicate_name IN
+                      <foreach item="predicate" collection="predicateNames"
+                               open="(" separator="," close=")">
+                          #{predicate}
+                      </foreach>
+                      AND observed_at IS NOT NULL
+                      AND valid_from IS NOT NULL
+                      AND valid_from &lt;= #{now}
+                      AND (valid_to IS NULL OR valid_to &gt; #{now}))
+              ))
+              OR (#{temporalScope} = 'HISTORICAL'
+                  AND schema_version = 3
+                  AND temporal_scope = 'HISTORICAL'
+                  AND predicate_name IN
+                  <foreach item="predicate" collection="predicateNames"
+                           open="(" separator="," close=")">
+                      #{predicate}
+                  </foreach>
+                  AND observed_at IS NOT NULL
+                  AND (valid_from IS NULL OR valid_from &lt;= #{now})
+                  AND (valid_to IS NULL OR valid_from IS NULL OR valid_to &gt;= valid_from))
           )
           AND (
                 (source_type = 'USER_EXPLICIT' AND visibility = 'VISIBLE')
@@ -96,6 +120,7 @@ public interface UserMemoryMapper extends BaseMapper<UserMemoryEntity> {
             @Param("generation") long generation,
             @Param("predicateNames") List<String> predicateNames,
             @Param("legacyCategory") String legacyCategory,
+            @Param("temporalScope") String temporalScope,
             @Param("now") LocalDateTime now,
             @Param("limit") int limit);
 
@@ -260,6 +285,31 @@ public interface UserMemoryMapper extends BaseMapper<UserMemoryEntity> {
             @Param("userId") long userId,
             @Param("generation") long generation,
             @Param("canonicalKey") String canonicalKey,
+            @Param("updatedAt") LocalDateTime updatedAt);
+
+    @Update("""
+        UPDATE agent_user_memory
+        SET status = 'SUPERSEDED',
+            valid_to = #{validTo},
+            updated_at = #{updatedAt}
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND memory_generation = #{generation}
+          AND canonical_key = #{canonicalKey}
+          AND memory_id = #{memoryId}
+          AND version = #{version}
+          AND schema_version = 3
+          AND temporal_scope = 'CURRENT'
+          AND status = 'ACTIVE'
+        """)
+    int closeOwnedCurrentFact(
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("generation") long generation,
+            @Param("canonicalKey") String canonicalKey,
+            @Param("memoryId") String memoryId,
+            @Param("version") long version,
+            @Param("validTo") LocalDateTime validTo,
             @Param("updatedAt") LocalDateTime updatedAt);
 
     @Update("""

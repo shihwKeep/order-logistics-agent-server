@@ -2,10 +2,13 @@ package com.xjjk.agent.memory.service;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class ExplicitMemoryCommandDetector {
 
-    private static final List<String> PERMANENT_PREFIXES = List.of("请永久记住", "永久记住");
+    private static final Pattern PERMANENT_COMMAND_PREFIX = Pattern.compile(
+            "^(?:请\\s*)?(?:帮我\\s*)?(?:永久|永远|始终|一直|长期)\\s*(?:记住|保存|保留)");
     private static final List<String> NORMAL_PREFIXES = List.of("请记住", "帮我记住", "记住", "以后请", "以后都");
     private static final List<String> MIXED_INTENT_MARKERS = List.of("顺便", "另外帮我", "同时帮我");
 
@@ -23,8 +26,21 @@ public class ExplicitMemoryCommandDetector {
             return Optional.empty();
         }
         String normalized = normalizeWhitespace(input);
-        Optional<CommandText> permanent = detect(normalized, PERMANENT_PREFIXES, true);
+        Optional<CommandText> permanent = detectPermanent(normalized);
         return permanent.isPresent() ? permanent : detect(normalized, NORMAL_PREFIXES, false);
+    }
+
+    static boolean requestsPermanentRetention(String input) {
+        return input != null && PERMANENT_COMMAND_PREFIX
+                .matcher(normalizeWhitespace(input)).find();
+    }
+
+    private Optional<CommandText> detectPermanent(String input) {
+        Matcher matcher = PERMANENT_COMMAND_PREFIX.matcher(input);
+        if (!matcher.find()) {
+            return Optional.empty();
+        }
+        return command(input.substring(matcher.end()), true);
     }
 
     private Optional<CommandText> detect(String input, List<String> prefixes, boolean permanent) {
@@ -32,15 +48,19 @@ public class ExplicitMemoryCommandDetector {
             if (!input.startsWith(prefix)) {
                 continue;
             }
-            String payload = stripOuterPunctuation(input.substring(prefix.length()));
-            if (payload.isBlank()
-                    || payload.codePointCount(0, payload.length()) > maxPayloadCodePoints
-                    || MIXED_INTENT_MARKERS.stream().anyMatch(payload::contains)) {
-                return Optional.empty();
-            }
-            return Optional.of(new CommandText(payload, permanent));
+            return command(input.substring(prefix.length()), permanent);
         }
         return Optional.empty();
+    }
+
+    private Optional<CommandText> command(String rawPayload, boolean permanent) {
+        String payload = stripOuterPunctuation(rawPayload);
+        if (payload.isBlank()
+                || payload.codePointCount(0, payload.length()) > maxPayloadCodePoints
+                || MIXED_INTENT_MARKERS.stream().anyMatch(payload::contains)) {
+            return Optional.empty();
+        }
+        return Optional.of(new CommandText(payload, permanent));
     }
 
     static String normalizeWhitespace(String value) {

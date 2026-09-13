@@ -22,7 +22,6 @@ public class ExplicitMemoryCommandService {
     private static final String REJECTED_TEXT = "这类内容不适合作为长期记忆保存。";
     private static final String DISABLED_TEXT = "记忆功能已关闭，可在“我的记忆”中开启。";
     private static final String CLARIFY_TEXT = "你希望我记住什么？请把需要长期记住的内容说清楚。";
-
     private final UserMemoryProperties properties;
     private final HybridExplicitMemoryResolver resolver;
     private final MemorySensitiveContentPolicy sensitivePolicy;
@@ -150,6 +149,6 @@ public class ExplicitMemoryCommandService {
     }
 
     private static boolean requestsPermanentRetention(String message) {
-        return message != null && message.contains("永久");
+        return ExplicitMemoryCommandDetector.requestsPermanentRetention(message);
     }
 }

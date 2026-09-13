@@ -51,6 +51,18 @@ public class UserMemoryEntity {
     @TableField("stability")
     private String stability;
 
+    @TableField("observed_at")
+    private LocalDateTime observedAt;
+
+    @TableField("valid_from")
+    private LocalDateTime validFrom;
+
+    @TableField("valid_to")
+    private LocalDateTime validTo;
+
+    @TableField("temporal_scope")
+    private String temporalScope;
+
     @TableField("verification_method")
     private String verificationMethod;
 

@@ -12,6 +12,7 @@ public class ExplicitMemoryCandidateValidator {
     private final MemorySensitiveContentPolicy sensitiveContentPolicy;
     private final MemoryCategoryContentPolicy categoryContentPolicy;
     private final MemorySchemaRegistry schemaRegistry;
+    private final MemoryTemporalEvidencePolicy temporalEvidencePolicy;
     private final int maxContentCodePoints;
     private final int maxEvidenceCodePoints;
 
@@ -21,7 +22,8 @@ public class ExplicitMemoryCandidateValidator {
             int maxEvidenceCodePoints
     ) {
         this(sensitiveContentPolicy, new MemoryCategoryContentPolicy(),
-                null, maxContentCodePoints, maxEvidenceCodePoints);
+                null, new MemoryTemporalEvidencePolicy(),
+                maxContentCodePoints, maxEvidenceCodePoints);
     }
 
     public ExplicitMemoryCandidateValidator(
@@ -31,9 +33,24 @@ public class ExplicitMemoryCandidateValidator {
             int maxContentCodePoints,
             int maxEvidenceCodePoints
     ) {
+        this(sensitiveContentPolicy, categoryContentPolicy, schemaRegistry,
+                new MemoryTemporalEvidencePolicy(),
+                maxContentCodePoints, maxEvidenceCodePoints);
+    }
+
+    public ExplicitMemoryCandidateValidator(
+            MemorySensitiveContentPolicy sensitiveContentPolicy,
+            MemoryCategoryContentPolicy categoryContentPolicy,
+            MemorySchemaRegistry schemaRegistry,
+            MemoryTemporalEvidencePolicy temporalEvidencePolicy,
+            int maxContentCodePoints,
+            int maxEvidenceCodePoints
+    ) {
         this.sensitiveContentPolicy = Objects.requireNonNull(sensitiveContentPolicy, "sensitiveContentPolicy");
         this.categoryContentPolicy = Objects.requireNonNull(categoryContentPolicy, "categoryContentPolicy");
         this.schemaRegistry = schemaRegistry;
+        this.temporalEvidencePolicy = Objects.requireNonNull(
+                temporalEvidencePolicy, "temporalEvidencePolicy");
         this.maxContentCodePoints = requirePositive(maxContentCodePoints);
         this.maxEvidenceCodePoints = requirePositive(maxEvidenceCodePoints);
     }
@@ -45,6 +62,7 @@ public class ExplicitMemoryCandidateValidator {
             int maxEvidenceCodePoints) {
         this(sensitiveContentPolicy, new MemoryCategoryContentPolicy(),
                 Objects.requireNonNull(schemaRegistry, "schemaRegistry"),
+                new MemoryTemporalEvidencePolicy(),
                 maxContentCodePoints, maxEvidenceCodePoints);
     }
 
@@ -94,14 +112,17 @@ public class ExplicitMemoryCandidateValidator {
             String originalMessage,
             boolean permanentCommand) {
         if (schemaRegistry == null || candidate.retentionType() == null
-                || candidate.semanticFact().stability() != MemoryStability.STABLE) {
+                || (candidate.semanticFact().stability() != MemoryStability.STABLE
+                && candidate.semanticFact().stability() != MemoryStability.TIME_BOUND)) {
             throw invalid();
         }
         String original = ExplicitMemoryCommandDetector.normalizeWhitespace(
                 originalMessage == null ? "" : originalMessage);
         String evidence = normalize(candidate.semanticFact().evidenceText());
         String valueEvidence = normalize(candidate.semanticFact().valueEvidence());
-        if (!original.contains(evidence) || !evidence.contains(valueEvidence)) {
+        if (!original.contains(evidence) || !evidence.contains(valueEvidence)
+                || !temporalEvidencePolicy.isSupported(
+                        candidate.semanticFact(), evidence)) {
             throw invalid();
         }
         requireLength(evidence, maxEvidenceCodePoints);

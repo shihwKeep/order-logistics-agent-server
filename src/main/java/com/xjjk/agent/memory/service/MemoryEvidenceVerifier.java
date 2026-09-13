@@ -1,6 +1,8 @@
 package com.xjjk.agent.memory.service;
 
 import com.xjjk.agent.memory.domain.ValidatedMemoryFact;
+import com.xjjk.agent.memory.domain.MemoryStability;
+import com.xjjk.agent.memory.domain.MemoryTemporalScope;
 
 import java.util.List;
 import java.util.Objects;
@@ -22,6 +24,14 @@ public interface MemoryEvidenceVerifier {
                 throw new IllegalArgumentException("candidateId must not be blank");
             }
             Objects.requireNonNull(fact, "fact");
+        }
+
+        public MemoryStability stability() {
+            return fact.candidate().stability();
+        }
+
+        public MemoryTemporalScope temporalScope() {
+            return fact.temporalScope();
         }
     }
 

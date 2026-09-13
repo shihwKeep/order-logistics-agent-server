@@ -9,7 +9,8 @@ public record ValidatedMemoryFact(
         String canonicalContent,
         String valueJson,
         String legacyCategory,
-        String verificationMethod
+        String verificationMethod,
+        MemoryTemporalScope temporalScope
 ) {
     public ValidatedMemoryFact {
         Objects.requireNonNull(candidate, "candidate");
@@ -18,6 +19,22 @@ public record ValidatedMemoryFact(
         valueJson = requireText(valueJson, "valueJson");
         legacyCategory = requireText(legacyCategory, "legacyCategory");
         verificationMethod = requireText(verificationMethod, "verificationMethod");
+        Objects.requireNonNull(temporalScope, "temporalScope");
+        if (temporalScope != candidate.temporalScope()) {
+            throw new IllegalArgumentException(
+                    "temporalScope must match candidate.temporalScope");
+        }
+    }
+
+    public ValidatedMemoryFact(
+            MemoryFactCandidate candidate,
+            String canonicalKey,
+            String canonicalContent,
+            String valueJson,
+            String legacyCategory,
+            String verificationMethod) {
+        this(candidate, canonicalKey, canonicalContent, valueJson, legacyCategory,
+                verificationMethod, candidate.temporalScope());
     }
 
     public double confidence() {

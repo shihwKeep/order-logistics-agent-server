@@ -81,6 +81,46 @@ class UserMemoryMigrationContractTest {
                 .doesNotContain("source_message", "model_output", "candidate_content");
     }
 
+    @Test
+    void upgradesStructuredFactsToTemporalSchemaVersionThree() throws IOException {
+        String sql = readMigration(
+                "/db/migration/V15__add_temporal_user_profile_memory.sql");
+
+        assertThat(sql)
+                .contains("ADD COLUMN observed_at DATETIME(3)")
+                .contains("ADD COLUMN valid_from DATETIME(3)")
+                .contains("ADD COLUMN valid_to DATETIME(3)")
+                .contains("ADD COLUMN temporal_scope VARCHAR(16)")
+                .contains("DROP CHECK chk_user_memory_structured_fact")
+                .contains("UPDATE agent_user_memory")
+                .contains("observed_at = created_at")
+                .contains("valid_from = created_at")
+                .contains("temporal_scope = 'CURRENT'")
+                .contains("schema_version = 3")
+                .contains("SET schema_version = NULL")
+                .contains("memory_type IS NOT NULL")
+                .contains("stability IN ('STABLE', 'TIME_BOUND')")
+                .contains("stability IS NOT NULL")
+                .contains("temporal_scope IN ('CURRENT', 'HISTORICAL')")
+                .contains("temporal_scope IS NOT NULL")
+                .contains("verification_method IS NOT NULL")
+                .contains("observed_at IS NOT NULL")
+                .contains("temporal_scope = 'HISTORICAL' OR valid_from IS NOT NULL")
+                .contains("valid_to IS NULL OR (valid_from IS NOT NULL AND valid_to >= valid_from)")
+                .contains("KEY idx_memory_owner_predicate_temporal_scope")
+                .contains("tenant_id, user_id, memory_generation, predicate_name,")
+                .contains("temporal_scope, status");
+
+        int constraintDropped = sql.indexOf("DROP CHECK chk_user_memory_structured_fact");
+        int invalidFactsArchived = sql.indexOf("SET schema_version = NULL");
+        int factsBackfilled = sql.indexOf("SET observed_at = created_at");
+        int constraintRecreated = sql.indexOf(
+                "ADD CONSTRAINT chk_user_memory_structured_fact");
+        assertThat(constraintDropped).isLessThan(invalidFactsArchived);
+        assertThat(invalidFactsArchived).isLessThan(factsBackfilled);
+        assertThat(factsBackfilled).isLessThan(constraintRecreated);
+    }
+
     private String readMigration(String path) throws IOException {
         try (var input = getClass().getResourceAsStream(path)) {
             assertThat(input).isNotNull();

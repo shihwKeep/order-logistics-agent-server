@@ -6,10 +6,12 @@ import com.xjjk.agent.memory.domain.ImplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.domain.MemoryFactCandidate;
 import com.xjjk.agent.memory.domain.MemoryStability;
+import com.xjjk.agent.memory.domain.MemoryTemporalScope;
 import com.xjjk.agent.memory.domain.MemoryType;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -79,6 +81,96 @@ class ImplicitMemoryCandidateValidatorTest {
     }
 
     @Test
+    void acceptsTimeBoundFactsAndPreservesTheirTemporalScope() {
+        String source = "我以前是Java开发";
+        MemoryFactCandidate candidate = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT,
+                "occupation",
+                "Java开发",
+                "Java开发",
+                source,
+                MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.HISTORICAL,
+                0.96);
+
+        var result = semanticValidator.validate(candidate, source);
+
+        assertThat(result.candidate().stability()).isEqualTo(MemoryStability.TIME_BOUND);
+        assertThat(result.candidate().temporalScope())
+                .isEqualTo(MemoryTemporalScope.HISTORICAL);
+        assertThat(result.temporalScope()).isEqualTo(MemoryTemporalScope.HISTORICAL);
+    }
+
+    @Test
+    void rejectsTemporaryAndUnknownSemanticFacts() {
+        for (MemoryStability stability : List.of(
+                MemoryStability.TEMPORARY, MemoryStability.UNKNOWN)) {
+            MemoryFactCandidate candidate = new MemoryFactCandidate(
+                    MemoryType.WORK_CONTEXT,
+                    "occupation",
+                    "Java开发",
+                    "Java开发",
+                    "我以前是Java开发",
+                    stability,
+                    MemoryTemporalScope.HISTORICAL,
+                    0.96);
+
+            assertSemanticRejected(candidate, candidate.evidenceText(),
+                    MemoryCandidateValidationException.Reason.STABILITY);
+        }
+    }
+
+    @Test
+    void rejectsCurrentAndHistoricalScopeContradictedByEvidenceAnchors() {
+        MemoryFactCandidate historicalMarkedCurrent = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT, "occupation", "Java开发", "Java开发",
+                "我以前是Java开发", MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.CURRENT, 0.96);
+        MemoryFactCandidate currentMarkedHistorical = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT, "occupation", "坐席", "坐席",
+                "我现在是坐席", MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.HISTORICAL, 0.96);
+        MemoryFactCandidate unanchoredHistorical = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT, "occupation", "坐席", "坐席",
+                "我是坐席", MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.HISTORICAL, 0.96);
+
+        assertSemanticRejected(historicalMarkedCurrent,
+                historicalMarkedCurrent.evidenceText(),
+                MemoryCandidateValidationException.Reason.EVIDENCE);
+        assertSemanticRejected(currentMarkedHistorical,
+                currentMarkedHistorical.evidenceText(),
+                MemoryCandidateValidationException.Reason.EVIDENCE);
+        assertSemanticRejected(unanchoredHistorical,
+                unanchoredHistorical.evidenceText(),
+                MemoryCandidateValidationException.Reason.EVIDENCE);
+    }
+
+    @Test
+    void acceptsSplitTemporalCandidatesOnlyWithCandidateSpecificClauses() {
+        String source = "以前是Java开发，现在是坐席";
+        MemoryFactCandidate historical = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT, "occupation", "Java开发", "Java开发",
+                "以前是Java开发", MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.HISTORICAL, 0.96);
+        MemoryFactCandidate current = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT, "occupation", "坐席", "坐席",
+                "现在是坐席", MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.CURRENT, 0.96);
+        MemoryFactCandidate ambiguousWholeSentence = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT, "occupation", "Java开发", "Java开发",
+                source, MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.HISTORICAL, 0.96);
+
+        assertThat(semanticValidator.validate(historical, source).temporalScope())
+                .isEqualTo(MemoryTemporalScope.HISTORICAL);
+        assertThat(semanticValidator.validate(current, source).temporalScope())
+                .isEqualTo(MemoryTemporalScope.CURRENT);
+        assertSemanticRejected(ambiguousWholeSentence, source,
+                MemoryCandidateValidationException.Reason.EVIDENCE);
+    }
+
+    @Test
     void rejectsUngroundedFactsWithSpecificSafeReasons() {
         assertSemanticRejected(programmingLanguage(
                         "Python", "Java", "我平时用 Java 开发", 0.96),
@@ -106,6 +198,36 @@ class ImplicitMemoryCandidateValidatorTest {
                 0.99);
         assertSemanticRejected(sensitive, sensitive.evidenceText(),
                 MemoryCandidateValidationException.Reason.SENSITIVE);
+    }
+
+    @Test
+    void handlesRepeatedProfilePredicateTokensWithinControlledValidationBoundary() {
+        String source = "我最喜欢的城市是杭州";
+        MemoryFactCandidate allowed = new MemoryFactCandidate(
+                MemoryType.PROFILE,
+                "favorite_favorite_city",
+                "杭州",
+                "杭州",
+                source,
+                MemoryStability.STABLE,
+                0.96);
+
+        var result = semanticValidator.validate(allowed, source);
+
+        assertThat(result.canonicalContent())
+                .isEqualTo("用户提供的个人画像事实（favorite_favorite_city）是杭州");
+        assertThat(result.verificationMethod()).isEqualTo("SEMANTIC_REQUIRED");
+
+        MemoryFactCandidate rejected = new MemoryFactCandidate(
+                MemoryType.PROFILE,
+                "phone_phone",
+                "普通值",
+                "普通值",
+                "我的phone信息是普通值",
+                MemoryStability.STABLE,
+                0.96);
+        assertSemanticRejected(rejected, rejected.evidenceText(),
+                MemoryCandidateValidationException.Reason.SCHEMA);
     }
 
     @Test

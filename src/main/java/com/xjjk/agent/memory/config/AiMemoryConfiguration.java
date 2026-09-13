@@ -11,6 +11,7 @@ import com.xjjk.agent.memory.service.HybridExplicitMemoryResolver;
 import com.xjjk.agent.memory.service.MemorySensitiveContentPolicy;
 import com.xjjk.agent.memory.service.MemoryCategoryContentPolicy;
 import com.xjjk.agent.memory.service.MemorySchemaRegistry;
+import com.xjjk.agent.memory.service.MemoryTemporalEvidencePolicy;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.ResponseFormat;
@@ -86,6 +87,11 @@ public class AiMemoryConfiguration {
     }
 
     @Bean
+    public MemoryTemporalEvidencePolicy memoryTemporalEvidencePolicy() {
+        return new MemoryTemporalEvidencePolicy();
+    }
+
+    @Bean
     public DeterministicExplicitMemoryCandidateParser deterministicExplicitMemoryCandidateParser(
             MemoryCategoryContentPolicy contentPolicy
     ) {
@@ -97,12 +103,14 @@ public class AiMemoryConfiguration {
             MemorySensitiveContentPolicy policy,
             MemoryCategoryContentPolicy categoryContentPolicy,
             MemorySchemaRegistry schemaRegistry,
+            MemoryTemporalEvidencePolicy temporalEvidencePolicy,
             UserMemoryProperties properties
     ) {
         return new ExplicitMemoryCandidateValidator(
                 policy,
                 categoryContentPolicy,
                 schemaRegistry,
+                temporalEvidencePolicy,
                 properties.maxContentLength(),
                 properties.maxEvidenceLength()
         );

@@ -13,6 +13,8 @@ import com.xjjk.agent.memory.observation.UserMemoryMetrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -96,6 +98,39 @@ class ExplicitMemoryCommandServiceTest {
                 true, true, "好的，已记住：用户希望被称为石海文", "memory-1"));
         verify(writer).save(turn(), candidate);
         assertThat(resolutionCount("SEMANTIC_PATH", "SAVED")).isEqualTo(1.0);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "请永久记住我叫小石",
+            "请永远记住我叫小石",
+            "请始终保存我的回答偏好",
+            "请一直保留我喜欢简洁回答的偏好",
+            "请长期记住我叫小石",
+            "请长期保存我叫小石"
+    })
+    void recognizesControlledPermanentRetentionCommands(String message) {
+        ExplicitMemoryCandidate candidate = prepareResolvedSave(message, true);
+
+        assertThat(service.handle(turn(), message).saved()).isTrue();
+
+        verify(validator).validate(candidate, message, true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "请记住我长期从事Java开发",
+            "我长期从事Java开发，请记住",
+            "请记住永久合同内容",
+            "请记住我一直保存阅读笔记",
+            "请记住我长期保留学习资料"
+    })
+    void doesNotUpgradeRetentionForOrdinaryLongTermFactWording(String message) {
+        ExplicitMemoryCandidate candidate = prepareResolvedSave(message, false);
+
+        assertThat(service.handle(turn(), message).saved()).isTrue();
+
+        verify(validator).validate(candidate, message, false);
     }
 
     @Test
@@ -204,6 +239,19 @@ class ExplicitMemoryCommandServiceTest {
         return new ExplicitMemoryCandidate(MemoryCategory.PROFILE_PREFERRED_NAME,
                 "profile.preferred_name", "用户希望被称为石海文", "你以后都叫我石海文",
                 MemoryRetentionType.NORMAL);
+    }
+
+    private ExplicitMemoryCandidate prepareResolvedSave(
+            String message,
+            boolean permanent) {
+        ExplicitMemoryCandidate candidate = candidate();
+        when(resolver.mightContainExplicitMemory(message)).thenReturn(true);
+        when(resolver.resolve(message)).thenReturn(ExplicitMemoryResolution.save(
+                candidate, ExplicitMemoryResolution.Path.SEMANTIC_PATH, 0.98));
+        when(validator.validate(candidate, message, permanent)).thenReturn(candidate);
+        when(writer.save(turn(), candidate)).thenReturn(
+                new ExplicitMemoryWriteService.SaveResult("memory-1", candidate.content()));
+        return candidate;
     }
 
     private ChatTurnContext turn() {

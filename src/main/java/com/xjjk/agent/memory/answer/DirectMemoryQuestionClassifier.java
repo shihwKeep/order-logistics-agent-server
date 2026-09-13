@@ -17,7 +17,7 @@ public class DirectMemoryQuestionClassifier {
             "并且", "同时", "另外", "以及", "；", ";");
     private static final List<String> QUESTION = List.of(
             "什么", "怎么", "哪种", "哪里", "哪儿", "在哪",
-            "是否", "吗", "？", "?");
+            "是否", "吗", "多大", "几岁", "？", "?");
 
     public Optional<DirectMemoryQuestionType> classify(String rawQuery) {
         if (rawQuery == null || rawQuery.isBlank()
@@ -32,6 +32,10 @@ public class DirectMemoryQuestionClassifier {
         }
 
         List<DirectMemoryQuestionType> matches = new ArrayList<>();
+        if (containsAny(query, List.of("多大年纪", "多大年龄", "几岁"))
+                || (query.contains("年龄") && containsAny(query, List.of("什么", "多少")))) {
+            matches.add(DirectMemoryQuestionType.AGE);
+        }
         if (containsAny(query, List.of("称呼", "叫我", "怎么叫"))) {
             matches.add(DirectMemoryQuestionType.PREFERRED_NAME);
         }
@@ -54,8 +58,16 @@ public class DirectMemoryQuestionClassifier {
                 && containsAny(query, List.of("简洁", "详细", "怎么")))) {
             matches.add(DirectMemoryQuestionType.ANSWER_STYLE);
         }
-        if (containsAny(query, List.of(
-                "做什么工作", "从事什么", "工作范围", "主要做什么", "职业", "技术栈"))) {
+        boolean occupationQuestion = containsAny(query, List.of(
+                "做什么工作", "从事什么", "什么职业", "职业是什么", "主要做什么"));
+        boolean historical = containsAny(query, List.of(
+                "以前", "过去", "曾经", "原来", "之前"));
+        if (occupationQuestion) {
+            matches.add(historical
+                    ? DirectMemoryQuestionType.HISTORICAL_OCCUPATION
+                    : DirectMemoryQuestionType.CURRENT_OCCUPATION);
+        }
+        if (containsAny(query, List.of("工作范围", "技术栈"))) {
             matches.add(DirectMemoryQuestionType.WORK_SCOPE);
         }
         return matches.size() == 1 ? Optional.of(matches.getFirst()) : Optional.empty();

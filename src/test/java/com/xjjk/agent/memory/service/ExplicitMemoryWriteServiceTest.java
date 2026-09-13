@@ -7,7 +7,11 @@ import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.memory.config.UserMemoryProperties;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.MemoryCategory;
+import com.xjjk.agent.memory.domain.MemoryFactCandidate;
 import com.xjjk.agent.memory.domain.MemoryRetentionType;
+import com.xjjk.agent.memory.domain.MemoryStability;
+import com.xjjk.agent.memory.domain.MemoryTemporalScope;
+import com.xjjk.agent.memory.domain.MemoryType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xjjk.agent.memory.persistence.entity.MemoryOutboxEntity;
 import com.xjjk.agent.memory.persistence.entity.UserMemoryEntity;
@@ -23,6 +27,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 
@@ -30,8 +35,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -58,6 +65,9 @@ class ExplicitMemoryWriteServiceTest {
         when(settingMapper.selectOwnedForUpdate(1L, 2L)).thenReturn(setting);
         when(messageMapper.selectOwnedUserMessageSequence(1L, 2L, "conversation", "user-message"))
                 .thenReturn(11L);
+        when(messageMapper.selectOwnedUserMessageCreatedAt(
+                1L, 2L, "conversation", "user-message"))
+                .thenReturn(LocalDateTime.parse("2026-09-11T07:55:00"));
         when(memoryMapper.insert(any(UserMemoryEntity.class))).thenReturn(1);
         when(outboxMapper.insert(any(MemoryOutboxEntity.class))).thenReturn(1);
     }
@@ -69,8 +79,12 @@ class ExplicitMemoryWriteServiceTest {
         existing.setVersion(3L);
         when(memoryMapper.selectActiveByKeyForUpdate(1L, 2L, 7L, "preference.answer_style"))
                 .thenReturn(existing);
-        when(memoryMapper.supersedeOwnedActive(eq(1L), eq(2L), eq(7L),
-                eq("preference.answer_style"), any())).thenReturn(1);
+        existing.setSchemaVersion(3);
+        existing.setTemporalScope("CURRENT");
+        existing.setValidFrom(LocalDateTime.parse("2026-09-10T08:00:00"));
+        when(memoryMapper.closeOwnedCurrentFact(eq(1L), eq(2L), eq(7L),
+                eq("preference.answer_style"), eq("old-memory"), eq(3L), any(), any()))
+                .thenReturn(1);
 
         ExplicitMemoryWriteService.SaveResult result = service.save(turn(), candidate());
 
@@ -86,13 +100,17 @@ class ExplicitMemoryWriteServiceTest {
         assertThat(memory.getValue().getSourceMessageSequence()).isEqualTo(11L);
         assertThat(memory.getValue().getExpiresAt()).isEqualTo("2027-09-11T08:00:00");
         assertThat(memory.getValue().getContentHash()).hasSize(64);
-        assertThat(memory.getValue().getSchemaVersion()).isEqualTo(2);
+        assertThat(memory.getValue().getSchemaVersion()).isEqualTo(3);
         assertThat(memory.getValue().getMemoryType()).isEqualTo("RESPONSE_PREFERENCE");
         assertThat(memory.getValue().getPredicateName()).isEqualTo("answer_style");
         assertThat(memory.getValue().getValueJson()).isEqualTo("\"简洁\"");
         assertThat(memory.getValue().getStability()).isEqualTo("STABLE");
         assertThat(memory.getValue().getVerificationMethod())
                 .isEqualTo("EXPLICIT_DETERMINISTIC");
+        assertThat(memory.getValue().getObservedAt()).isEqualTo("2026-09-11T07:55:00");
+        assertThat(memory.getValue().getValidFrom()).isEqualTo("2026-09-11T07:55:00");
+        assertThat(memory.getValue().getValidTo()).isNull();
+        assertThat(memory.getValue().getTemporalScope()).isEqualTo("CURRENT");
 
         ArgumentCaptor<MemoryOutboxEntity> outbox = ArgumentCaptor.forClass(MemoryOutboxEntity.class);
         verify(outboxMapper, org.mockito.Mockito.times(2)).insert(outbox.capture());
@@ -108,10 +126,56 @@ class ExplicitMemoryWriteServiceTest {
         assertThat(result.content()).isEqualTo("用户偏好简洁回答");
 
         verify(settingMapper).insertIfAbsent(eq(1L), eq(2L), eq(true), eq(true), any());
-        verify(memoryMapper).supersedeOwnedActive(eq(1L), eq(2L), eq(7L),
-                eq("preference.answer_style"), any());
+        verify(memoryMapper).closeOwnedCurrentFact(eq(1L), eq(2L), eq(7L),
+                eq("preference.answer_style"), eq("old-memory"), eq(3L),
+                eq(LocalDateTime.parse("2026-09-11T07:55:00")), any());
         verify(suppressionMapper).liftOwnedActive(eq(1L), eq(2L), eq(7L),
                 eq("preference.answer_style"), any());
+    }
+
+    @Test
+    void appendsHistoricalExplicitFactWithoutClosingCurrentFact() {
+        ExplicitMemoryCandidate historical = ExplicitMemoryCandidate.semantic(
+                new MemoryFactCandidate(
+                        MemoryType.WORK_CONTEXT, "occupation", "Java开发", "Java开发",
+                        "我以前是Java开发", MemoryStability.TIME_BOUND,
+                        MemoryTemporalScope.HISTORICAL, 0.98),
+                MemoryRetentionType.PERMANENT);
+        when(memoryMapper.selectActiveByKeyForUpdate(
+                eq(1L), eq(2L), eq(7L), org.mockito.ArgumentMatchers.contains(".history.")))
+                .thenReturn(null);
+
+        service.save(turn(), historical);
+
+        ArgumentCaptor<UserMemoryEntity> inserted =
+                ArgumentCaptor.forClass(UserMemoryEntity.class);
+        verify(memoryMapper).insert(inserted.capture());
+        assertThat(inserted.getValue().getCanonicalKey()).contains(".history.");
+        assertThat(inserted.getValue().getTemporalScope()).isEqualTo("HISTORICAL");
+        assertThat(inserted.getValue().getObservedAt()).isEqualTo("2026-09-11T07:55:00");
+        assertThat(inserted.getValue().getValidFrom()).isNull();
+        verify(memoryMapper, never()).closeOwnedCurrentFact(
+                anyLong(), anyLong(), anyLong(), anyString(), anyString(), anyLong(), any(), any());
+    }
+
+    @Test
+    void ignoresAnOlderCurrentExplicitReplay() {
+        UserMemoryEntity newer = new UserMemoryEntity();
+        newer.setMemoryId("newer-memory");
+        newer.setContent("用户偏好详细回答");
+        newer.setVersion(2L);
+        newer.setSchemaVersion(3);
+        newer.setTemporalScope("CURRENT");
+        newer.setObservedAt(LocalDateTime.parse("2026-09-11T07:56:00"));
+        when(memoryMapper.selectActiveByKeyForUpdate(
+                1L, 2L, 7L, "preference.answer_style")).thenReturn(newer);
+
+        ExplicitMemoryWriteService.SaveResult result = service.save(turn(), candidate());
+
+        assertThat(result).isEqualTo(new ExplicitMemoryWriteService.SaveResult(
+                "newer-memory", "用户偏好详细回答"));
+        verify(memoryMapper, never()).insert(any(UserMemoryEntity.class));
+        verify(outboxMapper, never()).insert(any(MemoryOutboxEntity.class));
     }
 
     @Test
