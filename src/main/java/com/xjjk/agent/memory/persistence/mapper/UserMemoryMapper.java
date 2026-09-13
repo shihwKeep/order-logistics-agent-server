@@ -264,6 +264,31 @@ public interface UserMemoryMapper extends BaseMapper<UserMemoryEntity> {
 
     @Update("""
         UPDATE agent_user_memory
+        SET status = 'SUPERSEDED',
+            valid_to = #{validTo},
+            updated_at = #{updatedAt}
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND memory_generation = #{generation}
+          AND canonical_key = #{canonicalKey}
+          AND memory_id = #{memoryId}
+          AND version = #{version}
+          AND schema_version = 3
+          AND temporal_scope = 'CURRENT'
+          AND status = 'ACTIVE'
+        """)
+    int closeOwnedCurrentFact(
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("generation") long generation,
+            @Param("canonicalKey") String canonicalKey,
+            @Param("memoryId") String memoryId,
+            @Param("version") long version,
+            @Param("validTo") LocalDateTime validTo,
+            @Param("updatedAt") LocalDateTime updatedAt);
+
+    @Update("""
+        UPDATE agent_user_memory
         SET status = 'DELETED', updated_at = #{updatedAt}
         WHERE tenant_id = #{tenantId}
           AND user_id = #{userId}

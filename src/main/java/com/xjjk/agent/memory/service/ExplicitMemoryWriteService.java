@@ -14,6 +14,7 @@ import com.xjjk.agent.memory.domain.MemorySourceType;
 import com.xjjk.agent.memory.domain.MemoryStatus;
 import com.xjjk.agent.memory.domain.MemoryVisibility;
 import com.xjjk.agent.memory.domain.MemoryStability;
+import com.xjjk.agent.memory.domain.MemoryTemporalScope;
 import com.xjjk.agent.memory.domain.MemoryType;
 import com.xjjk.agent.memory.persistence.entity.MemoryOutboxEntity;
 import com.xjjk.agent.memory.persistence.entity.UserMemoryEntity;
@@ -108,18 +109,33 @@ public class ExplicitMemoryWriteService {
         if (sourceSequence == null || sourceSequence < 1) {
             throw writeFailed();
         }
+        LocalDateTime observedAt = messageMapper.selectOwnedUserMessageCreatedAt(
+                turn.tenantId(), turn.userId(), turn.conversationId(), turn.userMessageId());
+        if (observedAt == null) {
+            observedAt = now;
+        }
 
+        MemoryFactCandidate structuredFact = schemaRegistry.normalizeCandidate(
+                structuredFact(candidate));
+        MemorySchemaRegistry.SchemaResolution structured = schemaRegistry.resolve(structuredFact);
+        boolean semantic = candidate.semanticFact() != null;
+        String canonicalKey = semantic ? structured.canonicalKey() : candidate.canonicalKey();
+        String canonicalContent = semantic ? structured.canonicalContent() : candidate.content();
+        String category = semantic ? structured.legacyCategory() : candidate.category().name();
         UserMemoryEntity previous = memoryMapper.selectActiveByKeyForUpdate(
-                turn.tenantId(), turn.userId(), generation, candidate.canonicalKey());
+                turn.tenantId(), turn.userId(), generation, canonicalKey);
+        if (isStaleCurrent(structuredFact, previous, observedAt)) {
+            return new SaveResult(previous.getMemoryId(), previous.getContent());
+        }
         long version = previous == null || previous.getVersion() == null
                 ? 1L : previous.getVersion() + 1L;
-        int superseded = memoryMapper.supersedeOwnedActive(
-                turn.tenantId(), turn.userId(), generation, candidate.canonicalKey(), now);
+        int superseded = previous == null ? 0 : closePrevious(
+                turn, generation, canonicalKey, structuredFact, previous, observedAt, now);
         if (previous != null && (superseded != 1 || previous.getMemoryId() == null)) {
             throw writeFailed();
         }
         suppressionMapper.liftOwnedActive(
-                turn.tenantId(), turn.userId(), generation, candidate.canonicalKey(), now);
+                turn.tenantId(), turn.userId(), generation, canonicalKey, now);
 
         String memoryId = UUID.randomUUID().toString();
         UserMemoryEntity memory = new UserMemoryEntity();
@@ -128,20 +144,22 @@ public class ExplicitMemoryWriteService {
         memory.setUserId(turn.userId());
         memory.setMemoryGeneration(generation);
         memory.setSourceType(MemorySourceType.USER_EXPLICIT.name());
-        memory.setCategory(candidate.category().name());
-        MemoryFactCandidate structuredFact = schemaRegistry.normalizeCandidate(
-                structuredFact(candidate));
-        MemorySchemaRegistry.SchemaResolution structured = schemaRegistry.resolve(structuredFact);
-        memory.setSchemaVersion(2);
+        memory.setCategory(category);
+        memory.setSchemaVersion(3);
         memory.setMemoryType(structuredFact.memoryType().name());
         memory.setPredicateName(structuredFact.predicate());
         memory.setValueJson(structured.valueJson());
         memory.setStability(structuredFact.stability().name());
         memory.setVerificationMethod(candidate.semanticFact() == null
                 ? "EXPLICIT_DETERMINISTIC" : "EXPLICIT_SEMANTIC");
-        memory.setCanonicalKey(candidate.canonicalKey());
-        memory.setContent(candidate.content());
-        memory.setContentHash(MemoryHashing.sha256(candidate.content()));
+        memory.setObservedAt(observedAt);
+        memory.setValidFrom(structuredFact.temporalScope() == MemoryTemporalScope.CURRENT
+                ? observedAt : null);
+        memory.setValidTo(null);
+        memory.setTemporalScope(structuredFact.temporalScope().name());
+        memory.setCanonicalKey(canonicalKey);
+        memory.setContent(canonicalContent);
+        memory.setContentHash(MemoryHashing.sha256(canonicalContent));
         memory.setConfidence(new BigDecimal("1.0000"));
         memory.setVisibility(MemoryVisibility.VISIBLE.name());
         memory.setRetentionType(candidate.retentionType().name());
@@ -164,7 +182,39 @@ public class ExplicitMemoryWriteService {
         }
         insertOutbox(turn.tenantId(), turn.userId(), generation,
                 version, memoryId, MemoryOutboxOperation.UPSERT, now);
-        return new SaveResult(memoryId, candidate.content());
+        return new SaveResult(memoryId, canonicalContent);
+    }
+
+    private int closePrevious(
+            ChatTurnContext turn,
+            long generation,
+            String canonicalKey,
+            MemoryFactCandidate fact,
+            UserMemoryEntity previous,
+            LocalDateTime observedAt,
+            LocalDateTime now) {
+        if (fact.temporalScope() == MemoryTemporalScope.CURRENT
+                && Integer.valueOf(3).equals(previous.getSchemaVersion())
+                && MemoryTemporalScope.CURRENT.name().equals(previous.getTemporalScope())
+                && previous.getVersion() != null) {
+            return memoryMapper.closeOwnedCurrentFact(
+                    turn.tenantId(), turn.userId(), generation, canonicalKey,
+                    previous.getMemoryId(), previous.getVersion(), observedAt, now);
+        }
+        return memoryMapper.supersedeOwnedActive(
+                turn.tenantId(), turn.userId(), generation, canonicalKey, now);
+    }
+
+    private static boolean isStaleCurrent(
+            MemoryFactCandidate fact,
+            UserMemoryEntity previous,
+            LocalDateTime observedAt) {
+        if (previous == null || fact.temporalScope() != MemoryTemporalScope.CURRENT) {
+            return false;
+        }
+        LocalDateTime previousTime = previous.getObservedAt() != null
+                ? previous.getObservedAt() : previous.getCreatedAt();
+        return previousTime != null && observedAt.isBefore(previousTime);
     }
 
     private static MemoryFactCandidate structuredFact(ExplicitMemoryCandidate candidate) {

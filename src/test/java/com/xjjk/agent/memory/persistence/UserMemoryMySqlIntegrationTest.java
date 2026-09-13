@@ -250,6 +250,24 @@ class UserMemoryMySqlIntegrationTest {
     }
 
     @Test
+    void allowsUnknownHistoricalStartButRequiresCurrentStart() throws Exception {
+        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+            insertTemporalFact(statement, "00000000-0000-0000-0000-000000000130",
+                    "'WORK_CONTEXT'", "'TIME_BOUND'", "'SEMANTIC_MODEL'", "'HISTORICAL'",
+                    "NULL", "NULL");
+            assertThat(count(statement, "agent_user_memory",
+                    "memory_id = '00000000-0000-0000-0000-000000000130'"))
+                    .isEqualTo(1);
+
+            assertThatThrownBy(() -> insertTemporalFact(
+                    statement, "00000000-0000-0000-0000-000000000131",
+                    "'WORK_CONTEXT'", "'TIME_BOUND'", "'SEMANTIC_MODEL'", "'CURRENT'",
+                    "NULL", "NULL"))
+                    .isInstanceOf(SQLException.class);
+        }
+    }
+
+    @Test
     void rejectsNullAndUnsupportedTemporalFactEnums() throws Exception {
         String[][] rejectedValues = {
                 {"00000000-0000-0000-0000-000000000121", "NULL", "'STABLE'", "'DETERMINISTIC'", "'CURRENT'"},
@@ -459,6 +477,20 @@ class UserMemoryMySqlIntegrationTest {
             String verificationMethod,
             String temporalScope,
             String validTo) throws SQLException {
+        insertTemporalFact(statement, memoryId, memoryType, stability,
+                verificationMethod, temporalScope,
+                "'2026-09-02 01:02:03.456'", validTo);
+    }
+
+    private static void insertTemporalFact(
+            Statement statement,
+            String memoryId,
+            String memoryType,
+            String stability,
+            String verificationMethod,
+            String temporalScope,
+            String validFrom,
+            String validTo) throws SQLException {
         statement.executeUpdate("""
                 INSERT INTO agent_user_memory (
                     memory_id, tenant_id, user_id, memory_generation, source_type, category,
@@ -470,13 +502,13 @@ class UserMemoryMySqlIntegrationTest {
                 ) VALUES (
                     '%s', 1, 2, 7, 'USER_EXPLICIT', 'WORK_COMMON_SCOPE',
                     3, %s, 'primary_programming_language', JSON_OBJECT('value', 'Java'), %s,
-                    '2026-09-02 01:02:03.456', '2026-09-02 01:02:03.456', %s, %s, %s,
+                    '2026-09-02 01:02:03.456', %s, %s, %s, %s,
                     'work.primary_programming_language', '用户主要使用 Java 进行开发',
                     REPEAT('e', 64), 0.9600, 'VISIBLE', 'PERMANENT', 'ACTIVE', NULL, NULL,
                     '我平时用 Java 语言进行开发', 1, NULL,
                     '2026-09-02 01:02:03.456', '2026-09-02 01:02:03.456'
                 )
-                """.formatted(memoryId, memoryType, stability, validTo,
+                """.formatted(memoryId, memoryType, stability, validFrom, validTo,
                         temporalScope, verificationMethod));
     }
 

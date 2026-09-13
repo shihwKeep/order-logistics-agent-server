@@ -21,6 +21,7 @@ class UserMemoryMapperContractTest {
             "selectGlobalExplicit",
             "selectActiveCandidates",
             "selectVisiblePage",
+            "closeOwnedCurrentFact",
             "supersedeOwnedActive",
             "softDeleteOwned",
             "clearOwnedExplicit",
@@ -62,6 +63,7 @@ class UserMemoryMapperContractTest {
     void destructiveUpdatesEnforceOwnerInSql() {
         for (String methodName : List.of(
                 "supersedeOwnedActive",
+                "closeOwnedCurrentFact",
                 "softDeleteOwned",
                 "clearOwnedExplicit",
                 "clearOwnedGeneration")) {
@@ -74,6 +76,21 @@ class UserMemoryMapperContractTest {
                     .contains("user_id = #{userId}")
                     .contains("memory_generation = #{generation}");
         }
+    }
+
+    @Test
+    void closingCurrentFactUsesTemporalCompareAndSet() {
+        Method method = findMethod("closeOwnedCurrentFact");
+        String sql = String.join("\n", method.getAnnotation(Update.class).value());
+
+        assertThat(sql)
+                .contains("canonical_key = #{canonicalKey}")
+                .contains("memory_id = #{memoryId}")
+                .contains("version = #{version}")
+                .contains("temporal_scope = 'CURRENT'")
+                .contains("status = 'ACTIVE'")
+                .contains("status = 'SUPERSEDED'")
+                .contains("valid_to = #{validTo}");
     }
 
     @Test

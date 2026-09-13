@@ -91,6 +91,6 @@ ALTER TABLE agent_user_memory
             AND temporal_scope IS NOT NULL
             AND temporal_scope IN ('CURRENT', 'HISTORICAL')
             AND observed_at IS NOT NULL
-            AND valid_from IS NOT NULL
-            AND (valid_to IS NULL OR valid_to >= valid_from))
+            AND (temporal_scope = 'HISTORICAL' OR valid_from IS NOT NULL)
+            AND (valid_to IS NULL OR (valid_from IS NOT NULL AND valid_to >= valid_from)))
     );

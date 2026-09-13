@@ -105,8 +105,8 @@ class UserMemoryMigrationContractTest {
                 .contains("temporal_scope IS NOT NULL")
                 .contains("verification_method IS NOT NULL")
                 .contains("observed_at IS NOT NULL")
-                .contains("valid_from IS NOT NULL")
-                .contains("valid_to IS NULL OR valid_to >= valid_from")
+                .contains("temporal_scope = 'HISTORICAL' OR valid_from IS NOT NULL")
+                .contains("valid_to IS NULL OR (valid_from IS NOT NULL AND valid_to >= valid_from)")
                 .contains("KEY idx_memory_owner_predicate_temporal_scope")
                 .contains("tenant_id, user_id, memory_generation, predicate_name,")
                 .contains("temporal_scope, status");

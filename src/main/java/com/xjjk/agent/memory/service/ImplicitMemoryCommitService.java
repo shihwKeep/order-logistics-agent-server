@@ -1,5 +1,7 @@
 package com.xjjk.agent.memory.service;
 
+import com.xjjk.agent.chat.persistence.entity.AgentMessageEntity;
+import com.xjjk.agent.chat.persistence.mapper.AgentMessageMapper;
 import com.xjjk.agent.memory.config.ImplicitMemoryProperties;
 import com.xjjk.agent.memory.domain.ImplicitMemoryExtractionBatch;
 import com.xjjk.agent.memory.domain.MemoryExtractionResultCode;
@@ -9,6 +11,7 @@ import com.xjjk.agent.memory.domain.MemoryOutboxStatus;
 import com.xjjk.agent.memory.domain.MemoryRetentionType;
 import com.xjjk.agent.memory.domain.MemorySourceType;
 import com.xjjk.agent.memory.domain.MemoryStatus;
+import com.xjjk.agent.memory.domain.MemoryTemporalScope;
 import com.xjjk.agent.memory.domain.MemoryVisibility;
 import com.xjjk.agent.memory.domain.ValidatedMemoryFact;
 import com.xjjk.agent.memory.persistence.entity.MemoryExtractionTaskEntity;
@@ -47,6 +50,7 @@ public class ImplicitMemoryCommitService {
     private final UserMemoryMapper memoryMapper;
     private final MemorySuppressionMapper suppressionMapper;
     private final MemoryOutboxMapper outboxMapper;
+    private final AgentMessageMapper messageMapper;
     private final ImplicitMemoryProperties properties;
     private final Clock clock;
 
@@ -57,9 +61,11 @@ public class ImplicitMemoryCommitService {
             UserMemoryMapper memoryMapper,
             MemorySuppressionMapper suppressionMapper,
             MemoryOutboxMapper outboxMapper,
+            AgentMessageMapper messageMapper,
             ImplicitMemoryProperties properties
     ) {
         this(taskMapper, settingMapper, memoryMapper, suppressionMapper, outboxMapper,
+                messageMapper,
                 properties, Clock.systemUTC());
     }
 
@@ -69,6 +75,7 @@ public class ImplicitMemoryCommitService {
             UserMemoryMapper memoryMapper,
             MemorySuppressionMapper suppressionMapper,
             MemoryOutboxMapper outboxMapper,
+            AgentMessageMapper messageMapper,
             ImplicitMemoryProperties properties,
             Clock clock
     ) {
@@ -77,6 +84,7 @@ public class ImplicitMemoryCommitService {
         this.memoryMapper = Objects.requireNonNull(memoryMapper, "memoryMapper");
         this.suppressionMapper = Objects.requireNonNull(suppressionMapper, "suppressionMapper");
         this.outboxMapper = Objects.requireNonNull(outboxMapper, "outboxMapper");
+        this.messageMapper = Objects.requireNonNull(messageMapper, "messageMapper");
         this.properties = Objects.requireNonNull(properties, "properties");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
@@ -104,6 +112,7 @@ public class ImplicitMemoryCommitService {
             return 0;
         }
 
+        LocalDateTime observedAt = sourceObservedAt(claim, now);
         int saved = 0;
         for (ValidatedMemoryFact candidate : deduplicate(batch.acceptedCandidates())) {
             if (suppressionMapper.existsOwnedActive(
@@ -118,19 +127,22 @@ public class ImplicitMemoryCommitService {
                     .equals(previous.getSourceType())) {
                 continue;
             }
+            if (isStaleCurrent(candidate, previous, observedAt)) {
+                continue;
+            }
             long version = previous == null || previous.getVersion() == null
                     ? 1L : Math.addExact(previous.getVersion(), 1L);
             if (previous != null) {
-                if (memoryMapper.supersedeOwnedActive(
-                        claim.tenantId(), claim.userId(), claim.memoryGeneration(),
-                        candidate.canonicalKey(), now) != 1) {
+                int closed = closePrevious(claim, candidate, previous, observedAt, now);
+                if (closed != 1) {
                     throw new IllegalStateException("隐式记忆旧版本失效失败");
                 }
                 insertOutbox(claim, previous.getMemoryId(), previous.getVersion(),
                         MemoryOutboxOperation.DELETE, now);
             }
             String memoryId = UUID.randomUUID().toString();
-            UserMemoryEntity memory = toEntity(claim, candidate, memoryId, version, now);
+            UserMemoryEntity memory = toEntity(
+                    claim, candidate, memoryId, version, observedAt, now);
             if (memoryMapper.insert(memory) != 1) {
                 throw new IllegalStateException("隐式记忆写入失败");
             }
@@ -151,6 +163,7 @@ public class ImplicitMemoryCommitService {
             ValidatedMemoryFact candidate,
             String memoryId,
             long version,
+            LocalDateTime observedAt,
             LocalDateTime now
     ) {
         UserMemoryEntity memory = new UserMemoryEntity();
@@ -160,12 +173,17 @@ public class ImplicitMemoryCommitService {
         memory.setMemoryGeneration(claim.memoryGeneration());
         memory.setSourceType(MemorySourceType.AUTO_EXTRACT.name());
         memory.setCategory(candidate.legacyCategory());
-        memory.setSchemaVersion(2);
+        memory.setSchemaVersion(3);
         memory.setMemoryType(candidate.candidate().memoryType().name());
         memory.setPredicateName(candidate.candidate().predicate());
         memory.setValueJson(candidate.valueJson());
         memory.setStability(candidate.candidate().stability().name());
         memory.setVerificationMethod(candidate.verificationMethod());
+        memory.setObservedAt(observedAt);
+        memory.setValidFrom(candidate.temporalScope() == MemoryTemporalScope.CURRENT
+                ? observedAt : null);
+        memory.setValidTo(null);
+        memory.setTemporalScope(candidate.temporalScope().name());
         memory.setCanonicalKey(candidate.canonicalKey());
         memory.setContent(candidate.canonicalContent());
         memory.setContentHash(MemoryHashing.sha256(candidate.canonicalContent()));
@@ -182,6 +200,48 @@ public class ImplicitMemoryCommitService {
         memory.setCreatedAt(now);
         memory.setUpdatedAt(now);
         return memory;
+    }
+
+    private int closePrevious(
+            MemoryExtractionTaskClaim claim,
+            ValidatedMemoryFact candidate,
+            UserMemoryEntity previous,
+            LocalDateTime observedAt,
+            LocalDateTime now) {
+        if (candidate.temporalScope() == MemoryTemporalScope.CURRENT
+                && Integer.valueOf(3).equals(previous.getSchemaVersion())
+                && MemoryTemporalScope.CURRENT.name().equals(previous.getTemporalScope())
+                && previous.getMemoryId() != null
+                && previous.getVersion() != null) {
+            return memoryMapper.closeOwnedCurrentFact(
+                    claim.tenantId(), claim.userId(), claim.memoryGeneration(),
+                    candidate.canonicalKey(), previous.getMemoryId(), previous.getVersion(),
+                    observedAt, now);
+        }
+        return memoryMapper.supersedeOwnedActive(
+                claim.tenantId(), claim.userId(), claim.memoryGeneration(),
+                candidate.canonicalKey(), now);
+    }
+
+    private static boolean isStaleCurrent(
+            ValidatedMemoryFact candidate,
+            UserMemoryEntity previous,
+            LocalDateTime observedAt) {
+        if (previous == null || candidate.temporalScope() != MemoryTemporalScope.CURRENT) {
+            return false;
+        }
+        LocalDateTime previousTime = previous.getObservedAt() != null
+                ? previous.getObservedAt() : previous.getCreatedAt();
+        return previousTime != null && observedAt.isBefore(previousTime);
+    }
+
+    private LocalDateTime sourceObservedAt(
+            MemoryExtractionTaskClaim claim, LocalDateTime fallback) {
+        AgentMessageEntity source = messageMapper.selectOwnedSuccessfulUserMessage(
+                claim.tenantId(), claim.userId(), claim.conversationId(), claim.requestId(),
+                claim.userMessageId(), claim.userMessageSequence());
+        return source == null || source.getCreatedAt() == null
+                ? fallback : source.getCreatedAt();
     }
 
     private void insertOutbox(
