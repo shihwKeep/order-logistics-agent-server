@@ -42,7 +42,7 @@ public class MemorySchemaRegistry {
     private static final Set<String> SENSITIVE_PROFILE_PREDICATE_TOKENS = Set.of(
             "phone", "mobile", "tel", "telephone", "contact", "id", "identity", "card",
             "bank", "account", "address", "location", "health", "medical", "disease",
-            "diagnosis");
+            "diagnosis", "whatsapp", "wechat", "qq", "residence", "postal");
 
     private static final Map<String, String> ANSWER_LANGUAGES = Map.ofEntries(
             Map.entry("中文", "中文"), Map.entry("汉语", "中文"),

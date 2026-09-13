@@ -90,6 +90,15 @@ class GeneralSemanticMemoryAcceptanceTest {
 
     private static Stream<Arguments> sensitiveProfileFacts() {
         return Stream.of(
+                profileFact("我的 WhatsApp 是+86 (138) 0013.8000", "whatsapp",
+                        "+86 (138) 0013.8000"),
+                profileFact("我家在浦东新区世纪大道100号", "residence",
+                        "浦东新区世纪大道100号"),
+                profileFact("我的电话是138.0013.8000", "favorite_number", "138.0013.8000"),
+                profileFact("我的身份证是320.311.1990 0101-123X", "document_reference",
+                        "320.311.1990 0101-123X"),
+                profileFact("我的银行卡是6222(0212)3456.7890-123", "payment_reference",
+                        "6222(0212)3456.7890-123"),
                 profileFact("我的电话是138-0013-8000", "phone_number", "138-0013-8000"),
                 profileFact("我的身份证是320 311 1990 0101 1234", "identity_code",
                         "320 311 1990 0101 1234"),

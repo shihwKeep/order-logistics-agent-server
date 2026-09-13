@@ -210,7 +210,8 @@ class MemorySchemaRegistryTest {
                 "identity_number", "national_id", "id_number", "credit_card",
                 "bank_account", "account_id",
                 "home_address", "current_location", "health_status", "medical_history",
-                "disease_history", "diagnosis_result"}) {
+                "disease_history", "diagnosis_result", "whatsapp", "wechat", "qq",
+                "residence", "postal_address"}) {
             assertThatThrownBy(() -> registry.resolve(candidate(
                     MemoryType.PROFILE, predicate, "普通值", "普通值")))
                     .as(predicate)

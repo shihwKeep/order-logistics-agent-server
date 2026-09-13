@@ -109,6 +109,31 @@ class ExplicitMemoryCandidateValidatorTest {
     }
 
     @Test
+    void rejectsFormattedProfilePiiFromExplicitMemoryRequests() {
+        for (String[] fact : new String[][]{
+                {"whatsapp", "+86 (138) 0013.8000"},
+                {"residence", "我家在浦东新区世纪大道100号"},
+                {"favorite_number", "138.0013.8000"},
+                {"document_reference", "320.311.1990 0101-123X"},
+                {"payment_reference", "6222(0212)3456.7890-123"}
+        }) {
+            String source = "请记住" + fact[1];
+            MemoryFactCandidate modelFact = new MemoryFactCandidate(
+                    MemoryType.PROFILE, fact[0], fact[1], fact[1], source,
+                    MemoryStability.STABLE, 0.98);
+
+            assertThatThrownBy(() -> validator.validate(
+                    ExplicitMemoryCandidate.semantic(
+                            modelFact, MemoryRetentionType.NORMAL),
+                    source,
+                    false))
+                    .as(fact[0])
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("MEMORY_CONTENT_REJECTED");
+        }
+    }
+
+    @Test
     void normalizesAndAcceptsMatchingCandidate() {
         ExplicitMemoryCandidate candidate = new ExplicitMemoryCandidate(
                 MemoryCategory.PREFERENCE_ANSWER_STYLE,
