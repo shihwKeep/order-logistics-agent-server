@@ -18,71 +18,102 @@ public final class ChatSseSession {
 
     private final SseEmitter emitter;
     private long sequence;
+    private boolean sessionSent;
+    private boolean terminal;
 
     public ChatSseSession(SseEmitter emitter) {
         this.emitter = Objects.requireNonNull(emitter, "SSE 输出不能为空");
     }
 
-    public void session(String conversationId, String requestId) throws IOException {
-        send("session", new ChatStreamPayloads.Session(conversationId, requestId));
+    public synchronized void session(String conversationId, String requestId) throws IOException {
+        if (sessionSent || terminal) {
+            return;
+        }
+        sendLocked("session", new ChatStreamPayloads.Session(conversationId, requestId));
+        sessionSent = true;
     }
 
-    public void generating() throws IOException {
-        send("status", new ChatStreamPayloads.Status("GENERATING", "正在生成回答"));
+    /**
+     * 在 session 事件成功写出后保持连接活跃；心跳不改变 SSE 的总生命周期。
+     *
+     * @return 本次是否实际写出了心跳
+     */
+    public synchronized boolean heartbeat() throws IOException {
+        if (!sessionSent || terminal) {
+            return false;
+        }
+        sendLocked("heartbeat", new ChatStreamPayloads.Heartbeat());
+        return true;
+    }
+
+    public synchronized void generating() throws IOException {
+        sendLocked("status", new ChatStreamPayloads.Status("GENERATING", "正在生成回答"));
     }
 
     /** 卡片动作正在确定性查询物流，不表示模型正在生成。 */
-    public void queryingLogistics() throws IOException {
-        send("status", new ChatStreamPayloads.Status(
+    public synchronized void queryingLogistics() throws IOException {
+        sendLocked("status", new ChatStreamPayloads.Status(
                 "QUERYING_LOGISTICS", "正在查询物流"));
     }
 
     /** 客户卡片动作正在确定性查询订单，不表示模型正在生成。 */
-    public void queryingCustomerOrders() throws IOException {
-        send("status", new ChatStreamPayloads.Status(
+    public synchronized void queryingCustomerOrders() throws IOException {
+        sendLocked("status", new ChatStreamPayloads.Status(
                 "QUERYING_CUSTOMER_ORDERS", "正在查询客户订单"));
     }
 
     /** 售后卡片动作正在确定性查询详情，不表示模型正在生成。 */
-    public void queryingAfterSaleDetail() throws IOException {
-        send("status", new ChatStreamPayloads.Status(
+    public synchronized void queryingAfterSaleDetail() throws IOException {
+        sendLocked("status", new ChatStreamPayloads.Status(
                 "QUERYING_AFTER_SALE_DETAIL", "正在查询售后详情"));
     }
 
-    public void delta(String text) throws IOException {
-        send("delta", new ChatStreamPayloads.Delta(text));
+    public synchronized void delta(String text) throws IOException {
+        sendLocked("delta", new ChatStreamPayloads.Delta(text));
     }
 
     /** 发送工具产生的结构化结果，正文仍由模型通过 delta 输出。 */
-    public void result(ToolUiResult result) throws IOException {
+    public synchronized void result(ToolUiResult result) throws IOException {
         Objects.requireNonNull(result, "工具结果不能为空");
         result(result.kind(), result.schemaVersion(), result.queriedAt(), result.data());
     }
 
     /** 工具名属于服务端调用元数据，不进入前端公开的 result 负载。 */
-    public void result(
+    public synchronized void result(
             String kind,
             int schemaVersion,
             java.time.OffsetDateTime queriedAt,
             Object data) throws IOException {
-        send("result", new ChatStreamPayloads.Result(
+        sendLocked("result", new ChatStreamPayloads.Result(
                 kind, schemaVersion, queriedAt, data));
     }
 
     /** 仅由确认回答成功落库的收尾流程调用。 */
-    public void done(String messageId) throws IOException {
-        send("done", new ChatStreamPayloads.Done(messageId));
+    public synchronized void done(String messageId) throws IOException {
+        if (terminal) {
+            return;
+        }
+        terminal = true;
+        sendLocked("done", new ChatStreamPayloads.Done(messageId));
     }
 
-    public void error(ChatStreamError error, String requestId) throws IOException {
-        send("error", new ChatStreamPayloads.Error(error.code(), error.message(), requestId));
+    public synchronized void error(ChatStreamError error, String requestId) throws IOException {
+        if (terminal) {
+            return;
+        }
+        terminal = true;
+        sendLocked("error", new ChatStreamPayloads.Error(error.code(), error.message(), requestId));
     }
 
-    public void complete() {
+    public synchronized void complete() {
+        terminal = true;
         emitter.complete();
     }
 
-    private synchronized <T> void send(String type, T payload) throws IOException {
+    private <T> void sendLocked(String type, T payload) throws IOException {
+        if (terminal && !"done".equals(type) && !"error".equals(type)) {
+            return;
+        }
         long nextSequence = ++sequence;
         emitter.send(SseEmitter.event()
                 .name(type)

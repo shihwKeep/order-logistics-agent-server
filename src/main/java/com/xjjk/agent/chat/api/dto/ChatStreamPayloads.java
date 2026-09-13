@@ -13,6 +13,9 @@ public final class ChatStreamPayloads {
     ) {
     }
 
+    public record Heartbeat() {
+    }
+
     public record Status(
             String code,
             String text
