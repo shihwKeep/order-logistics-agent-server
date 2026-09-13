@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 通用语义记忆契约的离线验收集，避免实现退化为整句关键词模板。 */
 class GeneralSemanticMemoryAcceptanceTest {
@@ -55,12 +56,33 @@ class GeneralSemanticMemoryAcceptanceTest {
                 fact("我长期负责跨境电商供应链平台建设",
                         MemoryType.WORK_CONTEXT, "occupation",
                         "跨境电商供应链平台建设", "跨境电商供应链平台建设",
-                        "用户的职业是跨境电商供应链平台建设", "SEMANTIC_REQUIRED"),
+                        "用户当前的职业是跨境电商供应链平台建设", "SEMANTIC_REQUIRED"),
+                fact("我今年32岁",
+                        MemoryType.PROFILE, "age",
+                        "32", "32岁", "用户曾表示年龄为32岁", "SEMANTIC_REQUIRED"),
+                fact("我最喜欢的城市是杭州",
+                        MemoryType.PROFILE, "favorite_city",
+                        "杭州", "杭州", "用户提供的个人画像事实（favorite_city）是杭州",
+                        "SEMANTIC_REQUIRED"),
                 fact("我一直喜欢先看例子再看原理",
                         MemoryType.STABLE_PREFERENCE, "learning_order",
                         "先看例子再看原理", "先看例子再看原理",
                         "用户的稳定偏好是先看例子再看原理", "SEMANTIC_REQUIRED")
         );
+    }
+
+    @org.junit.jupiter.api.Test
+    void rejectsSensitiveOpenProfileFactsThroughTheFullValidator() {
+        String source = "我的手机号是13800138000";
+        MemoryFactCandidate candidate = new MemoryFactCandidate(
+                MemoryType.PROFILE, "phone_number", "13800138000", "13800138000",
+                source, MemoryStability.STABLE, 0.99);
+
+        assertThatThrownBy(() -> validator.validate(candidate, source))
+                .isInstanceOfSatisfying(
+                        MemoryCandidateValidationException.class,
+                        error -> assertThat(error.reason())
+                                .isEqualTo(MemoryCandidateValidationException.Reason.SENSITIVE));
     }
 
     private static Arguments fact(

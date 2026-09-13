@@ -10,12 +10,15 @@ class UserMemoryDomainTest {
     void exposesOnlyApprovedInitialCategories() {
         assertThat(MemoryCategory.values()).containsExactly(
                 MemoryCategory.PROFILE_PREFERRED_NAME,
+                MemoryCategory.PROFILE_PERSONAL_FACT,
                 MemoryCategory.PREFERENCE_LANGUAGE,
                 MemoryCategory.PREFERENCE_ANSWER_STYLE,
                 MemoryCategory.WORK_COMMON_SCOPE
         );
         assertThat(MemoryCategory.PROFILE_PREFERRED_NAME.keyPrefix())
                 .isEqualTo("profile.preferred_name");
+        assertThat(MemoryCategory.PROFILE_PERSONAL_FACT.keyPrefix())
+                .isEqualTo("profile.personal");
     }
 
     @Test

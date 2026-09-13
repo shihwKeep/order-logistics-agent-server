@@ -88,6 +88,7 @@ public class MemoryCategoryContentPolicy {
         Objects.requireNonNull(category, "category");
         return switch (category) {
             case PROFILE_PREFERRED_NAME -> supportsPreferredName(evidence, canonicalContent);
+            case PROFILE_PERSONAL_FACT -> false;
             case PREFERENCE_LANGUAGE -> supportsKnownCanonicalGroup(
                     evidence, canonicalContent, LANGUAGES, "用户偏好使用", "交流");
             case PREFERENCE_ANSWER_STYLE -> supportsKnownCanonicalGroup(
@@ -104,6 +105,7 @@ public class MemoryCategoryContentPolicy {
         }
         return switch (category) {
             case PROFILE_PREFERRED_NAME -> preferredName(normalized);
+            case PROFILE_PERSONAL_FACT -> Optional.empty();
             case PREFERENCE_LANGUAGE -> singleGroup(
                     normalized, LANGUAGES, LANGUAGE_FILLERS, "用户偏好使用", "交流");
             case PREFERENCE_ANSWER_STYLE -> singleGroup(
