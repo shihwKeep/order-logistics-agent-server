@@ -81,6 +81,38 @@ class UserMemoryMigrationContractTest {
                 .doesNotContain("source_message", "model_output", "candidate_content");
     }
 
+    @Test
+    void upgradesStructuredFactsToTemporalSchemaVersionThree() throws IOException {
+        String sql = readMigration(
+                "/db/migration/V15__add_temporal_user_profile_memory.sql");
+
+        assertThat(sql)
+                .contains("ADD COLUMN observed_at DATETIME(3)")
+                .contains("ADD COLUMN valid_from DATETIME(3)")
+                .contains("ADD COLUMN valid_to DATETIME(3)")
+                .contains("ADD COLUMN temporal_scope VARCHAR(16)")
+                .contains("DROP CHECK chk_user_memory_structured_fact")
+                .contains("UPDATE agent_user_memory")
+                .contains("observed_at = created_at")
+                .contains("valid_from = created_at")
+                .contains("temporal_scope = 'CURRENT'")
+                .contains("schema_version = 3")
+                .contains("stability IN ('STABLE', 'TIME_BOUND')")
+                .contains("temporal_scope IN ('CURRENT', 'HISTORICAL')")
+                .contains("observed_at IS NOT NULL")
+                .contains("valid_from IS NOT NULL")
+                .contains("KEY idx_memory_owner_predicate_temporal_scope")
+                .contains("tenant_id, user_id, memory_generation, predicate_name,")
+                .contains("temporal_scope, status");
+
+        int constraintDropped = sql.indexOf("DROP CHECK chk_user_memory_structured_fact");
+        int factsBackfilled = sql.indexOf("UPDATE agent_user_memory");
+        int constraintRecreated = sql.indexOf(
+                "ADD CONSTRAINT chk_user_memory_structured_fact");
+        assertThat(constraintDropped).isLessThan(factsBackfilled);
+        assertThat(factsBackfilled).isLessThan(constraintRecreated);
+    }
+
     private String readMigration(String path) throws IOException {
         try (var input = getClass().getResourceAsStream(path)) {
             assertThat(input).isNotNull();

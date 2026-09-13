@@ -51,6 +51,54 @@ class MemorySemanticDomainTest {
     }
 
     @Test
+    void supportsTimeBoundFactsWithCurrentScopeByDefault() {
+        MemoryFactCandidate candidate = candidate(MemoryStability.TIME_BOUND, 0.96);
+
+        assertThat(MemoryTemporalScope.values())
+                .containsExactly(MemoryTemporalScope.CURRENT, MemoryTemporalScope.HISTORICAL);
+        assertThat(candidate.stability()).isEqualTo(MemoryStability.TIME_BOUND);
+        assertThat(candidate.temporalScope()).isEqualTo(MemoryTemporalScope.CURRENT);
+    }
+
+    @Test
+    void carriesExplicitHistoricalScopeThroughCandidateAndValidatedFact() {
+        MemoryFactCandidate candidate = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT,
+                "primary_programming_language",
+                "Java",
+                "Java",
+                "我以前用 Java 语言进行开发",
+                MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.HISTORICAL,
+                0.96);
+        ValidatedMemoryFact fact = new ValidatedMemoryFact(
+                candidate,
+                "work.primary_programming_language",
+                "用户以前主要使用 Java 进行开发",
+                "\"Java\"",
+                "WORK_COMMON_SCOPE",
+                "DETERMINISTIC",
+                MemoryTemporalScope.HISTORICAL);
+
+        assertThat(candidate.temporalScope()).isEqualTo(MemoryTemporalScope.HISTORICAL);
+        assertThat(fact.temporalScope()).isEqualTo(MemoryTemporalScope.HISTORICAL);
+    }
+
+    @Test
+    void rejectsNullTemporalScope() {
+        assertThatThrownBy(() -> new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT,
+                "primary_programming_language",
+                "Java",
+                "Java",
+                "我平时用 Java 语言进行开发",
+                MemoryStability.STABLE,
+                null,
+                0.96))
+                .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
     void validatedFactCarriesOnlyServerResolvedPersistenceFields() {
         MemoryFactCandidate candidate = candidate(MemoryStability.STABLE, 0.96);
         ValidatedMemoryFact fact = new ValidatedMemoryFact(
@@ -64,6 +112,7 @@ class MemorySemanticDomainTest {
         assertThat(fact.canonicalKey()).isEqualTo("work.primary_programming_language");
         assertThat(fact.canonicalContent()).isEqualTo("用户主要使用 Java 进行开发");
         assertThat(fact.confidence()).isEqualTo(0.96);
+        assertThat(fact.temporalScope()).isEqualTo(MemoryTemporalScope.CURRENT);
     }
 
     private static MemoryFactCandidate candidate(
