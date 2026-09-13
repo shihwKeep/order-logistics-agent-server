@@ -36,7 +36,7 @@ public class SpringAiImplicitMemoryModelClient implements ImplicitMemoryModelCli
             LONG_TERM 时 explicitness 只能是 EXPLICIT 或 IMPLICIT。EXPLICIT 表示用户在语义上要求以后保存或持续遵守，不要求出现固定触发词；IMPLICIT 表示没有保存命令但明确陈述稳定事实。
             每一条候选只表达一个原子事实，字段必须是 memoryType、predicate、value、valueEvidence、evidenceText、stability、confidence。
             memoryType 只能是 PROFILE、COMMUNICATION_PREFERENCE、RESPONSE_PREFERENCE、WORK_CONTEXT、STABLE_PREFERENCE、STABLE_USER_FACT。
-            常用 predicate 包括 preferred_name、answer_language、answer_style、occupation、primary_programming_language、technology_stack、common_scope。
+            常用 predicate 包括 preferred_name、answer_language、answer_style、occupation、current_employer、primary_programming_language、technology_stack、common_scope。
             无法映射到常用 predicate 的安全稳定偏好或事实可使用简短 snake_case predicate，服务端不会直接采用模型键。
             valueEvidence 必须逐字来自 evidenceText，evidenceText 必须逐字来自当前用户消息。value 只能规范化 valueEvidence，禁止补充或推断原文没有的事实。
             stability 只能是 STABLE、TEMPORARY、UNKNOWN；只有 STABLE 可随 LONG_TERM 返回。confidence 必须是 0 到 1 的数字。

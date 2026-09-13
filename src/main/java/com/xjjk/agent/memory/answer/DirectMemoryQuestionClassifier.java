@@ -16,7 +16,8 @@ public class DirectMemoryQuestionClassifier {
     private static final List<String> MULTI_INTENT = List.of(
             "并且", "同时", "另外", "以及", "；", ";");
     private static final List<String> QUESTION = List.of(
-            "什么", "怎么", "哪种", "是否", "吗", "？", "?");
+            "什么", "怎么", "哪种", "哪里", "哪儿", "在哪",
+            "是否", "吗", "？", "?");
 
     public Optional<DirectMemoryQuestionType> classify(String rawQuery) {
         if (rawQuery == null || rawQuery.isBlank()
@@ -43,6 +44,10 @@ public class DirectMemoryQuestionClassifier {
                 || (query.contains("语言") && containsAny(
                 query, List.of("编程", "开发", "代码", "程序")))) {
             matches.add(DirectMemoryQuestionType.PROGRAMMING_LANGUAGE);
+        }
+        if (containsAny(query, List.of(
+                "在哪里工作", "在哪工作", "工作单位", "哪家公司工作", "任职公司"))) {
+            matches.add(DirectMemoryQuestionType.CURRENT_EMPLOYER);
         }
         if (containsAny(query, List.of("回答风格", "回复风格"))
                 || (containsAny(query, List.of("回答", "回复"))

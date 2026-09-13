@@ -60,6 +60,25 @@ class ImplicitMemoryCandidateValidatorTest {
     }
 
     @Test
+    void acceptsSemanticallyExtractedCurrentEmployerForIndependentVerification() {
+        String source = "我在享佳工作";
+        MemoryFactCandidate candidate = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT,
+                "current_employer",
+                "享佳",
+                "享佳",
+                source,
+                MemoryStability.STABLE,
+                0.96);
+
+        var result = semanticValidator.validate(candidate, source);
+
+        assertThat(result.canonicalKey()).isEqualTo("work.current_employer");
+        assertThat(result.canonicalContent()).isEqualTo("用户当前工作单位是享佳");
+        assertThat(result.verificationMethod()).isEqualTo("SEMANTIC_REQUIRED");
+    }
+
+    @Test
     void rejectsUngroundedFactsWithSpecificSafeReasons() {
         assertSemanticRejected(programmingLanguage(
                         "Python", "Java", "我平时用 Java 开发", 0.96),

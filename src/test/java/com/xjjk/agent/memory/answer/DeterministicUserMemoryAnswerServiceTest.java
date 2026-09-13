@@ -73,6 +73,39 @@ class DeterministicUserMemoryAnswerServiceTest {
     }
 
     @Test
+    void answersCurrentEmployerUsingOnlyTheEmployerPredicate() {
+        String query = "我在哪里工作？";
+        RecalledMemory employer = new RecalledMemory(
+                "memory-employer", 1L, "USER_EXPLICIT", "WORK_COMMON_SCOPE",
+                "work.current_employer", "用户当前工作单位是享佳",
+                new BigDecimal("0.98"), LocalDateTime.parse("2026-09-13T08:00:00"),
+                2, "WORK_CONTEXT", "current_employer", "\"享佳\"",
+                "STABLE", "EXPLICIT_SEMANTIC");
+        when(classifier.classify(query))
+                .thenReturn(Optional.of(DirectMemoryQuestionType.CURRENT_EMPLOYER));
+        when(recallService.recallByPredicates(
+                IDENTITY, List.of("current_employer"),
+                MemoryCategory.WORK_COMMON_SCOPE))
+                .thenReturn(new UserMemoryRecallResult(
+                        List.of(employer), false, "MYSQL_CATEGORY",
+                        UserMemoryRecallStatus.AVAILABLE));
+        when(renderer.render(DirectMemoryQuestionType.CURRENT_EMPLOYER, employer))
+                .thenReturn(Optional.of(
+                        "根据您之前提供的信息，您当前工作单位是享佳。"));
+
+        DeterministicUserMemoryAnswerResult result = service.answer(
+                IDENTITY, query, "request-employer");
+
+        assertThat(result.outcome())
+                .isEqualTo(DeterministicUserMemoryAnswerResult.Outcome.ANSWERED);
+        assertThat(result.assistantText()).contains("享佳");
+        verify(metrics).directAnswer("CURRENT_EMPLOYER", "ANSWERED");
+        verify(recallService).recallByPredicates(
+                IDENTITY, List.of("current_employer"),
+                MemoryCategory.WORK_COMMON_SCOPE);
+    }
+
+    @Test
     void bypassesRecallWhenClassifierDoesNotMatch() {
         when(classifier.classify("你好")).thenReturn(Optional.empty());
 

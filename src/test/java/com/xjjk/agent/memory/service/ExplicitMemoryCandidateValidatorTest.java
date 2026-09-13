@@ -63,6 +63,30 @@ class ExplicitMemoryCandidateValidatorTest {
     }
 
     @Test
+    void acceptsSemanticCurrentEmployerFromAnExplicitMemoryRequest() {
+        String source = "你记住我在享佳工作";
+        MemoryFactCandidate modelFact = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT,
+                "current_employer",
+                "享佳",
+                "享佳",
+                source,
+                MemoryStability.STABLE,
+                0.98);
+
+        ExplicitMemoryCandidate result = validator.validate(
+                ExplicitMemoryCandidate.semantic(modelFact, MemoryRetentionType.NORMAL),
+                source,
+                false);
+
+        assertThat(result.category()).isEqualTo(MemoryCategory.WORK_COMMON_SCOPE);
+        assertThat(result.canonicalKey()).isEqualTo("work.current_employer");
+        assertThat(result.content()).isEqualTo("用户当前工作单位是享佳");
+        assertThat(result.semanticFact().memoryType()).isEqualTo(MemoryType.WORK_CONTEXT);
+        assertThat(result.semanticFact().predicate()).isEqualTo("current_employer");
+    }
+
+    @Test
     void normalizesAndAcceptsMatchingCandidate() {
         ExplicitMemoryCandidate candidate = new ExplicitMemoryCandidate(
                 MemoryCategory.PREFERENCE_ANSWER_STYLE,

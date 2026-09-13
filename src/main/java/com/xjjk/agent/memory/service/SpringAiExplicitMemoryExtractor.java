@@ -31,7 +31,7 @@ public class SpringAiExplicitMemoryExtractor implements ExplicitMemoryExtractor 
             意图像记忆但关键信息不完整时用 CLARIFY；普通问答、业务查询或并未要求长期保存时用 NONE。
             SAVE 时必须输出 memoryType、predicate、value、valueEvidence、evidenceText、stability、retention、confidence；其他动作只需 action 和 confidence。
             memoryType 只能是 PROFILE、COMMUNICATION_PREFERENCE、RESPONSE_PREFERENCE、WORK_CONTEXT、STABLE_PREFERENCE、STABLE_USER_FACT。
-            常用 predicate 包括 preferred_name、answer_language、answer_style、occupation、primary_programming_language、technology_stack、common_scope；其他安全稳定事实可给简短 snake_case predicate。
+            常用 predicate 包括 preferred_name、answer_language、answer_style、occupation、current_employer、primary_programming_language、technology_stack、common_scope；其他安全稳定事实可给简短 snake_case predicate。
             retention 只能是 NORMAL 或 PERMANENT；只有用户明确要求永久保存时才用 PERMANENT。stability 必须是 STABLE。
             valueEvidence 必须逐字来自 evidenceText，evidenceText 必须逐字取自用户原文，value 只能规范化 valueEvidence。
             canonicalKey、category 和最终 content 均由服务端生成，模型不得输出或决定。

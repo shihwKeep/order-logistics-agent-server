@@ -91,6 +91,7 @@ public class DeterministicMemoryAnswerRenderer {
         String fact = switch (type) {
             case PREFERRED_NAME -> "您希望被称为" + value;
             case PROGRAMMING_LANGUAGE -> "您平时主要使用 " + value;
+            case CURRENT_EMPLOYER -> "您当前工作单位是" + value;
             case ANSWER_LANGUAGE -> "您偏好使用" + value + "交流";
             case ANSWER_STYLE -> "您偏好" + value + "回答";
             case WORK_SCOPE -> switch (memory.predicateName()) {
@@ -108,6 +109,7 @@ public class DeterministicMemoryAnswerRenderer {
         return switch (Objects.requireNonNull(type, "问题类型不能为空")) {
             case PREFERRED_NAME -> "我还没有记住您偏好的称呼。";
             case PROGRAMMING_LANGUAGE -> "我还没有记住您常用的编程语言。";
+            case CURRENT_EMPLOYER -> "我还没有记住您的工作单位。";
             case WORK_SCOPE -> "我还没有记住您的工作范围。";
             case ANSWER_LANGUAGE -> "我还没有记住您的回答语言偏好。";
             case ANSWER_STYLE -> "我还没有记住您的回答风格偏好。";

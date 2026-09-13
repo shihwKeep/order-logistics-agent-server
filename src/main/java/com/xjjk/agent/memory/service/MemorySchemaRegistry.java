@@ -33,6 +33,8 @@ public class MemorySchemaRegistry {
     private static final Pattern SAFE_OPEN_VALUE = Pattern.compile(
             "[\\p{L}\\p{N}+#._ /，,、：:；;（）()\\-]{1,128}",
             Pattern.UNICODE_CASE);
+    private static final Pattern SAFE_OPEN_PREDICATE = Pattern.compile(
+            "[a-z][a-z0-9_]{0,63}");
 
     private static final Map<String, String> ANSWER_LANGUAGES = Map.ofEntries(
             Map.entry("中文", "中文"), Map.entry("汉语", "中文"),
@@ -76,6 +78,7 @@ public class MemorySchemaRegistry {
                     Map.entry("answer_language", MemoryType.COMMUNICATION_PREFERENCE),
                     Map.entry("answer_style", MemoryType.RESPONSE_PREFERENCE),
                     Map.entry("occupation", MemoryType.WORK_CONTEXT),
+                    Map.entry("current_employer", MemoryType.WORK_CONTEXT),
                     Map.entry("primary_programming_language", MemoryType.WORK_CONTEXT),
                     Map.entry("technology_stack", MemoryType.WORK_CONTEXT),
                     Map.entry("common_scope", MemoryType.WORK_CONTEXT));
@@ -136,6 +139,10 @@ public class MemorySchemaRegistry {
             case "occupation" -> stable(
                     candidate, "occupation", "work.occupation", "WORK_COMMON_SCOPE",
                     this::safeOpenValue, value -> "用户的职业是" + value, true);
+            case "current_employer" -> stable(
+                    candidate, "current_employer", "work.current_employer",
+                    "WORK_COMMON_SCOPE", this::safeOpenValue,
+                    value -> "用户当前工作单位是" + value, true);
             case "primary_programming_language" -> {
                 String canonical = programmingLanguage(candidate.valueEvidence());
                 requireEquivalent(candidate.value(), canonical, this::programmingLanguage);
@@ -153,8 +160,23 @@ public class MemorySchemaRegistry {
             case "common_scope" -> stable(
                     candidate, "common_scope", "work.common_scope", "WORK_COMMON_SCOPE",
                     this::safeOpenValue, value -> "用户常用工作范围是" + value, true);
-            default -> throw rejected(SCHEMA);
+            default -> openWork(candidate);
         };
+    }
+
+    /**
+     * 未预注册的稳定工作事实使用受控开放模式：predicate 必须是短 snake_case，
+     * canonical key 由服务端哈希生成，事实值仍需证据一致并经过语义复核。
+     */
+    private SchemaResolution openWork(MemoryFactCandidate candidate) {
+        if (!SAFE_OPEN_PREDICATE.matcher(candidate.predicate()).matches()) {
+            throw rejected(SCHEMA);
+        }
+        String canonical = safeOpenValue(candidate.valueEvidence());
+        requireEquivalent(candidate.value(), canonical, this::safeOpenValue);
+        String key = "work.open." + MemoryHashing.sha256(candidate.predicate());
+        return resolved(key, "用户的稳定工作背景是" + canonical, canonical,
+                "WORK_COMMON_SCOPE", true);
     }
 
     private SchemaResolution stable(

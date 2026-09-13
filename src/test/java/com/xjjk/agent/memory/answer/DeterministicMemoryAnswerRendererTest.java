@@ -54,6 +54,19 @@ class DeterministicMemoryAnswerRendererTest {
     }
 
     @Test
+    void rendersStructuredCurrentEmployer() {
+        RecalledMemory memory = new RecalledMemory(
+                "memory-employer", 1L, "USER_EXPLICIT", "WORK_COMMON_SCOPE",
+                "work.current_employer", "用户当前工作单位是享佳",
+                new BigDecimal("0.98"), LocalDateTime.parse("2026-09-13T08:00:00"),
+                2, "WORK_CONTEXT", "current_employer", "\"享佳\"",
+                "STABLE", "EXPLICIT_SEMANTIC");
+
+        assertThat(renderer.render(DirectMemoryQuestionType.CURRENT_EMPLOYER, memory))
+                .contains("根据您之前提供的信息，您当前工作单位是享佳。");
+    }
+
+    @Test
     void rejectsWrongCategoryBroadScopeInstructionalAndMalformedContent() {
         assertThat(renderer.render(DirectMemoryQuestionType.PROGRAMMING_LANGUAGE,
                 memory("PREFERENCE_LANGUAGE", "用户偏好使用中文交流"))).isEmpty();
@@ -77,6 +90,8 @@ class DeterministicMemoryAnswerRendererTest {
                 .isEqualTo("我还没有记住您常用的编程语言。");
         assertThat(renderer.notRemembered(DirectMemoryQuestionType.WORK_SCOPE))
                 .isEqualTo("我还没有记住您的工作范围。");
+        assertThat(renderer.notRemembered(DirectMemoryQuestionType.CURRENT_EMPLOYER))
+                .isEqualTo("我还没有记住您的工作单位。");
         assertThat(renderer.notRemembered(DirectMemoryQuestionType.ANSWER_LANGUAGE))
                 .isEqualTo("我还没有记住您的回答语言偏好。");
         assertThat(renderer.notRemembered(DirectMemoryQuestionType.ANSWER_STYLE))

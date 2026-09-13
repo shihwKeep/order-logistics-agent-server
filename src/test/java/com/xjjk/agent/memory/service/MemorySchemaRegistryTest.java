@@ -79,6 +79,38 @@ class MemorySchemaRegistryTest {
     }
 
     @Test
+    void resolvesCurrentEmployerAsACanonicalWorkContextSlot() {
+        var result = registry.resolve(candidate(
+                MemoryType.WORK_CONTEXT, "current_employer", "享佳", "享佳"));
+
+        assertThat(result.canonicalKey()).isEqualTo("work.current_employer");
+        assertThat(result.canonicalContent()).isEqualTo("用户当前工作单位是享佳");
+        assertThat(result.valueJson()).isEqualTo("\"享佳\"");
+        assertThat(result.legacyCategory()).isEqualTo("WORK_COMMON_SCOPE");
+        assertThat(result.requiresSemanticVerification()).isTrue();
+    }
+
+    @Test
+    void acceptsBoundedOpenWorkFactsWithoutTrustingTheModelPredicateAsAKey() {
+        var result = registry.resolve(candidate(
+                MemoryType.WORK_CONTEXT, "preferred_framework", "Phoenix", "Phoenix"));
+
+        assertThat(result.canonicalKey()).matches("work\\.open\\.[0-9a-f]{64}");
+        assertThat(result.canonicalKey()).doesNotContain("preferred_framework");
+        assertThat(result.canonicalContent()).isEqualTo("用户的稳定工作背景是Phoenix");
+        assertThat(result.requiresSemanticVerification()).isTrue();
+    }
+
+    @Test
+    void rejectsUnsafeOpenWorkPredicateNames() {
+        assertThatThrownBy(() -> registry.resolve(candidate(
+                MemoryType.WORK_CONTEXT, "Bad-Predicate", "Phoenix", "Phoenix")))
+                .isInstanceOf(MemoryCandidateValidationException.class)
+                .extracting(error -> ((MemoryCandidateValidationException) error).reason())
+                .isEqualTo(MemoryCandidateValidationException.Reason.SCHEMA);
+    }
+
+    @Test
     void rejectsUnknownPredicatesAndUnsupportedValueRewrites() {
         assertThatThrownBy(() -> registry.resolve(candidate(
                 MemoryType.PROFILE, "unknown_profile_field", "简洁", "简洁")))

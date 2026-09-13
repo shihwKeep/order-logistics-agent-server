@@ -29,7 +29,7 @@ public class UserMemoryMetrics {
     private static final Set<String> REJECTION_REASONS = Set.of(
             "OWNER_OR_STATE", "VERSION_MISMATCH", "SUPPRESSED");
     private static final Set<String> DIRECT_QUESTIONS = Set.of(
-            "PREFERRED_NAME", "PROGRAMMING_LANGUAGE", "WORK_SCOPE",
+            "PREFERRED_NAME", "PROGRAMMING_LANGUAGE", "CURRENT_EMPLOYER", "WORK_SCOPE",
             "ANSWER_LANGUAGE", "ANSWER_STYLE");
     private static final Set<String> DIRECT_OUTCOMES = Set.of(
             "ANSWERED", "FALLTHROUGH", "UNAVAILABLE");

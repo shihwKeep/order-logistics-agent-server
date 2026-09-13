@@ -9,6 +9,7 @@ public enum DirectMemoryQuestionType {
     PREFERRED_NAME(MemoryCategory.PROFILE_PREFERRED_NAME, "preferred_name"),
     PROGRAMMING_LANGUAGE(MemoryCategory.WORK_COMMON_SCOPE,
             "primary_programming_language"),
+    CURRENT_EMPLOYER(MemoryCategory.WORK_COMMON_SCOPE, "current_employer"),
     WORK_SCOPE(MemoryCategory.WORK_COMMON_SCOPE,
             "occupation", "common_scope", "technology_stack"),
     ANSWER_LANGUAGE(MemoryCategory.PREFERENCE_LANGUAGE, "answer_language"),
