@@ -20,6 +20,7 @@ class UserMemoryMapperContractTest {
             "selectActiveByKeyForUpdate",
             "selectGlobalExplicit",
             "selectActiveCandidates",
+            "selectActiveByPredicates",
             "selectVisiblePage",
             "closeOwnedCurrentFact",
             "supersedeOwnedActive",
@@ -108,6 +109,25 @@ class UserMemoryMapperContractTest {
         String candidates = String.join("\n",
                 findMethod("selectActiveCandidates").getAnnotation(Select.class).value());
         assertThat(candidates).contains("collection=\"memoryIds\"");
+    }
+
+    @Test
+    void predicateRecallEnforcesRequestedTemporalScope() {
+        Method method = findMethod("selectActiveByPredicates");
+        String sql = String.join("\n", method.getAnnotation(Select.class).value());
+        Set<String> parameterNames = Arrays.stream(method.getParameters())
+                .map(parameter -> parameter.getAnnotation(Param.class))
+                .filter(annotation -> annotation != null)
+                .map(Param::value)
+                .collect(Collectors.toSet());
+
+        assertThat(parameterNames).contains("temporalScope");
+        assertThat(sql)
+                .contains("#{temporalScope}")
+                .contains("temporal_scope = 'CURRENT'")
+                .contains("temporal_scope = 'HISTORICAL'")
+                .contains("valid_from")
+                .contains("valid_to");
     }
 
     private Method findMethod(String name) {

@@ -401,6 +401,43 @@ class UserMemorySpringTransactionIntegrationTest {
     }
 
     @Test
+    void predicateRecallExecutesTemporalIsolationOnRealMySql() {
+        LocalDateTime now = LocalDateTime.now();
+        jdbc.update("""
+                INSERT INTO agent_user_memory (
+                    memory_id, tenant_id, user_id, memory_generation, source_type, category,
+                    schema_version, memory_type, predicate_name, value_json, stability,
+                    verification_method, canonical_key, content, content_hash, confidence,
+                    visibility, retention_type, status, evidence_text, version, expires_at,
+                    observed_at, valid_from, valid_to, temporal_scope, created_at, updated_at
+                ) VALUES
+                ('00000000-0000-0000-0000-000000000041', 1, 2, 7, 'AUTO_EXTRACT',
+                 'WORK_COMMON_SCOPE', 3, 'WORK_CONTEXT', 'occupation', '\"坐席\"',
+                 'TIME_BOUND', 'SEMANTIC_MODEL', 'work.occupation', '用户当前的职业是坐席',
+                 REPEAT('1', 64), 0.9500, 'HIDDEN', 'NORMAL', 'ACTIVE', '现在是坐席', 1,
+                 UTC_TIMESTAMP(3) + INTERVAL 365 DAY, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3),
+                 NULL, 'CURRENT', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)),
+                ('00000000-0000-0000-0000-000000000042', 1, 2, 7, 'AUTO_EXTRACT',
+                 'WORK_COMMON_SCOPE', 3, 'WORK_CONTEXT', 'occupation', '\"Java开发\"',
+                 'TIME_BOUND', 'SEMANTIC_MODEL', 'work.occupation.history.1',
+                 '用户过去的职业是Java开发', REPEAT('2', 64), 0.9500, 'HIDDEN', 'NORMAL',
+                 'ACTIVE', '以前是Java开发', 1, UTC_TIMESTAMP(3) + INTERVAL 365 DAY,
+                 UTC_TIMESTAMP(3), NULL, NULL, 'HISTORICAL', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
+                """);
+
+        assertThat(memoryMapper.selectActiveByPredicates(
+                1L, 2L, 7L, List.of("occupation"), "WORK_COMMON_SCOPE",
+                "CURRENT", now, 20))
+                .extracting(com.xjjk.agent.memory.persistence.entity.UserMemoryEntity::getMemoryId)
+                .containsExactly("00000000-0000-0000-0000-000000000041");
+        assertThat(memoryMapper.selectActiveByPredicates(
+                1L, 2L, 7L, List.of("occupation"), "WORK_COMMON_SCOPE",
+                "HISTORICAL", now, 20))
+                .extracting(com.xjjk.agent.memory.persistence.entity.UserMemoryEntity::getMemoryId)
+                .containsExactly("00000000-0000-0000-0000-000000000042");
+    }
+
+    @Test
     void outerRollbackDoesNotRecordSuccessAndUsesClearFailureCode() {
         double successBefore = operationCount("clear_explicit", "success", "NONE");
         double failureBefore = operationCount("clear_explicit", "failure", "MEMORY_CLEAR_FAILED");

@@ -34,7 +34,8 @@ public class DeterministicUserMemoryAnswerService {
         }
         DirectMemoryQuestionType type = classified.get();
         UserMemoryRecallResult recalled = recallService.recallByPredicates(
-                identity, type.predicateNames(), type.memoryCategory());
+                identity, type.predicateNames(), type.memoryCategory(),
+                type.temporalScope());
         if (recalled.status() == UserMemoryRecallStatus.NOT_INITIALIZED) {
             return fallThrough(requestId, type);
         }

@@ -18,7 +18,31 @@ public record RecalledMemory(
         String predicateName,
         String valueJson,
         String stability,
-        String verificationMethod) {
+        String verificationMethod,
+        LocalDateTime observedAt,
+        LocalDateTime validFrom,
+        LocalDateTime validTo,
+        String temporalScope) {
+
+    public RecalledMemory(
+            String memoryId,
+            long memoryVersion,
+            String sourceType,
+            String category,
+            String canonicalKey,
+            String content,
+            BigDecimal confidence,
+            LocalDateTime updatedAt,
+            Integer schemaVersion,
+            String memoryType,
+            String predicateName,
+            String valueJson,
+            String stability,
+            String verificationMethod) {
+        this(memoryId, memoryVersion, sourceType, category, canonicalKey, content,
+                confidence, updatedAt, schemaVersion, memoryType, predicateName,
+                valueJson, stability, verificationMethod, null, null, null, null);
+    }
 
     public RecalledMemory(
             String memoryId,
@@ -30,6 +54,7 @@ public record RecalledMemory(
             BigDecimal confidence,
             LocalDateTime updatedAt) {
         this(memoryId, memoryVersion, sourceType, category, canonicalKey, content,
-                confidence, updatedAt, null, null, null, null, null, null);
+                confidence, updatedAt, null, null, null, null, null, null,
+                null, null, null, null);
     }
 }

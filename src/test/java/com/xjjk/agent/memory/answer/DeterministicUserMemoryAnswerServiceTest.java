@@ -2,6 +2,7 @@ package com.xjjk.agent.memory.answer;
 
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.memory.domain.MemoryCategory;
+import com.xjjk.agent.memory.domain.MemoryTemporalScope;
 import com.xjjk.agent.memory.observation.UserMemoryMetrics;
 import com.xjjk.agent.memory.recall.RecalledMemory;
 import com.xjjk.agent.memory.recall.UserMemoryRecallResult;
@@ -51,7 +52,7 @@ class DeterministicUserMemoryAnswerServiceTest {
                 .thenReturn(Optional.of(DirectMemoryQuestionType.PROGRAMMING_LANGUAGE));
         when(recallService.recallByPredicates(
                 IDENTITY, List.of("primary_programming_language"),
-                MemoryCategory.WORK_COMMON_SCOPE))
+                MemoryCategory.WORK_COMMON_SCOPE, MemoryTemporalScope.CURRENT))
                 .thenReturn(new UserMemoryRecallResult(
                         List.of(javaMemory), false, "MYSQL_CATEGORY",
                         UserMemoryRecallStatus.AVAILABLE));
@@ -68,7 +69,7 @@ class DeterministicUserMemoryAnswerServiceTest {
         verify(metrics).directAnswer("PROGRAMMING_LANGUAGE", "ANSWERED");
         verify(recallService).recallByPredicates(
                 IDENTITY, List.of("primary_programming_language"),
-                MemoryCategory.WORK_COMMON_SCOPE);
+                MemoryCategory.WORK_COMMON_SCOPE, MemoryTemporalScope.CURRENT);
         verify(recallService, never()).recall(any(), anyString());
     }
 
@@ -85,7 +86,7 @@ class DeterministicUserMemoryAnswerServiceTest {
                 .thenReturn(Optional.of(DirectMemoryQuestionType.CURRENT_EMPLOYER));
         when(recallService.recallByPredicates(
                 IDENTITY, List.of("current_employer"),
-                MemoryCategory.WORK_COMMON_SCOPE))
+                MemoryCategory.WORK_COMMON_SCOPE, MemoryTemporalScope.CURRENT))
                 .thenReturn(new UserMemoryRecallResult(
                         List.of(employer), false, "MYSQL_CATEGORY",
                         UserMemoryRecallStatus.AVAILABLE));
@@ -102,7 +103,34 @@ class DeterministicUserMemoryAnswerServiceTest {
         verify(metrics).directAnswer("CURRENT_EMPLOYER", "ANSWERED");
         verify(recallService).recallByPredicates(
                 IDENTITY, List.of("current_employer"),
-                MemoryCategory.WORK_COMMON_SCOPE);
+                MemoryCategory.WORK_COMMON_SCOPE, MemoryTemporalScope.CURRENT);
+    }
+
+    @Test
+    void requestsCurrentAgeUsingTemporalScope() {
+        String query = "我多大年纪了？";
+        RecalledMemory age = new RecalledMemory(
+                "memory-age", 1L, "AUTO_EXTRACT", "PROFILE_PERSONAL_FACT",
+                "profile.age", "用户曾表示年龄为32岁", new BigDecimal("0.98"),
+                LocalDateTime.parse("2026-09-13T08:00:00"), 3, "PROFILE", "age",
+                "\"32\"", "TIME_BOUND", "SEMANTIC_MODEL",
+                LocalDateTime.parse("2026-09-13T08:00:00"),
+                LocalDateTime.parse("2026-09-13T08:00:00"), null, "CURRENT");
+        when(classifier.classify(query)).thenReturn(Optional.of(DirectMemoryQuestionType.AGE));
+        when(recallService.recallByPredicates(
+                IDENTITY, List.of("age"), MemoryCategory.PROFILE_PERSONAL_FACT,
+                MemoryTemporalScope.CURRENT))
+                .thenReturn(new UserMemoryRecallResult(
+                        List.of(age), false, "MYSQL_PREDICATE",
+                        UserMemoryRecallStatus.AVAILABLE));
+        when(renderer.render(DirectMemoryQuestionType.AGE, age))
+                .thenReturn(Optional.of("根据您之前提供的信息，您当时32岁。"));
+
+        assertThat(service.answer(IDENTITY, query, "request-age").assistantText())
+                .isEqualTo("根据您之前提供的信息，您当时32岁。");
+        verify(recallService).recallByPredicates(
+                IDENTITY, List.of("age"), MemoryCategory.PROFILE_PERSONAL_FACT,
+                MemoryTemporalScope.CURRENT);
     }
 
     @Test
@@ -122,7 +150,7 @@ class DeterministicUserMemoryAnswerServiceTest {
         classified();
         when(recallService.recallByPredicates(
                 IDENTITY, List.of("primary_programming_language"),
-                MemoryCategory.WORK_COMMON_SCOPE))
+                MemoryCategory.WORK_COMMON_SCOPE, MemoryTemporalScope.CURRENT))
                 .thenReturn(UserMemoryRecallResult.disabled());
 
         DeterministicUserMemoryAnswerResult result = service.answer(
@@ -138,7 +166,7 @@ class DeterministicUserMemoryAnswerServiceTest {
         classified();
         when(recallService.recallByPredicates(
                 IDENTITY, List.of("primary_programming_language"),
-                MemoryCategory.WORK_COMMON_SCOPE))
+                MemoryCategory.WORK_COMMON_SCOPE, MemoryTemporalScope.CURRENT))
                 .thenReturn(new UserMemoryRecallResult(
                         List.of(), false, "MYSQL_CATEGORY",
                         UserMemoryRecallStatus.AVAILABLE));
@@ -155,7 +183,7 @@ class DeterministicUserMemoryAnswerServiceTest {
         classified();
         when(recallService.recallByPredicates(
                 IDENTITY, List.of("primary_programming_language"),
-                MemoryCategory.WORK_COMMON_SCOPE))
+                MemoryCategory.WORK_COMMON_SCOPE, MemoryTemporalScope.CURRENT))
                 .thenReturn(UserMemoryRecallResult.notInitialized());
         DeterministicUserMemoryAnswerResult result = service.answer(
                 IDENTITY, QUERY, "request-new-user");
@@ -170,7 +198,7 @@ class DeterministicUserMemoryAnswerServiceTest {
         classified();
         when(recallService.recallByPredicates(
                 IDENTITY, List.of("primary_programming_language"),
-                MemoryCategory.WORK_COMMON_SCOPE))
+                MemoryCategory.WORK_COMMON_SCOPE, MemoryTemporalScope.CURRENT))
                 .thenReturn(UserMemoryRecallResult.unavailable());
 
         assertThat(service.answer(IDENTITY, QUERY, "request-mysql").assistantText())
@@ -186,7 +214,7 @@ class DeterministicUserMemoryAnswerServiceTest {
         classified();
         when(recallService.recallByPredicates(
                 IDENTITY, List.of("primary_programming_language"),
-                MemoryCategory.WORK_COMMON_SCOPE))
+                MemoryCategory.WORK_COMMON_SCOPE, MemoryTemporalScope.CURRENT))
                 .thenReturn(new UserMemoryRecallResult(
                         List.of(broadScope), false, "MYSQL_CATEGORY",
                         UserMemoryRecallStatus.AVAILABLE));

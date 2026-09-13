@@ -4,6 +4,7 @@ import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.memory.config.MemoryRetrievalProperties;
 import com.xjjk.agent.memory.config.UserMemoryProperties;
 import com.xjjk.agent.memory.domain.MemoryCategory;
+import com.xjjk.agent.memory.domain.MemoryTemporalScope;
 import com.xjjk.agent.memory.persistence.entity.UserMemoryEntity;
 import com.xjjk.agent.memory.persistence.entity.UserMemorySettingEntity;
 import com.xjjk.agent.memory.persistence.mapper.MemorySuppressionMapper;
@@ -129,9 +130,19 @@ public class UserMemoryRecallService {
             AgentIdentity identity,
             List<String> predicateNames,
             MemoryCategory legacyCategory) {
+        return recallByPredicates(
+                identity, predicateNames, legacyCategory, MemoryTemporalScope.CURRENT);
+    }
+
+    public UserMemoryRecallResult recallByPredicates(
+            AgentIdentity identity,
+            List<String> predicateNames,
+            MemoryCategory legacyCategory,
+            MemoryTemporalScope temporalScope) {
         Objects.requireNonNull(identity, "identity");
         Objects.requireNonNull(predicateNames, "predicateNames");
         Objects.requireNonNull(legacyCategory, "legacyCategory");
+        Objects.requireNonNull(temporalScope, "temporalScope");
         List<String> predicates = predicateNames.stream()
                 .filter(Objects::nonNull)
                 .map(String::strip)
@@ -147,7 +158,7 @@ public class UserMemoryRecallService {
         }
         try {
             return recallPredicatesSafely(identity.tenantId(), identity.userId(),
-                    predicates, legacyCategory);
+                    predicates, legacyCategory, temporalScope);
         } catch (RuntimeException failure) {
             log.warn("user_memory_predicate_recall result=DEGRADED "
                             + "errorCode=MYSQL_VALIDATION_FAILED exceptionType={}",
@@ -209,7 +220,9 @@ public class UserMemoryRecallService {
                 metrics.recall(recalled.degradationMode(), recalled.resultCode());
                 metrics.candidateCount("INDEX", recalled.candidates().size());
             }
-            semantic = loadSemantic(tenantId, userId, generation, now, recalled.candidates());
+            semantic = loadSemantic(
+                    tenantId, userId, generation, now, recalled.candidates(),
+                    queryTemporalScope(query));
         }
 
         LinkedHashSet<String> keys = new LinkedHashSet<>();
@@ -277,7 +290,8 @@ public class UserMemoryRecallService {
             long tenantId,
             long userId,
             List<String> predicateNames,
-            MemoryCategory legacyCategory) {
+            MemoryCategory legacyCategory,
+            MemoryTemporalScope temporalScope) {
         UserMemorySettingEntity setting = settingMapper.selectOwned(tenantId, userId);
         if (setting == null) {
             return UserMemoryRecallResult.notInitialized();
@@ -292,12 +306,14 @@ public class UserMemoryRecallService {
         long generation = setting.getMemoryGeneration();
         LocalDateTime now = now();
         List<UserMemoryEntity> raw = memoryMapper.selectActiveByPredicates(
-                tenantId, userId, generation, predicateNames, legacyCategory.name(), now,
+                tenantId, userId, generation, predicateNames, legacyCategory.name(),
+                temporalScope.name(), now,
                 retrievalProperties.maxCandidates());
         List<UserMemoryEntity> valid = raw.stream()
                 .filter(memory -> validOwned(memory, tenantId, userId, generation, now))
+                .filter(memory -> validTemporal(memory, temporalScope, now))
                 .filter(memory -> structuredPredicate(memory, predicateNames)
-                        || legacyCategory(memory, legacyCategory))
+                        || legacyCategory(memory, legacyCategory, temporalScope))
                 .toList();
         rejected("OWNER_OR_STATE", raw.size() - valid.size());
         List<String> keys = valid.stream()
@@ -321,15 +337,50 @@ public class UserMemoryRecallService {
     private static boolean structuredPredicate(
             UserMemoryEntity memory,
             List<String> predicateNames) {
-        return Integer.valueOf(2).equals(memory.getSchemaVersion())
+        return (Integer.valueOf(2).equals(memory.getSchemaVersion())
+                || Integer.valueOf(3).equals(memory.getSchemaVersion()))
                 && predicateNames.contains(memory.getPredicateName());
     }
 
     private static boolean legacyCategory(
             UserMemoryEntity memory,
-            MemoryCategory category) {
+            MemoryCategory category,
+            MemoryTemporalScope temporalScope) {
         return memory.getSchemaVersion() == null
+                && temporalScope == MemoryTemporalScope.CURRENT
                 && category.name().equals(memory.getCategory());
+    }
+
+    private static boolean validTemporal(
+            UserMemoryEntity memory,
+            MemoryTemporalScope temporalScope,
+            LocalDateTime now) {
+        if (memory.getSchemaVersion() == null
+                || Integer.valueOf(2).equals(memory.getSchemaVersion())) {
+            return temporalScope != MemoryTemporalScope.HISTORICAL;
+        }
+        if (!Integer.valueOf(3).equals(memory.getSchemaVersion())
+                || memory.getObservedAt() == null) {
+            return false;
+        }
+        final MemoryTemporalScope storedScope;
+        try {
+            storedScope = MemoryTemporalScope.valueOf(memory.getTemporalScope());
+        } catch (RuntimeException invalidScope) {
+            return false;
+        }
+        if (temporalScope != null && temporalScope != storedScope) {
+            return false;
+        }
+        if (memory.getValidFrom() != null && memory.getValidFrom().isAfter(now)) {
+            return false;
+        }
+        if (storedScope == MemoryTemporalScope.CURRENT) {
+            return memory.getValidFrom() != null
+                    && (memory.getValidTo() == null || memory.getValidTo().isAfter(now));
+        }
+        return memory.getValidTo() == null || memory.getValidFrom() == null
+                || !memory.getValidTo().isBefore(memory.getValidFrom());
     }
 
     private List<MemorySelectionCandidate> loadSemantic(
@@ -337,7 +388,8 @@ public class UserMemoryRecallService {
             long userId,
             long generation,
             LocalDateTime now,
-            List<MemoryRecallCandidateSignal> signals) {
+            List<MemoryRecallCandidateSignal> signals,
+            MemoryTemporalScope temporalScope) {
         if (signals.isEmpty()) {
             return List.of();
         }
@@ -349,7 +401,8 @@ public class UserMemoryRecallService {
                 tenantId, userId, generation, ids, now);
         Map<String, UserMemoryEntity> byId = new HashMap<>();
         for (UserMemoryEntity row : rows) {
-            if (validOwned(row, tenantId, userId, generation, now)) {
+            if (validOwned(row, tenantId, userId, generation, now)
+                    && validTemporal(row, temporalScope, now)) {
                 byId.put(row.getMemoryId(), row);
             }
         }
@@ -378,6 +431,7 @@ public class UserMemoryRecallService {
             long generation,
             LocalDateTime now) {
         return validOwned(memory, tenantId, userId, generation, now)
+                && validTemporal(memory, MemoryTemporalScope.CURRENT, now)
                 && "USER_EXPLICIT".equals(memory.getSourceType())
                 && "VISIBLE".equals(memory.getVisibility())
                 && GLOBAL_CATEGORIES.contains(memory.getCategory());
@@ -414,6 +468,27 @@ public class UserMemoryRecallService {
     private LocalDateTime now() {
         return LocalDateTime.ofInstant(
                 clock.instant().truncatedTo(ChronoUnit.MILLIS), ZoneOffset.UTC);
+    }
+
+    /** 未明确询问历史时按当前事实处理；同时询问过去和现在时允许两类候选。 */
+    private static MemoryTemporalScope queryTemporalScope(String query) {
+        boolean historical = containsAny(query,
+                "以前", "过去", "曾经", "原来", "之前", "历史");
+        boolean current = containsAny(query,
+                "现在", "目前", "当前", "如今", "现任");
+        if (historical && current) {
+            return null;
+        }
+        return historical ? MemoryTemporalScope.HISTORICAL : MemoryTemporalScope.CURRENT;
+    }
+
+    private static boolean containsAny(String value, String... needles) {
+        for (String needle : needles) {
+            if (value.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void rejected(String reason, int count) {

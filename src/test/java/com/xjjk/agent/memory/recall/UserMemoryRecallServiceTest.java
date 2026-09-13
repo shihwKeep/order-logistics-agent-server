@@ -4,6 +4,7 @@ import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.memory.config.MemoryRetrievalProperties;
 import com.xjjk.agent.memory.config.UserMemoryProperties;
 import com.xjjk.agent.memory.domain.MemoryCategory;
+import com.xjjk.agent.memory.domain.MemoryTemporalScope;
 import com.xjjk.agent.memory.persistence.entity.UserMemoryEntity;
 import com.xjjk.agent.memory.persistence.entity.UserMemorySettingEntity;
 import com.xjjk.agent.memory.persistence.mapper.MemorySuppressionMapper;
@@ -172,7 +173,7 @@ class UserMemoryRecallServiceTest {
         elixir.setVerificationMethod("EXPLICIT_SEMANTIC");
         when(memories.selectActiveByPredicates(
                 7L, 9L, 3L, List.of("primary_programming_language"),
-                "WORK_COMMON_SCOPE", NOW, 20)).thenReturn(List.of(elixir));
+                "WORK_COMMON_SCOPE", "CURRENT", NOW, 20)).thenReturn(List.of(elixir));
         when(suppressions.selectActiveKeys(
                 7L, 9L, 3L, List.of("work.primary_programming_language"), 20))
                 .thenReturn(List.of());
@@ -189,6 +190,46 @@ class UserMemoryRecallServiceTest {
         });
         assertThat(result.semanticResultCode()).isEqualTo("MYSQL_PREDICATE");
         verifyNoInteractions(gateway);
+    }
+
+    @Test
+    void isolatesCurrentAndHistoricalStructuredFactsEvenIfMapperOverReturns() {
+        UserMemorySettingMapper settings = mock(UserMemorySettingMapper.class);
+        UserMemoryMapper memories = mock(UserMemoryMapper.class);
+        MemorySuppressionMapper suppressions = mock(MemorySuppressionMapper.class);
+        MemoryRecallGateway gateway = mock(MemoryRecallGateway.class);
+        when(settings.selectOwned(7L, 9L)).thenReturn(setting(true, 3L));
+        UserMemoryEntity current = temporalMemory(
+                "current-seat", "work.occupation", "坐席", "CURRENT");
+        UserMemoryEntity historical = temporalMemory(
+                "history-java", "work.occupation.history.1", "Java开发", "HISTORICAL");
+        when(memories.selectActiveByPredicates(
+                7L, 9L, 3L, List.of("occupation"),
+                "WORK_COMMON_SCOPE", "CURRENT", NOW, 20))
+                .thenReturn(List.of(current, historical));
+        when(memories.selectActiveByPredicates(
+                7L, 9L, 3L, List.of("occupation"),
+                "WORK_COMMON_SCOPE", "HISTORICAL", NOW, 20))
+                .thenReturn(List.of(historical, current));
+        when(suppressions.selectActiveKeys(
+                7L, 9L, 3L, List.of("work.occupation"), 20)).thenReturn(List.of());
+        when(suppressions.selectActiveKeys(
+                7L, 9L, 3L, List.of("work.occupation.history.1"), 20))
+                .thenReturn(List.of());
+        UserMemoryRecallService service = service(
+                settings, memories, suppressions, gateway, true);
+
+        UserMemoryRecallResult currentResult = service.recallByPredicates(
+                IDENTITY, List.of("occupation"), MemoryCategory.WORK_COMMON_SCOPE,
+                MemoryTemporalScope.CURRENT);
+        UserMemoryRecallResult historicalResult = service.recallByPredicates(
+                IDENTITY, List.of("occupation"), MemoryCategory.WORK_COMMON_SCOPE,
+                MemoryTemporalScope.HISTORICAL);
+
+        assertThat(currentResult.memories()).extracting(RecalledMemory::memoryId)
+                .containsExactly("current-seat");
+        assertThat(historicalResult.memories()).extracting(RecalledMemory::memoryId)
+                .containsExactly("history-java");
     }
 
     @Test
@@ -209,6 +250,39 @@ class UserMemoryRecallServiceTest {
 
         assertThat(result.semanticAttempted()).isTrue();
         verify(gateway).retrieve(7L, 9L, 3L, "这个方案适合我吗");
+    }
+
+    @Test
+    void semanticRecallRejectsHistoricalFactsForCurrentQuestion() {
+        UserMemorySettingMapper settings = mock(UserMemorySettingMapper.class);
+        UserMemoryMapper memories = mock(UserMemoryMapper.class);
+        MemorySuppressionMapper suppressions = mock(MemorySuppressionMapper.class);
+        MemoryRecallGateway gateway = mock(MemoryRecallGateway.class);
+        when(settings.selectOwned(7L, 9L)).thenReturn(setting(true, 3L));
+        when(memories.selectGlobalExplicit(7L, 9L, 3L, NOW, 3)).thenReturn(List.of());
+        when(gateway.retrieve(7L, 9L, 3L, "结合我现在的职业给建议"))
+                .thenReturn(new MemoryRecallGatewayResult(true, List.of(
+                        new MemoryRecallCandidateSignal(
+                                "history-java", 1L, 0.98, 1, Set.of("VECTOR")),
+                        new MemoryRecallCandidateSignal(
+                                "current-seat", 1L, 0.90, 2, Set.of("KEYWORD"))),
+                        "v2", "NONE", "OK"));
+        UserMemoryEntity historical = temporalMemory(
+                "history-java", "work.occupation.history.1", "Java开发", "HISTORICAL");
+        UserMemoryEntity current = temporalMemory(
+                "current-seat", "work.occupation", "坐席", "CURRENT");
+        when(memories.selectActiveCandidates(7L, 9L, 3L,
+                List.of("history-java", "current-seat"), NOW))
+                .thenReturn(List.of(historical, current));
+        when(suppressions.selectActiveKeys(
+                7L, 9L, 3L, List.of("work.occupation"), 20)).thenReturn(List.of());
+
+        UserMemoryRecallResult result = service(
+                settings, memories, suppressions, gateway, true)
+                .recall(IDENTITY, "结合我现在的职业给建议");
+
+        assertThat(result.memories()).extracting(RecalledMemory::memoryId)
+                .containsExactly("current-seat");
     }
 
     @Test
@@ -307,5 +381,24 @@ class UserMemoryRecallServiceTest {
         value.setExpiresAt(LocalDateTime.parse("2027-09-12T08:00:00"));
         value.setUpdatedAt(LocalDateTime.parse("2026-09-12T07:00:00"));
         return value;
+    }
+
+    private UserMemoryEntity temporalMemory(
+            String id, String key, String value, String temporalScope) {
+        UserMemoryEntity memory = memory(
+                id, 1L, "AUTO_EXTRACT", "WORK_COMMON_SCOPE", key,
+                "HISTORICAL".equals(temporalScope)
+                        ? "用户过去的职业是" + value : "用户当前的职业是" + value);
+        memory.setSchemaVersion(3);
+        memory.setMemoryType("WORK_CONTEXT");
+        memory.setPredicateName("occupation");
+        memory.setValueJson("\"" + value + "\"");
+        memory.setStability("TIME_BOUND");
+        memory.setVerificationMethod("SEMANTIC_MODEL");
+        memory.setObservedAt(LocalDateTime.parse("2026-09-12T07:00:00"));
+        memory.setValidFrom("CURRENT".equals(temporalScope)
+                ? LocalDateTime.parse("2026-09-12T07:00:00") : null);
+        memory.setTemporalScope(temporalScope);
+        return memory;
     }
 }

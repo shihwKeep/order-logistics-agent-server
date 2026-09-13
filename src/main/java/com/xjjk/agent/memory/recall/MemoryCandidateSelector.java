@@ -142,7 +142,9 @@ public class MemoryCandidateSelector {
                 memory.getCategory(), memory.getCanonicalKey(), memory.getContent(),
                 confidence(memory), updatedAt(memory), memory.getSchemaVersion(),
                 memory.getMemoryType(), memory.getPredicateName(), memory.getValueJson(),
-                memory.getStability(), memory.getVerificationMethod());
+                memory.getStability(), memory.getVerificationMethod(),
+                memory.getObservedAt(), memory.getValidFrom(), memory.getValidTo(),
+                memory.getTemporalScope());
     }
 
     private double textSimilarity(String left, String right) {

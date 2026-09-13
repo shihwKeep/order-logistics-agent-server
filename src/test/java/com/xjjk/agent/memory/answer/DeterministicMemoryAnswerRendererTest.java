@@ -67,6 +67,39 @@ class DeterministicMemoryAnswerRendererTest {
     }
 
     @Test
+    void rendersTimeQualifiedAgeWithoutInferringBirthDate() {
+        RecalledMemory memory = temporalMemory(
+                "memory-age", "PROFILE_PERSONAL_FACT", "profile.age",
+                "用户曾表示年龄为32岁", "PROFILE", "age", "\"32\"",
+                "TIME_BOUND", "CURRENT");
+
+        assertThat(renderer.render(DirectMemoryQuestionType.AGE, memory))
+                .contains("根据您之前提供的信息，您当时32岁。");
+    }
+
+    @Test
+    void isolatesCurrentAndHistoricalOccupationAnswers() {
+        RecalledMemory current = temporalMemory(
+                "memory-seat", "WORK_COMMON_SCOPE", "work.occupation",
+                "用户当前的职业是坐席", "WORK_CONTEXT", "occupation", "\"坐席\"",
+                "TIME_BOUND", "CURRENT");
+        RecalledMemory historical = temporalMemory(
+                "memory-java", "WORK_COMMON_SCOPE", "work.occupation.history.1",
+                "用户过去的职业是Java开发", "WORK_CONTEXT", "occupation", "\"Java开发\"",
+                "TIME_BOUND", "HISTORICAL");
+
+        assertThat(renderer.render(DirectMemoryQuestionType.CURRENT_OCCUPATION, current))
+                .contains("根据您之前提供的信息，您目前的职业是坐席。");
+        assertThat(renderer.render(
+                DirectMemoryQuestionType.HISTORICAL_OCCUPATION, historical))
+                .contains("根据您之前提供的信息，您以前从事过Java开发。");
+        assertThat(renderer.render(DirectMemoryQuestionType.CURRENT_OCCUPATION, historical))
+                .isEmpty();
+        assertThat(renderer.render(
+                DirectMemoryQuestionType.HISTORICAL_OCCUPATION, current)).isEmpty();
+    }
+
+    @Test
     void rejectsWrongCategoryBroadScopeInstructionalAndMalformedContent() {
         assertThat(renderer.render(DirectMemoryQuestionType.PROGRAMMING_LANGUAGE,
                 memory("PREFERENCE_LANGUAGE", "用户偏好使用中文交流"))).isEmpty();
@@ -88,6 +121,12 @@ class DeterministicMemoryAnswerRendererTest {
                 .isEqualTo("我还没有记住您偏好的称呼。");
         assertThat(renderer.notRemembered(DirectMemoryQuestionType.PROGRAMMING_LANGUAGE))
                 .isEqualTo("我还没有记住您常用的编程语言。");
+        assertThat(renderer.notRemembered(DirectMemoryQuestionType.AGE))
+                .isEqualTo("我还没有记住您此前提供的年龄。");
+        assertThat(renderer.notRemembered(DirectMemoryQuestionType.CURRENT_OCCUPATION))
+                .isEqualTo("我还没有记住您当前的职业。");
+        assertThat(renderer.notRemembered(DirectMemoryQuestionType.HISTORICAL_OCCUPATION))
+                .isEqualTo("我还没有记住您过去的职业。");
         assertThat(renderer.notRemembered(DirectMemoryQuestionType.WORK_SCOPE))
                 .isEqualTo("我还没有记住您的工作范围。");
         assertThat(renderer.notRemembered(DirectMemoryQuestionType.CURRENT_EMPLOYER))
@@ -105,6 +144,24 @@ class DeterministicMemoryAnswerRendererTest {
                         ? "work.common_scope" : "preference.language",
                 content, new BigDecimal("0.95"),
                 LocalDateTime.parse("2026-09-12T08:00:00"));
+    }
+
+    private RecalledMemory temporalMemory(
+            String memoryId,
+            String category,
+            String canonicalKey,
+            String content,
+            String memoryType,
+            String predicate,
+            String valueJson,
+            String stability,
+            String temporalScope) {
+        LocalDateTime observedAt = LocalDateTime.parse("2026-09-13T08:00:00");
+        return new RecalledMemory(
+                memoryId, 1L, "AUTO_EXTRACT", category, canonicalKey, content,
+                new BigDecimal("0.95"), observedAt, 3, memoryType, predicate,
+                valueJson, stability, "SEMANTIC_MODEL", observedAt, observedAt,
+                null, temporalScope);
     }
 
     private UserMemoryProperties properties() {
