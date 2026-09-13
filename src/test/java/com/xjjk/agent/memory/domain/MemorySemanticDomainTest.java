@@ -85,6 +85,52 @@ class MemorySemanticDomainTest {
     }
 
     @Test
+    void validatedFactCompatibilityConstructorKeepsCandidateTemporalScope() {
+        MemoryFactCandidate candidate = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT,
+                "primary_programming_language",
+                "Java",
+                "Java",
+                "我以前用 Java 语言进行开发",
+                MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.HISTORICAL,
+                0.96);
+
+        ValidatedMemoryFact fact = new ValidatedMemoryFact(
+                candidate,
+                "work.primary_programming_language",
+                "用户以前主要使用 Java 进行开发",
+                "\"Java\"",
+                "WORK_COMMON_SCOPE",
+                "DETERMINISTIC");
+
+        assertThat(fact.temporalScope()).isEqualTo(MemoryTemporalScope.HISTORICAL);
+    }
+
+    @Test
+    void rejectsValidatedFactWithDifferentCandidateTemporalScope() {
+        MemoryFactCandidate candidate = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT,
+                "primary_programming_language",
+                "Java",
+                "Java",
+                "我以前用 Java 语言进行开发",
+                MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.HISTORICAL,
+                0.96);
+
+        assertThatThrownBy(() -> new ValidatedMemoryFact(
+                candidate,
+                "work.primary_programming_language",
+                "用户以前主要使用 Java 进行开发",
+                "\"Java\"",
+                "WORK_COMMON_SCOPE",
+                "DETERMINISTIC",
+                MemoryTemporalScope.CURRENT))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void rejectsNullTemporalScope() {
         assertThatThrownBy(() -> new MemoryFactCandidate(
                 MemoryType.WORK_CONTEXT,

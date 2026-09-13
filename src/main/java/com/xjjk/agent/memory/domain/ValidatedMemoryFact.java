@@ -20,6 +20,10 @@ public record ValidatedMemoryFact(
         legacyCategory = requireText(legacyCategory, "legacyCategory");
         verificationMethod = requireText(verificationMethod, "verificationMethod");
         Objects.requireNonNull(temporalScope, "temporalScope");
+        if (temporalScope != candidate.temporalScope()) {
+            throw new IllegalArgumentException(
+                    "temporalScope must match candidate.temporalScope");
+        }
     }
 
     public ValidatedMemoryFact(
@@ -30,7 +34,7 @@ public record ValidatedMemoryFact(
             String legacyCategory,
             String verificationMethod) {
         this(candidate, canonicalKey, canonicalContent, valueJson, legacyCategory,
-                verificationMethod, MemoryTemporalScope.CURRENT);
+                verificationMethod, candidate.temporalScope());
     }
 
     public double confidence() {

@@ -89,6 +89,24 @@ class UserMemoryMySqlIntegrationTest {
             statement.executeUpdate("""
                     INSERT INTO agent_user_memory (
                         memory_id, tenant_id, user_id, memory_generation, source_type, category,
+                        schema_version, memory_type, predicate_name, value_json, stability,
+                        verification_method, canonical_key, content, content_hash, confidence,
+                        visibility, retention_type, status, source_conversation_id,
+                        source_message_sequence, evidence_text, version, expires_at,
+                        created_at, updated_at
+                    ) VALUES (
+                        '00000000-0000-0000-0000-000000000103', 1, 2, 7, 'AUTO_EXTRACT',
+                        'WORK_COMMON_SCOPE', 2, NULL, 'incomplete_v2_fact',
+                        JSON_OBJECT('value', '保留'), 'STABLE', 'DETERMINISTIC',
+                        'work.incomplete_v2_fact', '需要保留的残缺 v2 事实内容',
+                        REPEAT('f', 64), 0.8800, 'HIDDEN', 'NORMAL', 'ACTIVE', NULL, NULL,
+                        '需要保留的残缺 v2 事实证据', 1, NULL,
+                        '2026-09-01 03:04:05.678', '2026-09-01 03:04:05.678'
+                    )
+                    """);
+            statement.executeUpdate("""
+                    INSERT INTO agent_user_memory (
+                        memory_id, tenant_id, user_id, memory_generation, source_type, category,
                         canonical_key, content, content_hash, confidence, visibility, retention_type,
                         status, source_conversation_id, source_message_sequence, evidence_text,
                         version, expires_at, created_at, updated_at
@@ -170,6 +188,31 @@ class UserMemoryMySqlIntegrationTest {
                 assertThat(result.getTimestamp("valid_to")).isNull();
                 assertThat(result.getString("temporal_scope")).isNull();
             }
+
+            try (ResultSet result = statement.executeQuery("""
+                    SELECT schema_version, memory_type, predicate_name, value_json, stability,
+                           verification_method, observed_at, valid_from, valid_to, temporal_scope,
+                           category, content, source_type, status
+                    FROM agent_user_memory
+                    WHERE memory_id = '00000000-0000-0000-0000-000000000103'
+                    """)) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getObject("schema_version")).isNull();
+                assertThat(result.getString("memory_type")).isNull();
+                assertThat(result.getString("predicate_name")).isNull();
+                assertThat(result.getString("value_json")).isNull();
+                assertThat(result.getString("stability")).isNull();
+                assertThat(result.getString("verification_method")).isNull();
+                assertThat(result.getTimestamp("observed_at")).isNull();
+                assertThat(result.getTimestamp("valid_from")).isNull();
+                assertThat(result.getTimestamp("valid_to")).isNull();
+                assertThat(result.getString("temporal_scope")).isNull();
+                assertThat(result.getString("category")).isEqualTo("WORK_COMMON_SCOPE");
+                assertThat(result.getString("content"))
+                        .isEqualTo("需要保留的残缺 v2 事实内容");
+                assertThat(result.getString("source_type")).isEqualTo("AUTO_EXTRACT");
+                assertThat(result.getString("status")).isEqualTo("ACTIVE");
+            }
         }
     }
 
@@ -185,6 +228,24 @@ class UserMemoryMySqlIntegrationTest {
                     "memory_id IN ('00000000-0000-0000-0000-000000000111',"
                             + " '00000000-0000-0000-0000-000000000112')"))
                     .isEqualTo(2);
+        }
+    }
+
+    @Test
+    void acceptsEqualValidityBoundaryAndRejectsInvertedRange() throws Exception {
+        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+            insertTemporalFact(statement, "00000000-0000-0000-0000-000000000113",
+                    "'WORK_CONTEXT'", "'TIME_BOUND'", "'SEMANTIC_MODEL'", "'HISTORICAL'",
+                    "'2026-09-02 01:02:03.456'");
+
+            assertThat(count(statement, "agent_user_memory",
+                    "memory_id = '00000000-0000-0000-0000-000000000113'"))
+                    .isEqualTo(1);
+            assertThatThrownBy(() -> insertTemporalFact(
+                    statement, "00000000-0000-0000-0000-000000000129",
+                    "'WORK_CONTEXT'", "'TIME_BOUND'", "'SEMANTIC_MODEL'", "'HISTORICAL'",
+                    "'2026-09-02 01:02:03.455'"))
+                    .isInstanceOf(SQLException.class);
         }
     }
 
@@ -386,6 +447,18 @@ class UserMemoryMySqlIntegrationTest {
             String stability,
             String verificationMethod,
             String temporalScope) throws SQLException {
+        insertTemporalFact(statement, memoryId, memoryType, stability,
+                verificationMethod, temporalScope, "NULL");
+    }
+
+    private static void insertTemporalFact(
+            Statement statement,
+            String memoryId,
+            String memoryType,
+            String stability,
+            String verificationMethod,
+            String temporalScope,
+            String validTo) throws SQLException {
         statement.executeUpdate("""
                 INSERT INTO agent_user_memory (
                     memory_id, tenant_id, user_id, memory_generation, source_type, category,
@@ -397,13 +470,14 @@ class UserMemoryMySqlIntegrationTest {
                 ) VALUES (
                     '%s', 1, 2, 7, 'USER_EXPLICIT', 'WORK_COMMON_SCOPE',
                     3, %s, 'primary_programming_language', JSON_OBJECT('value', 'Java'), %s,
-                    '2026-09-02 01:02:03.456', '2026-09-02 01:02:03.456', NULL, %s, %s,
+                    '2026-09-02 01:02:03.456', '2026-09-02 01:02:03.456', %s, %s, %s,
                     'work.primary_programming_language', '用户主要使用 Java 进行开发',
                     REPEAT('e', 64), 0.9600, 'VISIBLE', 'PERMANENT', 'ACTIVE', NULL, NULL,
                     '我平时用 Java 语言进行开发', 1, NULL,
                     '2026-09-02 01:02:03.456', '2026-09-02 01:02:03.456'
                 )
-                """.formatted(memoryId, memoryType, stability, temporalScope, verificationMethod));
+                """.formatted(memoryId, memoryType, stability, validTo,
+                        temporalScope, verificationMethod));
     }
 
     private static long count(Statement statement, String table, String predicate) throws Exception {

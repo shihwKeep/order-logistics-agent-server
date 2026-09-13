@@ -97,6 +97,7 @@ class UserMemoryMigrationContractTest {
                 .contains("valid_from = created_at")
                 .contains("temporal_scope = 'CURRENT'")
                 .contains("schema_version = 3")
+                .contains("SET schema_version = NULL")
                 .contains("memory_type IS NOT NULL")
                 .contains("stability IN ('STABLE', 'TIME_BOUND')")
                 .contains("stability IS NOT NULL")
@@ -105,15 +106,18 @@ class UserMemoryMigrationContractTest {
                 .contains("verification_method IS NOT NULL")
                 .contains("observed_at IS NOT NULL")
                 .contains("valid_from IS NOT NULL")
+                .contains("valid_to IS NULL OR valid_to >= valid_from")
                 .contains("KEY idx_memory_owner_predicate_temporal_scope")
                 .contains("tenant_id, user_id, memory_generation, predicate_name,")
                 .contains("temporal_scope, status");
 
         int constraintDropped = sql.indexOf("DROP CHECK chk_user_memory_structured_fact");
-        int factsBackfilled = sql.indexOf("UPDATE agent_user_memory");
+        int invalidFactsArchived = sql.indexOf("SET schema_version = NULL");
+        int factsBackfilled = sql.indexOf("SET observed_at = created_at");
         int constraintRecreated = sql.indexOf(
                 "ADD CONSTRAINT chk_user_memory_structured_fact");
-        assertThat(constraintDropped).isLessThan(factsBackfilled);
+        assertThat(constraintDropped).isLessThan(invalidFactsArchived);
+        assertThat(invalidFactsArchived).isLessThan(factsBackfilled);
         assertThat(factsBackfilled).isLessThan(constraintRecreated);
     }
 

@@ -9,6 +9,7 @@ import com.xjjk.agent.memory.domain.MemoryExtractionDecision;
 import com.xjjk.agent.memory.domain.MemoryExtractionTaskClaim;
 import com.xjjk.agent.memory.domain.MemoryFactCandidate;
 import com.xjjk.agent.memory.domain.MemoryStability;
+import com.xjjk.agent.memory.domain.MemoryTemporalScope;
 import com.xjjk.agent.memory.domain.MemoryType;
 import com.xjjk.agent.memory.domain.ValidatedMemoryFact;
 import com.xjjk.agent.memory.observation.UserMemoryMetrics;
@@ -92,6 +93,50 @@ class ImplicitMemoryTaskWorkerTest {
 
         verify(commitService).commit(claim, batch);
         verify(metrics).success("auto_extract", 1);
+    }
+
+    @Test
+    void keepsHistoricalScopeWhenIndependentVerifierSupportsFact() {
+        String content = "我以前长期从事供应链系统建设";
+        prepareSource(content);
+        MemoryFactCandidate raw = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT,
+                "occupation",
+                "供应链系统建设",
+                "供应链系统建设",
+                content,
+                MemoryStability.STABLE,
+                MemoryTemporalScope.HISTORICAL,
+                0.93);
+        ValidatedMemoryFact pending = new ValidatedMemoryFact(
+                raw,
+                "work.occupation",
+                "用户以前的职业是供应链系统建设",
+                "\"供应链系统建设\"",
+                "WORK_COMMON_SCOPE",
+                "SEMANTIC_REQUIRED",
+                MemoryTemporalScope.HISTORICAL);
+        when(modelClient.analyze(any())).thenReturn(MemoryExtractionDecision.longTerm(
+                MemoryExplicitness.IMPLICIT, List.of(raw)));
+        when(validator.validate(raw, content)).thenReturn(pending);
+        when(evidenceVerifier.verify(any())).thenReturn(List.of(
+                new MemoryEvidenceVerifier.Result("candidate-0",
+                        MemoryEvidenceVerifier.Outcome.SUPPORTED)));
+        ValidatedMemoryFact supported = new ValidatedMemoryFact(
+                raw,
+                "work.occupation",
+                "用户以前的职业是供应链系统建设",
+                "\"供应链系统建设\"",
+                "WORK_COMMON_SCOPE",
+                "SEMANTIC_MODEL",
+                MemoryTemporalScope.HISTORICAL);
+        ImplicitMemoryExtractionBatch batch = ImplicitMemoryExtractionBatch.observed(
+                1, List.of(supported));
+        when(commitService.commit(claim, batch)).thenReturn(1);
+
+        worker().process(claim);
+
+        verify(commitService).commit(claim, batch);
     }
 
     @Test
