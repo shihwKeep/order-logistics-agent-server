@@ -6,10 +6,12 @@ import com.xjjk.agent.memory.domain.ImplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.domain.MemoryFactCandidate;
 import com.xjjk.agent.memory.domain.MemoryStability;
+import com.xjjk.agent.memory.domain.MemoryTemporalScope;
 import com.xjjk.agent.memory.domain.MemoryType;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -76,6 +78,46 @@ class ImplicitMemoryCandidateValidatorTest {
         assertThat(result.canonicalKey()).isEqualTo("work.current_employer");
         assertThat(result.canonicalContent()).isEqualTo("用户当前工作单位是享佳");
         assertThat(result.verificationMethod()).isEqualTo("SEMANTIC_REQUIRED");
+    }
+
+    @Test
+    void acceptsTimeBoundFactsAndPreservesTheirTemporalScope() {
+        String source = "我以前是Java开发";
+        MemoryFactCandidate candidate = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT,
+                "occupation",
+                "Java开发",
+                "Java开发",
+                source,
+                MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.HISTORICAL,
+                0.96);
+
+        var result = semanticValidator.validate(candidate, source);
+
+        assertThat(result.candidate().stability()).isEqualTo(MemoryStability.TIME_BOUND);
+        assertThat(result.candidate().temporalScope())
+                .isEqualTo(MemoryTemporalScope.HISTORICAL);
+        assertThat(result.temporalScope()).isEqualTo(MemoryTemporalScope.HISTORICAL);
+    }
+
+    @Test
+    void rejectsTemporaryAndUnknownSemanticFacts() {
+        for (MemoryStability stability : List.of(
+                MemoryStability.TEMPORARY, MemoryStability.UNKNOWN)) {
+            MemoryFactCandidate candidate = new MemoryFactCandidate(
+                    MemoryType.WORK_CONTEXT,
+                    "occupation",
+                    "Java开发",
+                    "Java开发",
+                    "我以前是Java开发",
+                    stability,
+                    MemoryTemporalScope.HISTORICAL,
+                    0.96);
+
+            assertSemanticRejected(candidate, candidate.evidenceText(),
+                    MemoryCandidateValidationException.Reason.STABILITY);
+        }
     }
 
     @Test

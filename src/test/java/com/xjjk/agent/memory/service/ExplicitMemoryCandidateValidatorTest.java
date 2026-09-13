@@ -6,6 +6,7 @@ import com.xjjk.agent.memory.domain.MemoryCategory;
 import com.xjjk.agent.memory.domain.MemoryRetentionType;
 import com.xjjk.agent.memory.domain.MemoryFactCandidate;
 import com.xjjk.agent.memory.domain.MemoryStability;
+import com.xjjk.agent.memory.domain.MemoryTemporalScope;
 import com.xjjk.agent.memory.domain.MemoryType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -96,6 +97,7 @@ class ExplicitMemoryCandidateValidatorTest {
                 "32岁",
                 source,
                 MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.CURRENT,
                 0.98);
 
         ExplicitMemoryCandidate result = validator.validate(
@@ -106,6 +108,55 @@ class ExplicitMemoryCandidateValidatorTest {
         assertThat(result.category()).isEqualTo(MemoryCategory.PROFILE_PERSONAL_FACT);
         assertThat(result.canonicalKey()).isEqualTo("profile.age");
         assertThat(result.content()).isEqualTo("用户曾表示年龄为32岁");
+        assertThat(result.semanticFact().temporalScope())
+                .isEqualTo(MemoryTemporalScope.CURRENT);
+    }
+
+    @Test
+    void acceptsHistoricalTimeBoundFactAndPreservesItsScope() {
+        String source = "请记住我以前是Java开发";
+        MemoryFactCandidate modelFact = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT,
+                "occupation",
+                "Java开发",
+                "Java开发",
+                source,
+                MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.HISTORICAL,
+                0.98);
+
+        ExplicitMemoryCandidate result = validator.validate(
+                ExplicitMemoryCandidate.semantic(modelFact, MemoryRetentionType.NORMAL),
+                source,
+                false);
+
+        assertThat(result.semanticFact().temporalScope())
+                .isEqualTo(MemoryTemporalScope.HISTORICAL);
+    }
+
+    @Test
+    void rejectsTemporaryAndUnknownSemanticFacts() {
+        for (MemoryStability stability : new MemoryStability[]{
+                MemoryStability.TEMPORARY, MemoryStability.UNKNOWN}) {
+            String source = "请记住我以前是Java开发";
+            MemoryFactCandidate modelFact = new MemoryFactCandidate(
+                    MemoryType.WORK_CONTEXT,
+                    "occupation",
+                    "Java开发",
+                    "Java开发",
+                    source,
+                    stability,
+                    MemoryTemporalScope.HISTORICAL,
+                    0.98);
+
+            assertThatThrownBy(() -> validator.validate(
+                    ExplicitMemoryCandidate.semantic(
+                            modelFact, MemoryRetentionType.NORMAL),
+                    source,
+                    false))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("MEMORY_CONTENT_REJECTED");
+        }
     }
 
     @Test

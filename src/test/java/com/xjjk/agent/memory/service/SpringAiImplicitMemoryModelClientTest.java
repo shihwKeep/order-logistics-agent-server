@@ -5,6 +5,7 @@ import com.xjjk.agent.memory.config.ImplicitMemoryProperties;
 import com.xjjk.agent.memory.domain.MemoryDecision;
 import com.xjjk.agent.memory.domain.MemoryExplicitness;
 import com.xjjk.agent.memory.domain.MemoryStability;
+import com.xjjk.agent.memory.domain.MemoryTemporalScope;
 import com.xjjk.agent.memory.domain.MemoryType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -44,9 +45,9 @@ class SpringAiImplicitMemoryModelClientTest {
                   "decision":"LONG_TERM",
                   "explicitness":"IMPLICIT",
                   "candidates":[
-                    {"memoryType":"WORK_CONTEXT","predicate":"primary_programming_language","value":"Java","valueEvidence":"Java","evidenceText":"我平时用 Java 语言进行开发","stability":"STABLE","confidence":0.96},
-                    {"memoryType":"RESPONSE_PREFERENCE","predicate":"answer_style","value":"简洁","valueEvidence":"简洁","evidenceText":"我喜欢简洁回答","stability":"STABLE","confidence":0.93},
-                    {"memoryType":"WORK_CONTEXT","predicate":"occupation","value":"后端开发","valueEvidence":"后端开发","evidenceText":"我是一名后端开发","stability":"STABLE","confidence":0.91}
+                    {"memoryType":"WORK_CONTEXT","predicate":"primary_programming_language","value":"Java","valueEvidence":"Java","evidenceText":"我平时用 Java 语言进行开发","stability":"STABLE","temporalScope":"CURRENT","confidence":0.96},
+                    {"memoryType":"RESPONSE_PREFERENCE","predicate":"answer_style","value":"简洁","valueEvidence":"简洁","evidenceText":"我喜欢简洁回答","stability":"STABLE","temporalScope":"CURRENT","confidence":0.93},
+                    {"memoryType":"WORK_CONTEXT","predicate":"occupation","value":"后端开发","valueEvidence":"后端开发","evidenceText":"我是一名后端开发","stability":"TIME_BOUND","temporalScope":"CURRENT","confidence":0.91}
                   ]
                 }
                 """, properties(Duration.ofSeconds(1), 2), executor());
@@ -61,6 +62,69 @@ class SpringAiImplicitMemoryModelClientTest {
                 .isEqualTo(MemoryType.WORK_CONTEXT);
         assertThat(result.candidates().getFirst().stability())
                 .isEqualTo(MemoryStability.STABLE);
+        assertThat(result.candidates().getFirst().temporalScope())
+                .isEqualTo(MemoryTemporalScope.CURRENT);
+    }
+
+    @Test
+    void parsesCurrentAgeAsTimeBoundProfileFact() {
+        SpringAiImplicitMemoryModelClient client = clientReturning("""
+                {"decision":"LONG_TERM","explicitness":"IMPLICIT","candidates":[
+                  {"memoryType":"PROFILE","predicate":"age","value":"32","valueEvidence":"32岁","evidenceText":"我今年32岁","stability":"TIME_BOUND","temporalScope":"CURRENT","confidence":0.97}
+                ]}
+                """, properties(Duration.ofSeconds(1), 3), executor());
+
+        var candidate = client.analyze(new ImplicitMemoryModelClient.Request(
+                "request-1", "我今年32岁", null)).candidates().getFirst();
+
+        assertThat(candidate.memoryType()).isEqualTo(MemoryType.PROFILE);
+        assertThat(candidate.predicate()).isEqualTo("age");
+        assertThat(candidate.stability()).isEqualTo(MemoryStability.TIME_BOUND);
+        assertThat(candidate.temporalScope()).isEqualTo(MemoryTemporalScope.CURRENT);
+    }
+
+    @Test
+    void parsesHistoricalAndCurrentOccupationAsSeparateAtomicFacts() {
+        SpringAiImplicitMemoryModelClient client = clientReturning("""
+                {"decision":"LONG_TERM","explicitness":"IMPLICIT","candidates":[
+                  {"memoryType":"WORK_CONTEXT","predicate":"occupation","value":"Java开发","valueEvidence":"Java开发","evidenceText":"以前是Java开发","stability":"TIME_BOUND","temporalScope":"HISTORICAL","confidence":0.96},
+                  {"memoryType":"WORK_CONTEXT","predicate":"occupation","value":"坐席","valueEvidence":"坐席","evidenceText":"现在是坐席","stability":"TIME_BOUND","temporalScope":"CURRENT","confidence":0.97}
+                ]}
+                """, properties(Duration.ofSeconds(1), 3), executor());
+
+        var candidates = client.analyze(new ImplicitMemoryModelClient.Request(
+                "request-1", "以前是Java开发，现在是坐席", null)).candidates();
+
+        assertThat(candidates).extracting(candidate -> candidate.temporalScope())
+                .containsExactly(MemoryTemporalScope.HISTORICAL, MemoryTemporalScope.CURRENT);
+        assertThat(candidates).extracting(candidate -> candidate.value())
+                .containsExactly("Java开发", "坐席");
+    }
+
+    @Test
+    void rejectsLongTermCandidateWithMissingOrInvalidTemporalScope() {
+        assertCode("""
+                {"decision":"LONG_TERM","explicitness":"IMPLICIT","candidates":[
+                  {"memoryType":"PROFILE","predicate":"age","value":"32","valueEvidence":"32岁","evidenceText":"我今年32岁","stability":"TIME_BOUND","confidence":0.97}
+                ]}
+                """, properties(Duration.ofSeconds(1), 3),
+                ImplicitMemoryExtractionException.Code.MODEL_PROTOCOL_ERROR);
+        assertCode("""
+                {"decision":"LONG_TERM","explicitness":"IMPLICIT","candidates":[
+                  {"memoryType":"PROFILE","predicate":"age","value":"32","valueEvidence":"32岁","evidenceText":"我今年32岁","stability":"TIME_BOUND","temporalScope":"RECENT","confidence":0.97}
+                ]}
+                """, properties(Duration.ofSeconds(1), 3),
+                ImplicitMemoryExtractionException.Code.MODEL_PROTOCOL_ERROR);
+    }
+
+    @Test
+    void rejectsLongTermCandidateWithMissingConfidence() {
+        assertCode("""
+                {"decision":"LONG_TERM","explicitness":"IMPLICIT","candidates":[
+                  {"memoryType":"PROFILE","predicate":"age","value":"32","valueEvidence":"32岁","evidenceText":"我今年32岁","stability":"TIME_BOUND","temporalScope":"CURRENT"}
+                ]}
+                """, properties(Duration.ofSeconds(1), 3),
+                ImplicitMemoryExtractionException.Code.MODEL_PROTOCOL_ERROR);
     }
 
     @Test
@@ -101,10 +165,16 @@ class SpringAiImplicitMemoryModelClientTest {
                 .contains("IGNORE、SESSION_ONLY、LONG_TERM")
                 .contains("EXPLICIT", "IMPLICIT")
                 .contains("memoryType", "predicate", "value", "valueEvidence")
-                .contains("evidenceText", "stability", "confidence")
+                .contains("evidenceText", "stability", "temporalScope", "confidence")
                 .contains("一条候选只表达一个原子事实")
                 .contains("不要求出现固定触发词")
-                .contains("禁止账号凭据、身份信息、健康信息、订单、退款、物流、支付、客户资料、企业制度")
+                .contains("年龄", "职业", "工作单位", "技能", "技术栈", "沟通", "回答偏好", "称呼")
+                .contains("STABLE", "TIME_BOUND", "TEMPORARY", "UNKNOWN")
+                .contains("CURRENT", "HISTORICAL")
+                .contains("高风险身份凭证", "联系方式", "账户", "健康", "精确地址", "客户业务记录")
+                .contains("普通自述的年龄、职业和偏好可以进入候选")
+                .contains("禁止推断出生年", "隐含职业")
+                .doesNotContain("禁止账号凭据、身份信息")
                 .doesNotContain("category 只能是 PROFILE_PREFERRED_NAME");
     }
 

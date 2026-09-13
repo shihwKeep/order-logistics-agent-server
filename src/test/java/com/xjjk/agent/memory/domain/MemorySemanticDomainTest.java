@@ -12,6 +12,7 @@ class MemorySemanticDomainTest {
     @Test
     void representsIgnoreSessionAndLongTermDecisions() {
         MemoryFactCandidate java = candidate(MemoryStability.STABLE, 0.96);
+        MemoryFactCandidate age = candidate(MemoryStability.TIME_BOUND, 0.96);
 
         assertThat(MemoryExtractionDecision.ignore().decision())
                 .isEqualTo(MemoryDecision.IGNORE);
@@ -20,6 +21,9 @@ class MemorySemanticDomainTest {
         assertThat(MemoryExtractionDecision.longTerm(
                 MemoryExplicitness.IMPLICIT, List.of(java)).candidates())
                 .containsExactly(java);
+        assertThat(MemoryExtractionDecision.longTerm(
+                MemoryExplicitness.IMPLICIT, List.of(age)).candidates())
+                .containsExactly(age);
     }
 
     @Test
@@ -31,6 +35,10 @@ class MemorySemanticDomainTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> MemoryExtractionDecision.longTerm(
                 MemoryExplicitness.IMPLICIT, List.of(temporary)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> MemoryExtractionDecision.longTerm(
+                MemoryExplicitness.IMPLICIT,
+                List.of(candidate(MemoryStability.UNKNOWN, 0.96))))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new MemoryExtractionDecision(
                 MemoryDecision.IGNORE, MemoryExplicitness.IMPLICIT,
