@@ -25,8 +25,14 @@ import static org.mockito.Mockito.when;
 class ChatSseHeartbeatTest {
 
     @Test
+    void heartbeatSchedulerCannotBecomeTheGlobalSpringTaskScheduler() {
+        assertThat(TaskScheduler.class.isAssignableFrom(ChatSseHeartbeatScheduler.class))
+                .isFalse();
+    }
+
+    @Test
     void sendsHeartbeatAtFixedRateAndCloseCancelsTheSchedule() throws Exception {
-        TaskScheduler scheduler = mock(TaskScheduler.class);
+        ChatSseHeartbeatScheduler scheduler = mock(ChatSseHeartbeatScheduler.class);
         ScheduledFuture<?> future = mock(ScheduledFuture.class);
         AtomicReference<Runnable> scheduled = captureScheduledTask(scheduler, future);
         ChatSseSession session = mock(ChatSseSession.class);
@@ -43,7 +49,7 @@ class ChatSseHeartbeatTest {
 
     @Test
     void sendFailureStopsTheTurnAndCancelsFutureTicks() throws Exception {
-        TaskScheduler scheduler = mock(TaskScheduler.class);
+        ChatSseHeartbeatScheduler scheduler = mock(ChatSseHeartbeatScheduler.class);
         ScheduledFuture<?> future = mock(ScheduledFuture.class);
         AtomicReference<Runnable> scheduled = captureScheduledTask(scheduler, future);
         ChatSseSession session = mock(ChatSseSession.class);
@@ -70,7 +76,7 @@ class ChatSseHeartbeatTest {
     }
 
     private AtomicReference<Runnable> captureScheduledTask(
-            TaskScheduler scheduler,
+            ChatSseHeartbeatScheduler scheduler,
             ScheduledFuture<?> future
     ) {
         AtomicReference<Runnable> scheduled = new AtomicReference<>();

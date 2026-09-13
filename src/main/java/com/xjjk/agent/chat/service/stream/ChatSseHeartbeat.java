@@ -6,8 +6,6 @@ import com.xjjk.agent.chat.stream.ChatSseSession;
 import com.xjjk.agent.chat.stream.ChatStreamControl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -23,11 +21,11 @@ public final class ChatSseHeartbeat {
 
     private static final Logger log = LoggerFactory.getLogger(ChatSseHeartbeat.class);
 
-    private final TaskScheduler scheduler;
+    private final ChatSseHeartbeatScheduler scheduler;
     private final ChatStreamProperties properties;
 
     public ChatSseHeartbeat(
-            @Qualifier("chatSseHeartbeatScheduler") TaskScheduler scheduler,
+            ChatSseHeartbeatScheduler scheduler,
             ChatStreamProperties properties
     ) {
         this.scheduler = Objects.requireNonNull(scheduler, "心跳调度器不能为空");
