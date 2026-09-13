@@ -106,6 +106,15 @@ Electron 主进程在 SSE 握手成功后启用空闲检测，默认 25 秒内�
 
 当前 Gateway 仓库没有发现明确的 Agent SSE 路由超时配置，因此该项必须作为部署配置核对项记录，不能仅凭应用心跳宣称链路已经完整保活。
 
+当前参数与部署约束：
+
+- `agent.chat.stream.timeout=30s`；
+- `agent.chat.stream.heartbeat-interval=10s`；
+- Electron 主进程空闲检测为 25 秒；
+- `/agent/api/v1/chat/stream` 的 Gateway/Nginx read/response timeout 必须大于 30 秒，建议至少 45 秒；
+- 代理不得缓冲 `text/event-stream`；
+- 心跳只能刷新空闲读取超时，不能绕过网关配置的绝对请求时限。
+
 ## 8. 测试
 
 后端自动化测试覆盖：
