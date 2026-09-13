@@ -3,6 +3,7 @@ package com.xjjk.agent.chat.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 @Configuration
 public class ChatStreamConfiguration {
@@ -20,5 +21,16 @@ public class ChatStreamConfiguration {
         executor.setAwaitTerminationSeconds(5);
 
         return executor;
+    }
+
+    @Bean("chatSseHeartbeatScheduler")
+    public ThreadPoolTaskScheduler chatSseHeartbeatScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(2);
+        scheduler.setThreadNamePrefix("chat-sse-heartbeat-");
+        scheduler.setRemoveOnCancelPolicy(true);
+        scheduler.setWaitForTasksToCompleteOnShutdown(false);
+        scheduler.setAwaitTerminationSeconds(5);
+        return scheduler;
     }
 }
