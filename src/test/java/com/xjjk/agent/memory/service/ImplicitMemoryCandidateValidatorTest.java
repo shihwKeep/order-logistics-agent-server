@@ -109,6 +109,36 @@ class ImplicitMemoryCandidateValidatorTest {
     }
 
     @Test
+    void handlesRepeatedProfilePredicateTokensWithinControlledValidationBoundary() {
+        String source = "我最喜欢的城市是杭州";
+        MemoryFactCandidate allowed = new MemoryFactCandidate(
+                MemoryType.PROFILE,
+                "favorite_favorite_city",
+                "杭州",
+                "杭州",
+                source,
+                MemoryStability.STABLE,
+                0.96);
+
+        var result = semanticValidator.validate(allowed, source);
+
+        assertThat(result.canonicalContent())
+                .isEqualTo("用户提供的个人画像事实（favorite_favorite_city）是杭州");
+        assertThat(result.verificationMethod()).isEqualTo("SEMANTIC_REQUIRED");
+
+        MemoryFactCandidate rejected = new MemoryFactCandidate(
+                MemoryType.PROFILE,
+                "phone_phone",
+                "普通值",
+                "普通值",
+                "我的phone信息是普通值",
+                MemoryStability.STABLE,
+                0.96);
+        assertSemanticRejected(rejected, rejected.evidenceText(),
+                MemoryCandidateValidationException.Reason.SCHEMA);
+    }
+
+    @Test
     void canonicalizesDirectHighConfidenceEvidence() {
         ImplicitMemoryCandidate result = validator.validate(
                 new ImplicitMemoryCandidate(

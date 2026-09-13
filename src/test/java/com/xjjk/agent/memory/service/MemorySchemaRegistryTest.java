@@ -224,6 +224,28 @@ class MemorySchemaRegistryTest {
     }
 
     @Test
+    void rejectsRepeatedSensitiveProfileTokensWithControlledSchemaReason() {
+        assertThatThrownBy(() -> registry.resolve(candidate(
+                MemoryType.PROFILE, "phone_phone", "普通值", "普通值")))
+                .isInstanceOfSatisfying(
+                        MemoryCandidateValidationException.class,
+                        error -> assertThat(error.reason())
+                                .isEqualTo(MemoryCandidateValidationException.Reason.SCHEMA));
+    }
+
+    @Test
+    void acceptsRepeatedNonSensitiveProfileTokensThroughOpenProfileSchema() {
+        var result = registry.resolve(candidate(
+                MemoryType.PROFILE, "favorite_favorite_city", "杭州", "杭州"));
+
+        assertThat(result.canonicalKey()).matches("profile\\.open\\.[0-9a-f]{64}");
+        assertThat(result.canonicalContent())
+                .isEqualTo("用户提供的个人画像事实（favorite_favorite_city）是杭州");
+        assertThat(result.legacyCategory()).isEqualTo("PROFILE_PERSONAL_FACT");
+        assertThat(result.requiresSemanticVerification()).isTrue();
+    }
+
+    @Test
     void allowsClearlyNonIdentifyingProfessionalLicensePreferences() {
         var result = registry.resolve(candidate(
                 MemoryType.PROFILE, "professional_license_preference",

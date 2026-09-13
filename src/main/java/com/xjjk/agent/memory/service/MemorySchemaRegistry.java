@@ -8,6 +8,8 @@ import com.xjjk.agent.memory.domain.MemoryType;
 import org.springframework.stereotype.Component;
 
 import java.text.Normalizer;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -398,7 +400,7 @@ public class MemorySchemaRegistry {
 
     private static void requireSafeOpenProfilePredicate(String predicate) {
         requireSafeOpenPredicate(predicate);
-        Set<String> tokens = Set.of(predicate.split("_"));
+        Set<String> tokens = new HashSet<>(Arrays.asList(predicate.split("_")));
         for (String token : tokens) {
             if (SENSITIVE_PROFILE_PREDICATE_TOKENS.contains(token)) {
                 throw rejected(SCHEMA);
