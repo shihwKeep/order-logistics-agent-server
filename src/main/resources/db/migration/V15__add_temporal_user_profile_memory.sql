@@ -35,17 +35,21 @@ ALTER TABLE agent_user_memory
             AND temporal_scope IS NULL)
         OR
         (schema_version = 3
+            AND memory_type IS NOT NULL
             AND memory_type IN (
                 'PROFILE', 'COMMUNICATION_PREFERENCE', 'RESPONSE_PREFERENCE',
                 'WORK_CONTEXT', 'STABLE_PREFERENCE', 'STABLE_USER_FACT'
             )
             AND predicate_name IS NOT NULL
             AND value_json IS NOT NULL
+            AND stability IS NOT NULL
             AND stability IN ('STABLE', 'TIME_BOUND')
+            AND verification_method IS NOT NULL
             AND verification_method IN (
                 'DETERMINISTIC', 'SEMANTIC_MODEL',
                 'EXPLICIT_DETERMINISTIC', 'EXPLICIT_SEMANTIC'
             )
+            AND temporal_scope IS NOT NULL
             AND temporal_scope IN ('CURRENT', 'HISTORICAL')
             AND observed_at IS NOT NULL
             AND valid_from IS NOT NULL)
