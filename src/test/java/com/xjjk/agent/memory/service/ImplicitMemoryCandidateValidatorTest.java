@@ -175,7 +175,7 @@ class ImplicitMemoryCandidateValidatorTest {
     void acceptsWholeSentenceEvidenceWhenEachValueHasAnUnambiguousTemporalClause() {
         String source = "我以前做java开发的，现在是享佳的坐席";
         MemoryFactCandidate historical = new MemoryFactCandidate(
-                MemoryType.WORK_CONTEXT, "occupation", "Java开发", "java开发",
+                MemoryType.WORK_CONTEXT, "occupation", "Java开发", "Java开发",
                 source, MemoryStability.TIME_BOUND,
                 MemoryTemporalScope.HISTORICAL, 1.0);
         MemoryFactCandidate current = new MemoryFactCandidate(

@@ -92,7 +92,8 @@ public class ImplicitMemoryCandidateValidator {
                 sourceMessage == null ? "" : sourceMessage);
         String evidence = normalizeSemantic(candidate.evidenceText());
         String valueEvidence = normalizeSemantic(candidate.valueEvidence());
-        if (!source.contains(evidence) || !evidence.contains(valueEvidence)
+        if (!MemoryEvidenceTextMatcher.contains(source, evidence)
+                || !MemoryEvidenceTextMatcher.contains(evidence, valueEvidence)
                 || !temporalEvidencePolicy.isSupported(candidate, evidence)) {
             throw semanticRejected(MemoryCandidateValidationException.Reason.EVIDENCE);
         }

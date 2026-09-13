@@ -120,9 +120,10 @@ public class ExplicitMemoryCandidateValidator {
                 originalMessage == null ? "" : originalMessage);
         String evidence = normalize(candidate.semanticFact().evidenceText());
         String valueEvidence = normalize(candidate.semanticFact().valueEvidence());
-        if (!original.contains(evidence) || !evidence.contains(valueEvidence)
+        if (!MemoryEvidenceTextMatcher.contains(original, evidence)
+                || !MemoryEvidenceTextMatcher.contains(evidence, valueEvidence)
                 || !temporalEvidencePolicy.isSupported(
-                        candidate.semanticFact(), evidence)) {
+                         candidate.semanticFact(), evidence)) {
             throw invalid();
         }
         requireLength(evidence, maxEvidenceCodePoints);

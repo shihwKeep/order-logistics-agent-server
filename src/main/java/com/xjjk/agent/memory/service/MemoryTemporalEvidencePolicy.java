@@ -35,7 +35,8 @@ public final class MemoryTemporalEvidencePolicy {
         }
         int fromIndex = 0;
         while (fromIndex < evidenceText.length()) {
-            int valueIndex = evidenceText.indexOf(valueEvidence, fromIndex);
+            int valueIndex = MemoryEvidenceTextMatcher.indexOf(
+                    evidenceText, valueEvidence, fromIndex);
             if (valueIndex < 0) {
                 return false;
             }
