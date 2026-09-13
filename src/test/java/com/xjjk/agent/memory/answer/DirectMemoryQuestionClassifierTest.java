@@ -21,6 +21,7 @@ class DirectMemoryQuestionClassifierTest {
             "'你记得我主要做什么工作吗？', CURRENT_OCCUPATION",
             "'我现在做什么工作？', CURRENT_OCCUPATION",
             "'我以前做什么工作？', HISTORICAL_OCCUPATION",
+            "'我以前做什么的', HISTORICAL_OCCUPATION",
             "'我过去从事什么职业？', HISTORICAL_OCCUPATION",
             "'我常用的技术栈是什么？', WORK_SCOPE",
             "'我在哪里工作？', CURRENT_EMPLOYER",

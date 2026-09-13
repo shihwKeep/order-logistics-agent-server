@@ -147,7 +147,7 @@ class ImplicitMemoryCandidateValidatorTest {
     }
 
     @Test
-    void acceptsSplitTemporalCandidatesOnlyWithCandidateSpecificClauses() {
+    void acceptsSplitTemporalCandidatesAndRejectsUnresolvedMixedEvidence() {
         String source = "以前是Java开发，现在是坐席";
         MemoryFactCandidate historical = new MemoryFactCandidate(
                 MemoryType.WORK_CONTEXT, "occupation", "Java开发", "Java开发",
@@ -157,17 +157,36 @@ class ImplicitMemoryCandidateValidatorTest {
                 MemoryType.WORK_CONTEXT, "occupation", "坐席", "坐席",
                 "现在是坐席", MemoryStability.TIME_BOUND,
                 MemoryTemporalScope.CURRENT, 0.96);
+        String ambiguousEvidence = "以前是Java开发现在是坐席";
         MemoryFactCandidate ambiguousWholeSentence = new MemoryFactCandidate(
                 MemoryType.WORK_CONTEXT, "occupation", "Java开发", "Java开发",
-                source, MemoryStability.TIME_BOUND,
+                ambiguousEvidence, MemoryStability.TIME_BOUND,
                 MemoryTemporalScope.HISTORICAL, 0.96);
 
         assertThat(semanticValidator.validate(historical, source).temporalScope())
                 .isEqualTo(MemoryTemporalScope.HISTORICAL);
         assertThat(semanticValidator.validate(current, source).temporalScope())
                 .isEqualTo(MemoryTemporalScope.CURRENT);
-        assertSemanticRejected(ambiguousWholeSentence, source,
+        assertSemanticRejected(ambiguousWholeSentence, ambiguousEvidence,
                 MemoryCandidateValidationException.Reason.EVIDENCE);
+    }
+
+    @Test
+    void acceptsWholeSentenceEvidenceWhenEachValueHasAnUnambiguousTemporalClause() {
+        String source = "我以前做java开发的，现在是享佳的坐席";
+        MemoryFactCandidate historical = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT, "occupation", "Java开发", "java开发",
+                source, MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.HISTORICAL, 1.0);
+        MemoryFactCandidate current = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT, "occupation", "坐席", "坐席",
+                source, MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.CURRENT, 1.0);
+
+        assertThat(semanticValidator.validate(historical, source).temporalScope())
+                .isEqualTo(MemoryTemporalScope.HISTORICAL);
+        assertThat(semanticValidator.validate(current, source).temporalScope())
+                .isEqualTo(MemoryTemporalScope.CURRENT);
     }
 
     @Test

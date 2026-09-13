@@ -151,8 +151,8 @@ public class SpringAiImplicitMemoryModelClient implements ImplicitMemoryModelCli
                 candidates.add(candidate);
             }
             MemoryExplicitness explicitness = response.explicitness() == null
-                    ? null : MemoryExplicitness.valueOf(
-                    requireText(response.explicitness()));
+                    ? defaultExplicitness(decision)
+                    : MemoryExplicitness.valueOf(requireText(response.explicitness()));
             MemoryExtractionDecision validatedDecision =
                     new MemoryExtractionDecision(decision, explicitness, candidates);
             if (candidates.size() <= properties.maxCandidates()) {
@@ -181,6 +181,12 @@ public class SpringAiImplicitMemoryModelClient implements ImplicitMemoryModelCli
             throw new IllegalArgumentException("invalid confidence");
         }
         return confidence;
+    }
+
+    private static MemoryExplicitness defaultExplicitness(MemoryDecision decision) {
+        return decision == MemoryDecision.LONG_TERM
+                ? MemoryExplicitness.IMPLICIT
+                : null;
     }
 
     private static ImplicitMemoryExtractionException callFailure() {

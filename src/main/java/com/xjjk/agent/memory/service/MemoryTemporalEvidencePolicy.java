@@ -21,12 +21,68 @@ public final class MemoryTemporalEvidencePolicy {
         boolean historical = containsAny(evidenceText, HISTORICAL_ANCHORS);
         boolean current = containsAny(evidenceText, CURRENT_ANCHORS);
         if (historical && current) {
+            return valueClauseSupports(candidate, evidenceText);
+        }
+        return scopeMatches(candidate.temporalScope(), historical, current);
+    }
+
+    private static boolean valueClauseSupports(
+            MemoryFactCandidate candidate,
+            String evidenceText) {
+        String valueEvidence = candidate.valueEvidence();
+        if (valueEvidence == null || valueEvidence.isBlank()) {
             return false;
         }
-        return switch (candidate.temporalScope()) {
+        int fromIndex = 0;
+        while (fromIndex < evidenceText.length()) {
+            int valueIndex = evidenceText.indexOf(valueEvidence, fromIndex);
+            if (valueIndex < 0) {
+                return false;
+            }
+            String clause = containingClause(evidenceText, valueIndex,
+                    valueIndex + valueEvidence.length());
+            boolean historical = containsAny(clause, HISTORICAL_ANCHORS);
+            boolean current = containsAny(clause, CURRENT_ANCHORS);
+            if (scopeMatches(candidate.temporalScope(), historical, current)) {
+                return true;
+            }
+            fromIndex = valueIndex + valueEvidence.length();
+        }
+        return false;
+    }
+
+    private static boolean scopeMatches(
+            MemoryTemporalScope scope,
+            boolean historical,
+            boolean current) {
+        if (historical && current) {
+            return false;
+        }
+        return switch (scope) {
             case HISTORICAL -> historical;
             case CURRENT -> !historical;
         };
+    }
+
+    private static String containingClause(
+            String text,
+            int valueStart,
+            int valueEnd) {
+        int start = valueStart;
+        while (start > 0 && !isClauseBoundary(text.charAt(start - 1))) {
+            start--;
+        }
+        int end = valueEnd;
+        while (end < text.length() && !isClauseBoundary(text.charAt(end))) {
+            end++;
+        }
+        return text.substring(start, end);
+    }
+
+    private static boolean isClauseBoundary(char value) {
+        return value == '，' || value == ',' || value == '。' || value == '.'
+                || value == '！' || value == '!' || value == '？' || value == '?'
+                || value == '；' || value == ';' || value == '\n' || value == '\r';
     }
 
     private static boolean containsAny(String value, List<String> anchors) {

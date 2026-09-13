@@ -59,7 +59,7 @@ public class DirectMemoryQuestionClassifier {
             matches.add(DirectMemoryQuestionType.ANSWER_STYLE);
         }
         boolean occupationQuestion = containsAny(query, List.of(
-                "做什么工作", "从事什么", "什么职业", "职业是什么", "主要做什么"));
+                "做什么工作", "做什么的", "从事什么", "什么职业", "职业是什么", "主要做什么"));
         boolean historical = containsAny(query, List.of(
                 "以前", "过去", "曾经", "原来", "之前"));
         if (occupationQuestion) {

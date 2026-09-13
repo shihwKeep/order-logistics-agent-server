@@ -103,6 +103,23 @@ class SpringAiImplicitMemoryModelClientTest {
     }
 
     @Test
+    void defaultsMissingLongTermExplicitnessToImplicitWithoutDroppingCandidates() {
+        SpringAiImplicitMemoryModelClient client = clientReturning("""
+                {"decision":"LONG_TERM","candidates":[
+                  {"memoryType":"WORK_CONTEXT","predicate":"occupation","value":"Java开发","valueEvidence":"Java开发","evidenceText":"我以前做java开发的，现在是享佳的坐席","stability":"TIME_BOUND","temporalScope":"HISTORICAL","confidence":1.0},
+                  {"memoryType":"WORK_CONTEXT","predicate":"occupation","value":"坐席","valueEvidence":"坐席","evidenceText":"我以前做java开发的，现在是享佳的坐席","stability":"TIME_BOUND","temporalScope":"CURRENT","confidence":1.0},
+                  {"memoryType":"WORK_CONTEXT","predicate":"current_employer","value":"享佳","valueEvidence":"享佳","evidenceText":"我以前做java开发的，现在是享佳的坐席","stability":"TIME_BOUND","temporalScope":"CURRENT","confidence":1.0}
+                ]}
+                """, properties(Duration.ofSeconds(1), 3), executor());
+
+        var result = client.analyze(new ImplicitMemoryModelClient.Request(
+                "request-1", "我以前做java开发的，现在是享佳的坐席", null));
+
+        assertThat(result.explicitness()).isEqualTo(MemoryExplicitness.IMPLICIT);
+        assertThat(result.candidates()).hasSize(3);
+    }
+
+    @Test
     void rejectsLongTermCandidateWithMissingOrInvalidTemporalScope() {
         assertCode("""
                 {"decision":"LONG_TERM","explicitness":"IMPLICIT","candidates":[

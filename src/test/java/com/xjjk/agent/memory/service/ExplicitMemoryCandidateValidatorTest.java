@@ -167,8 +167,8 @@ class ExplicitMemoryCandidateValidatorTest {
                 MemoryTemporalScope.HISTORICAL);
         assertTemporalRejected("请记住我是坐席", "我是坐席",
                 MemoryTemporalScope.HISTORICAL);
-        assertTemporalRejected("请记住我以前是Java开发，现在是坐席",
-                "我以前是Java开发，现在是坐席", MemoryTemporalScope.HISTORICAL);
+        assertTemporalRejected("请记住我以前是Java开发现在是坐席",
+                "我以前是Java开发现在是坐席", MemoryTemporalScope.HISTORICAL);
     }
 
     @Test
