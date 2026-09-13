@@ -105,6 +105,13 @@ class SpringAiExplicitMemoryExtractorTest {
     }
 
     @Test
+    void rejectsTrailingProseAndSecondJsonValue() {
+        assertProtocolFailure("{\"action\":\"NONE\",\"confidence\":0.99} trailing prose");
+        assertProtocolFailure(
+                "{\"action\":\"NONE\",\"confidence\":0.99} {\"ignored\":true}");
+    }
+
+    @Test
     void promptUsesGeneralFactSchemaAndDoesNotTrustModelCanonicalContent() {
         ChatClient client = mock(ChatClient.class);
         ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);

@@ -128,6 +128,52 @@ class SpringAiImplicitMemoryModelClientTest {
     }
 
     @Test
+    void validatesCandidatesBeyondStorageLimitBeforeTruncatingResult() {
+        assertCode("""
+                {"decision":"LONG_TERM","explicitness":"IMPLICIT","candidates":[
+                  {"memoryType":"PROFILE","predicate":"age","value":"32","valueEvidence":"32岁","evidenceText":"我今年32岁","stability":"TIME_BOUND","temporalScope":"CURRENT","confidence":0.97},
+                  {"memoryType":"WORK_CONTEXT","predicate":"occupation","value":"坐席","valueEvidence":"坐席","evidenceText":"现在是坐席","stability":"TIME_BOUND","temporalScope":"CURRENT","confidence":0.96},
+                  {"memoryType":"WORK_CONTEXT","predicate":"occupation","value":"Java开发","valueEvidence":"Java开发","evidenceText":"以前是Java开发","stability":"TIME_BOUND","confidence":0.95}
+                ]}
+                """, properties(Duration.ofSeconds(1), 2),
+                ImplicitMemoryExtractionException.Code.MODEL_PROTOCOL_ERROR);
+    }
+
+    @Test
+    void validatesLongTermStabilityBeyondStorageLimit() {
+        assertCode("""
+                {"decision":"LONG_TERM","explicitness":"IMPLICIT","candidates":[
+                  {"memoryType":"PROFILE","predicate":"age","value":"32","valueEvidence":"32岁","evidenceText":"我今年32岁","stability":"TIME_BOUND","temporalScope":"CURRENT","confidence":0.97},
+                  {"memoryType":"WORK_CONTEXT","predicate":"occupation","value":"坐席","valueEvidence":"坐席","evidenceText":"现在是坐席","stability":"TIME_BOUND","temporalScope":"CURRENT","confidence":0.96},
+                  {"memoryType":"WORK_CONTEXT","predicate":"occupation","value":"临时坐席","valueEvidence":"临时坐席","evidenceText":"今天临时做坐席","stability":"TEMPORARY","temporalScope":"CURRENT","confidence":0.95}
+                ]}
+                """, properties(Duration.ofSeconds(1), 2),
+                ImplicitMemoryExtractionException.Code.MODEL_PROTOCOL_ERROR);
+    }
+
+    @Test
+    void rejectsCandidateListsBeyondProtocolSafetyLimit() {
+        String candidate = """
+                {"memoryType":"PROFILE","predicate":"age","value":"32","valueEvidence":"32岁","evidenceText":"我今年32岁","stability":"TIME_BOUND","temporalScope":"CURRENT","confidence":0.97}
+                """.strip();
+        String output = "{\"decision\":\"LONG_TERM\",\"explicitness\":\"IMPLICIT\",\"candidates\":["
+                + String.join(",", java.util.Collections.nCopies(9, candidate)) + "]}";
+
+        assertCode(output, properties(Duration.ofSeconds(1), 2),
+                ImplicitMemoryExtractionException.Code.MODEL_PROTOCOL_ERROR);
+    }
+
+    @Test
+    void rejectsTrailingProseAndSecondJsonValue() {
+        assertCode("{\"decision\":\"IGNORE\",\"candidates\":[]} trailing prose",
+                properties(Duration.ofSeconds(1), 3),
+                ImplicitMemoryExtractionException.Code.MODEL_PROTOCOL_ERROR);
+        assertCode("{\"decision\":\"IGNORE\",\"candidates\":[]} {\"ignored\":true}",
+                properties(Duration.ofSeconds(1), 3),
+                ImplicitMemoryExtractionException.Code.MODEL_PROTOCOL_ERROR);
+    }
+
+    @Test
     void parsesIgnoreAndSessionOnlyWithoutCandidates() {
         assertThat(clientReturning(
                 "{\"decision\":\"IGNORE\",\"candidates\":[]}",

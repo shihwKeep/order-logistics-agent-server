@@ -1,7 +1,9 @@
 package com.xjjk.agent.memory.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectReader;
 import com.xjjk.agent.memory.config.UserMemoryProperties;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.ExplicitMemoryResolution;
@@ -46,7 +48,7 @@ public class SpringAiExplicitMemoryExtractor implements ExplicitMemoryExtractor 
     private final ChatClient chatClient;
     private final UserMemoryProperties properties;
     private final ExecutorService modelExecutor;
-    private final ObjectMapper objectMapper;
+    private final ObjectReader responseReader;
 
     public SpringAiExplicitMemoryExtractor(
             @Qualifier("memoryChatClient") ChatClient chatClient,
@@ -57,7 +59,9 @@ public class SpringAiExplicitMemoryExtractor implements ExplicitMemoryExtractor 
         this.chatClient = Objects.requireNonNull(chatClient, "chatClient");
         this.properties = Objects.requireNonNull(properties, "properties");
         this.modelExecutor = Objects.requireNonNull(modelExecutor, "modelExecutor");
-        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
+        this.responseReader = Objects.requireNonNull(objectMapper, "objectMapper")
+                .readerFor(ModelResult.class)
+                .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
     }
 
     @Override
@@ -104,7 +108,7 @@ public class SpringAiExplicitMemoryExtractor implements ExplicitMemoryExtractor 
             throw failure(CodeAlias.PROTOCOL);
         }
         try {
-            ModelResult result = objectMapper.readValue(output, ModelResult.class);
+            ModelResult result = responseReader.readValue(output);
             ExplicitMemoryResolution.Action action = ExplicitMemoryResolution.Action.valueOf(
                     requireText(result.action()));
             double confidence = requireConfidence(result.confidence());
