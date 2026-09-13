@@ -134,6 +134,29 @@ class ExplicitMemoryCandidateValidatorTest {
     }
 
     @Test
+    void rejectsGovernmentIdentityMemoriesFromExplicitRequests() {
+        for (String[] fact : new String[][]{
+                {"passport_number", "我的编号是E12345678", "E12345678"},
+                {"document_reference", "我的护照号是E12345678", "E12345678"},
+                {"document_reference", "我的驾驶证号是A12345", "A12345"},
+                {"document_reference", "我的社保号是A12345", "A12345"},
+                {"document_reference", "我的税号是A12345", "A12345"}
+        }) {
+            String source = "请记住" + fact[1];
+            MemoryFactCandidate modelFact = new MemoryFactCandidate(
+                    MemoryType.PROFILE, fact[0], fact[2], fact[2], source,
+                    MemoryStability.STABLE, 0.98);
+
+            assertThatThrownBy(() -> validator.validate(
+                    ExplicitMemoryCandidate.semantic(modelFact, MemoryRetentionType.NORMAL),
+                    source,
+                    false))
+                    .as(fact[0] + ": " + fact[1])
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
     void normalizesAndAcceptsMatchingCandidate() {
         ExplicitMemoryCandidate candidate = new ExplicitMemoryCandidate(
                 MemoryCategory.PREFERENCE_ANSWER_STYLE,

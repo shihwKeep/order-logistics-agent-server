@@ -42,7 +42,8 @@ public class MemorySchemaRegistry {
     private static final Set<String> SENSITIVE_PROFILE_PREDICATE_TOKENS = Set.of(
             "phone", "mobile", "tel", "telephone", "contact", "id", "identity", "card",
             "bank", "account", "address", "location", "health", "medical", "disease",
-            "diagnosis", "whatsapp", "wechat", "qq", "residence", "postal");
+            "diagnosis", "whatsapp", "wechat", "qq", "residence", "postal", "passport",
+            "ssn", "credential");
 
     private static final Map<String, String> ANSWER_LANGUAGES = Map.ofEntries(
             Map.entry("中文", "中文"), Map.entry("汉语", "中文"),
@@ -397,10 +398,20 @@ public class MemorySchemaRegistry {
 
     private static void requireSafeOpenProfilePredicate(String predicate) {
         requireSafeOpenPredicate(predicate);
-        for (String token : predicate.split("_")) {
+        Set<String> tokens = Set.of(predicate.split("_"));
+        for (String token : tokens) {
             if (SENSITIVE_PROFILE_PREDICATE_TOKENS.contains(token)) {
                 throw rejected(SCHEMA);
             }
+        }
+        boolean sensitiveCombination = (tokens.contains("social") && tokens.contains("security"))
+                || (tokens.contains("license")
+                && (tokens.contains("driver") || tokens.contains("number")
+                || tokens.contains("id")))
+                || (tokens.contains("tax")
+                && (tokens.contains("number") || tokens.contains("id")));
+        if (sensitiveCombination) {
+            throw rejected(SCHEMA);
         }
     }
 

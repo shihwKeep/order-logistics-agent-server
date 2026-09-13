@@ -28,6 +28,19 @@ class MemorySensitiveContentPolicyTest {
     }
 
     @Test
+    void rejectsGovernmentIdentitySemanticsInChineseAndEnglish() {
+        for (String sensitive : new String[]{
+                "我的护照号是E12345678", "护照号码E12345678", "证件号A12345",
+                "证件号码A12345", "驾驶证号A12345", "驾照号A12345",
+                "社保号A12345", "社会保障号A12345", "税号A12345",
+                "纳税人识别号A12345", "passport number E12345678", "SSN 123-45-6789",
+                "social security number 123-45-6789", "national ID A12345",
+                "driver license A12345", "tax ID A12345"}) {
+            assertThat(policy.isAllowed(sensitive)).as(sensitive).isFalse();
+        }
+    }
+
+    @Test
     void keepsOrdinaryNumbersAndProfileValuesAllowed() {
         assertThat(policy.isAllowed("32岁")).isTrue();
         assertThat(policy.isAllowed("编号32")).isTrue();

@@ -211,7 +211,9 @@ class MemorySchemaRegistryTest {
                 "bank_account", "account_id",
                 "home_address", "current_location", "health_status", "medical_history",
                 "disease_history", "diagnosis_result", "whatsapp", "wechat", "qq",
-                "residence", "postal_address"}) {
+                "residence", "postal_address", "passport", "passport_number", "ssn",
+                "social_security", "national_id", "government_id", "identity_document",
+                "credential", "license_number", "driver_license", "tax_id", "tax_number"}) {
             assertThatThrownBy(() -> registry.resolve(candidate(
                     MemoryType.PROFILE, predicate, "普通值", "普通值")))
                     .as(predicate)
@@ -219,6 +221,16 @@ class MemorySchemaRegistryTest {
                     .extracting(error -> ((MemoryCandidateValidationException) error).reason())
                     .isEqualTo(MemoryCandidateValidationException.Reason.SCHEMA);
         }
+    }
+
+    @Test
+    void allowsClearlyNonIdentifyingProfessionalLicensePreferences() {
+        var result = registry.resolve(candidate(
+                MemoryType.PROFILE, "professional_license_preference",
+                "云认证优先", "云认证优先"));
+
+        assertThat(result.canonicalKey()).matches("profile\\.open\\.[0-9a-f]{64}");
+        assertThat(result.requiresSemanticVerification()).isTrue();
     }
 
     @Test

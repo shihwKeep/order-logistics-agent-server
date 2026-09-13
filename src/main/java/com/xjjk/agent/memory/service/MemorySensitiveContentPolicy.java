@@ -17,6 +17,13 @@ public class MemorySensitiveContentPolicy {
                     + "肝炎|乙肝|甲肝|丙肝|艾滋|抑郁|焦虑|服用|用药|药物|药品|"
                     + "过敏|手术|症状|阿司匹林)"
     );
+    private static final Pattern GOVERNMENT_IDENTITY = Pattern.compile(
+            "(?:护照(?:号|号码)|证件(?:号|号码)|驾驶证(?:号|号码)|驾照(?:号|号码)|"
+                    + "社保(?:号|号码)|社会保障(?:号|号码)|税号|纳税人识别号|"
+                    + "passport\\s*(?:number|no\\.?)?|\\bssn\\b|"
+                    + "social\\s+security\\s*(?:number|no\\.?)?|national\\s+id|"
+                    + "driver(?:'s)?\\s+licen[cs]e(?:\\s*(?:number|no\\.?))?|tax\\s+id)",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern BUSINESS_RECORD = Pattern.compile(
             "(?:订单号|订单编号|物流单号|运单号|快递单号|退款记录|退款单|退款编号)"
     );
@@ -63,6 +70,7 @@ public class MemorySensitiveContentPolicy {
                 && !PHONE.matcher(digitsOnly).find()
                 && !BANK_CARD.matcher(digitsOnly).find()
                 && !HEALTH.matcher(value).find()
+                && !GOVERNMENT_IDENTITY.matcher(privacyNormalized).find()
                 && !BUSINESS_RECORD.matcher(value).find()
                 && !EXACT_ADDRESS.matcher(value).find()
                 && !CUSTOMER_DATA.matcher(value).find()

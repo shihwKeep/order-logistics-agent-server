@@ -88,8 +88,26 @@ class GeneralSemanticMemoryAcceptanceTest {
         assertThat(validator.validate(candidate, source).canonicalContent()).isNotBlank();
     }
 
+    @org.junit.jupiter.api.Test
+    void rejectsGovernmentIdentityPredicateThroughTheFullValidator() {
+        String source = "我的编号是E12345678";
+        MemoryFactCandidate candidate = new MemoryFactCandidate(
+                MemoryType.PROFILE, "passport_number", "E12345678", "E12345678",
+                source, MemoryStability.STABLE, 0.99);
+
+        assertThatThrownBy(() -> validator.validate(candidate, source))
+                .isInstanceOfSatisfying(
+                        MemoryCandidateValidationException.class,
+                        error -> assertThat(error.reason())
+                                .isEqualTo(MemoryCandidateValidationException.Reason.SCHEMA));
+    }
+
     private static Stream<Arguments> sensitiveProfileFacts() {
         return Stream.of(
+                profileFact("我的护照号是E12345678", "document_reference", "E12345678"),
+                profileFact("我的驾驶证号是A12345", "document_reference", "A12345"),
+                profileFact("我的社保号是A12345", "document_reference", "A12345"),
+                profileFact("我的税号是A12345", "document_reference", "A12345"),
                 profileFact("我的 WhatsApp 是+86 (138) 0013.8000", "whatsapp",
                         "+86 (138) 0013.8000"),
                 profileFact("我家在浦东新区世纪大道100号", "residence",
