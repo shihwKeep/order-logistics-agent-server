@@ -160,6 +160,18 @@ class ExplicitMemoryCandidateValidatorTest {
     }
 
     @Test
+    void rejectsCurrentAndHistoricalScopeContradictedByEvidenceAnchors() {
+        assertTemporalRejected("请记住我以前是Java开发", "我以前是Java开发",
+                MemoryTemporalScope.CURRENT);
+        assertTemporalRejected("请记住我现在是坐席", "我现在是坐席",
+                MemoryTemporalScope.HISTORICAL);
+        assertTemporalRejected("请记住我是坐席", "我是坐席",
+                MemoryTemporalScope.HISTORICAL);
+        assertTemporalRejected("请记住我以前是Java开发，现在是坐席",
+                "我以前是Java开发，现在是坐席", MemoryTemporalScope.HISTORICAL);
+    }
+
+    @Test
     void rejectsFormattedProfilePiiFromExplicitMemoryRequests() {
         for (String[] fact : new String[][]{
                 {"whatsapp", "+86 (138) 0013.8000"},
@@ -387,5 +399,26 @@ class ExplicitMemoryCandidateValidatorTest {
     private void assertRejected(ExplicitMemoryCandidate candidate, boolean permanent, String original) {
         assertThatThrownBy(() -> validator.validate(candidate, original, permanent))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private void assertTemporalRejected(
+            String original,
+            String evidence,
+            MemoryTemporalScope temporalScope) {
+        MemoryFactCandidate fact = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT,
+                "occupation",
+                evidence.contains("Java") ? "Java开发" : "坐席",
+                evidence.contains("Java") ? "Java开发" : "坐席",
+                evidence,
+                MemoryStability.TIME_BOUND,
+                temporalScope,
+                0.98);
+        assertThatThrownBy(() -> validator.validate(
+                ExplicitMemoryCandidate.semantic(fact, MemoryRetentionType.NORMAL),
+                original,
+                false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("MEMORY_CONTENT_REJECTED");
     }
 }

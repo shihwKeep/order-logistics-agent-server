@@ -121,6 +121,56 @@ class ImplicitMemoryCandidateValidatorTest {
     }
 
     @Test
+    void rejectsCurrentAndHistoricalScopeContradictedByEvidenceAnchors() {
+        MemoryFactCandidate historicalMarkedCurrent = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT, "occupation", "Java开发", "Java开发",
+                "我以前是Java开发", MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.CURRENT, 0.96);
+        MemoryFactCandidate currentMarkedHistorical = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT, "occupation", "坐席", "坐席",
+                "我现在是坐席", MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.HISTORICAL, 0.96);
+        MemoryFactCandidate unanchoredHistorical = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT, "occupation", "坐席", "坐席",
+                "我是坐席", MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.HISTORICAL, 0.96);
+
+        assertSemanticRejected(historicalMarkedCurrent,
+                historicalMarkedCurrent.evidenceText(),
+                MemoryCandidateValidationException.Reason.EVIDENCE);
+        assertSemanticRejected(currentMarkedHistorical,
+                currentMarkedHistorical.evidenceText(),
+                MemoryCandidateValidationException.Reason.EVIDENCE);
+        assertSemanticRejected(unanchoredHistorical,
+                unanchoredHistorical.evidenceText(),
+                MemoryCandidateValidationException.Reason.EVIDENCE);
+    }
+
+    @Test
+    void acceptsSplitTemporalCandidatesOnlyWithCandidateSpecificClauses() {
+        String source = "以前是Java开发，现在是坐席";
+        MemoryFactCandidate historical = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT, "occupation", "Java开发", "Java开发",
+                "以前是Java开发", MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.HISTORICAL, 0.96);
+        MemoryFactCandidate current = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT, "occupation", "坐席", "坐席",
+                "现在是坐席", MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.CURRENT, 0.96);
+        MemoryFactCandidate ambiguousWholeSentence = new MemoryFactCandidate(
+                MemoryType.WORK_CONTEXT, "occupation", "Java开发", "Java开发",
+                source, MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.HISTORICAL, 0.96);
+
+        assertThat(semanticValidator.validate(historical, source).temporalScope())
+                .isEqualTo(MemoryTemporalScope.HISTORICAL);
+        assertThat(semanticValidator.validate(current, source).temporalScope())
+                .isEqualTo(MemoryTemporalScope.CURRENT);
+        assertSemanticRejected(ambiguousWholeSentence, source,
+                MemoryCandidateValidationException.Reason.EVIDENCE);
+    }
+
+    @Test
     void rejectsUngroundedFactsWithSpecificSafeReasons() {
         assertSemanticRejected(programmingLanguage(
                         "Python", "Java", "我平时用 Java 开发", 0.96),

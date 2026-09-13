@@ -10,6 +10,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import com.xjjk.agent.memory.service.ImplicitMemoryCandidateValidator;
 import com.xjjk.agent.memory.service.MemorySchemaRegistry;
 import com.xjjk.agent.memory.service.MemorySensitiveContentPolicy;
+import com.xjjk.agent.memory.service.MemoryTemporalEvidencePolicy;
 
 import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -64,11 +65,13 @@ public class ImplicitMemoryConfiguration {
     public ImplicitMemoryCandidateValidator implicitMemoryCandidateValidator(
             MemorySensitiveContentPolicy sensitivePolicy,
             MemorySchemaRegistry schemaRegistry,
+            MemoryTemporalEvidencePolicy temporalEvidencePolicy,
             ImplicitMemoryProperties implicitProperties,
             UserMemoryProperties memoryProperties
     ) {
         return new ImplicitMemoryCandidateValidator(
-                sensitivePolicy, schemaRegistry, implicitProperties,
+                sensitivePolicy, schemaRegistry, temporalEvidencePolicy,
+                implicitProperties,
                 memoryProperties.maxContentLength(), memoryProperties.maxEvidenceLength());
     }
 }

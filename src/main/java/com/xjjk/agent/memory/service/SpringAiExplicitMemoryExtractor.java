@@ -61,7 +61,8 @@ public class SpringAiExplicitMemoryExtractor implements ExplicitMemoryExtractor 
         this.modelExecutor = Objects.requireNonNull(modelExecutor, "modelExecutor");
         this.responseReader = Objects.requireNonNull(objectMapper, "objectMapper")
                 .readerFor(ModelResult.class)
-                .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+                .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     }
 
     @Override

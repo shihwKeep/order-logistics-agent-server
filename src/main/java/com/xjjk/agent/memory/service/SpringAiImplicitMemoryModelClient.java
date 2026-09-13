@@ -69,7 +69,8 @@ public class SpringAiImplicitMemoryModelClient implements ImplicitMemoryModelCli
         this.modelExecutor = Objects.requireNonNull(modelExecutor, "modelExecutor");
         this.responseReader = Objects.requireNonNull(objectMapper, "objectMapper")
                 .readerFor(SemanticModelResponse.class)
-                .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+                .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     }
 
     @Override

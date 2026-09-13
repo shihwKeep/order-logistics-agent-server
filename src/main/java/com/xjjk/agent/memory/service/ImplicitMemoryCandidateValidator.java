@@ -14,6 +14,7 @@ public class ImplicitMemoryCandidateValidator {
     private final MemorySensitiveContentPolicy sensitivePolicy;
     private final MemoryCategoryContentPolicy categoryPolicy;
     private final MemorySchemaRegistry schemaRegistry;
+    private final MemoryTemporalEvidencePolicy temporalEvidencePolicy;
     private final ImplicitMemoryProperties properties;
     private final int maxContentCodePoints;
     private final int maxEvidenceCodePoints;
@@ -25,12 +26,9 @@ public class ImplicitMemoryCandidateValidator {
             int maxContentCodePoints,
             int maxEvidenceCodePoints
     ) {
-        this.sensitivePolicy = Objects.requireNonNull(sensitivePolicy, "sensitivePolicy");
-        this.categoryPolicy = Objects.requireNonNull(categoryPolicy, "categoryPolicy");
-        this.schemaRegistry = null;
-        this.properties = Objects.requireNonNull(properties, "properties");
-        this.maxContentCodePoints = requirePositive(maxContentCodePoints);
-        this.maxEvidenceCodePoints = requirePositive(maxEvidenceCodePoints);
+        this(sensitivePolicy, Objects.requireNonNull(categoryPolicy, "categoryPolicy"),
+                null, new MemoryTemporalEvidencePolicy(), properties,
+                maxContentCodePoints, maxEvidenceCodePoints);
     }
 
     public ImplicitMemoryCandidateValidator(
@@ -40,9 +38,38 @@ public class ImplicitMemoryCandidateValidator {
             int maxContentCodePoints,
             int maxEvidenceCodePoints
     ) {
+        this(sensitivePolicy, null, Objects.requireNonNull(schemaRegistry, "schemaRegistry"),
+                new MemoryTemporalEvidencePolicy(), properties,
+                maxContentCodePoints, maxEvidenceCodePoints);
+    }
+
+    public ImplicitMemoryCandidateValidator(
+            MemorySensitiveContentPolicy sensitivePolicy,
+            MemorySchemaRegistry schemaRegistry,
+            MemoryTemporalEvidencePolicy temporalEvidencePolicy,
+            ImplicitMemoryProperties properties,
+            int maxContentCodePoints,
+            int maxEvidenceCodePoints
+    ) {
+        this(sensitivePolicy, null, Objects.requireNonNull(schemaRegistry, "schemaRegistry"),
+                temporalEvidencePolicy, properties,
+                maxContentCodePoints, maxEvidenceCodePoints);
+    }
+
+    private ImplicitMemoryCandidateValidator(
+            MemorySensitiveContentPolicy sensitivePolicy,
+            MemoryCategoryContentPolicy categoryPolicy,
+            MemorySchemaRegistry schemaRegistry,
+            MemoryTemporalEvidencePolicy temporalEvidencePolicy,
+            ImplicitMemoryProperties properties,
+            int maxContentCodePoints,
+            int maxEvidenceCodePoints
+    ) {
         this.sensitivePolicy = Objects.requireNonNull(sensitivePolicy, "sensitivePolicy");
-        this.categoryPolicy = null;
-        this.schemaRegistry = Objects.requireNonNull(schemaRegistry, "schemaRegistry");
+        this.categoryPolicy = categoryPolicy;
+        this.schemaRegistry = schemaRegistry;
+        this.temporalEvidencePolicy = Objects.requireNonNull(
+                temporalEvidencePolicy, "temporalEvidencePolicy");
         this.properties = Objects.requireNonNull(properties, "properties");
         this.maxContentCodePoints = requirePositive(maxContentCodePoints);
         this.maxEvidenceCodePoints = requirePositive(maxEvidenceCodePoints);
@@ -65,7 +92,8 @@ public class ImplicitMemoryCandidateValidator {
                 sourceMessage == null ? "" : sourceMessage);
         String evidence = normalizeSemantic(candidate.evidenceText());
         String valueEvidence = normalizeSemantic(candidate.valueEvidence());
-        if (!source.contains(evidence) || !evidence.contains(valueEvidence)) {
+        if (!source.contains(evidence) || !evidence.contains(valueEvidence)
+                || !temporalEvidencePolicy.isSupported(candidate, evidence)) {
             throw semanticRejected(MemoryCandidateValidationException.Reason.EVIDENCE);
         }
         requireSemanticLength(evidence, maxEvidenceCodePoints);

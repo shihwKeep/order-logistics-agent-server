@@ -1,6 +1,7 @@
 package com.xjjk.agent.memory.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.xjjk.agent.memory.config.UserMemoryProperties;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCandidate;
 import com.xjjk.agent.memory.domain.ExplicitMemoryResolution;
@@ -112,6 +113,27 @@ class SpringAiExplicitMemoryExtractorTest {
     }
 
     @Test
+    void rejectsUnknownFieldsLocallyWithoutMutatingSharedMapper() {
+        ObjectMapper sharedMapper = new ObjectMapper()
+                .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        String outputTemplate = """
+                {"action":"SAVE","memoryType":"PROFILE","predicate":"age","value":"32",
+                 "valueEvidence":"32岁","evidenceText":"请记住我今年32岁",
+                 "stability":"TIME_BOUND","temporalScope":"CURRENT","retention":"NORMAL","confidence":0.98,%s}
+                """;
+        for (String unknownField : List.of(
+                "\"canonicalKey\":\"profile.age\"",
+                "\"category\":\"PROFILE_PERSONAL_FACT\"",
+                "\"content\":\"用户年龄为32岁\"",
+                "\"unexpected\":true")) {
+            assertProtocolFailure(outputTemplate.formatted(unknownField), sharedMapper);
+        }
+
+        assertThat(sharedMapper.isEnabled(
+                DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)).isFalse();
+    }
+
+    @Test
     void promptUsesGeneralFactSchemaAndDoesNotTrustModelCanonicalContent() {
         ChatClient client = mock(ChatClient.class);
         ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
@@ -213,8 +235,13 @@ class SpringAiExplicitMemoryExtractorTest {
     }
 
     private void assertProtocolFailure(String output) {
+        assertProtocolFailure(output, new ObjectMapper());
+    }
+
+    private void assertProtocolFailure(String output, ObjectMapper objectMapper) {
         SpringAiExplicitMemoryExtractor extractor = extractor(
-                clientReturning(output), properties(Duration.ofSeconds(1)), executor());
+                clientReturning(output), properties(Duration.ofSeconds(1)), executor(),
+                objectMapper);
         assertThatThrownBy(() -> extractor.resolve("你以后都叫我石海文"))
                 .isInstanceOfSatisfying(ExplicitMemoryExtractionException.class, error -> {
                     assertThat(error.code()).isEqualTo(
@@ -240,7 +267,16 @@ class SpringAiExplicitMemoryExtractorTest {
 
     private SpringAiExplicitMemoryExtractor extractor(
             ChatClient client, UserMemoryProperties properties, ExecutorService executor) {
-        return new SpringAiExplicitMemoryExtractor(client, properties, executor, new ObjectMapper());
+        return extractor(client, properties, executor, new ObjectMapper());
+    }
+
+    private SpringAiExplicitMemoryExtractor extractor(
+            ChatClient client,
+            UserMemoryProperties properties,
+            ExecutorService executor,
+            ObjectMapper objectMapper) {
+        return new SpringAiExplicitMemoryExtractor(
+                client, properties, executor, objectMapper);
     }
 
     private UserMemoryProperties properties(Duration timeout) {

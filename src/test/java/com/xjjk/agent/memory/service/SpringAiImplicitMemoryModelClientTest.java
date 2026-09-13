@@ -1,6 +1,7 @@
 package com.xjjk.agent.memory.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.xjjk.agent.memory.config.ImplicitMemoryProperties;
 import com.xjjk.agent.memory.domain.MemoryDecision;
 import com.xjjk.agent.memory.domain.MemoryExplicitness;
@@ -174,6 +175,30 @@ class SpringAiImplicitMemoryModelClientTest {
     }
 
     @Test
+    void rejectsUnknownFieldsLocallyWithoutMutatingSharedMapper() {
+        ObjectMapper sharedMapper = new ObjectMapper()
+                .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        String candidateTemplate = """
+                {"decision":"LONG_TERM","explicitness":"IMPLICIT","candidates":[
+                  {"memoryType":"PROFILE","predicate":"age","value":"32","valueEvidence":"32岁","evidenceText":"我今年32岁","stability":"TIME_BOUND","temporalScope":"CURRENT","confidence":0.97,%s}
+                ]}
+                """;
+        for (String unknownField : List.of(
+                "\"canonicalKey\":\"profile.age\"",
+                "\"category\":\"PROFILE_PERSONAL_FACT\"",
+                "\"content\":\"用户年龄为32岁\"",
+                "\"unexpected\":true")) {
+            assertProtocolFailure(candidateTemplate.formatted(unknownField), sharedMapper);
+        }
+        assertProtocolFailure(
+                "{\"decision\":\"IGNORE\",\"candidates\":[],\"unexpected\":true}",
+                sharedMapper);
+
+        assertThat(sharedMapper.isEnabled(
+                DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)).isFalse();
+    }
+
+    @Test
     void parsesIgnoreAndSessionOnlyWithoutCandidates() {
         assertThat(clientReturning(
                 "{\"decision\":\"IGNORE\",\"candidates\":[]}",
@@ -284,8 +309,25 @@ class SpringAiImplicitMemoryModelClientTest {
             String output,
             ImplicitMemoryProperties properties,
             ExecutorService executor) {
+        return clientReturning(output, properties, executor, new ObjectMapper());
+    }
+
+    private SpringAiImplicitMemoryModelClient clientReturning(
+            String output,
+            ImplicitMemoryProperties properties,
+            ExecutorService executor,
+            ObjectMapper objectMapper) {
         return new SpringAiImplicitMemoryModelClient(
-                chatClientReturning(output), properties, executor, new ObjectMapper());
+                chatClientReturning(output), properties, executor, objectMapper);
+    }
+
+    private void assertProtocolFailure(String output, ObjectMapper objectMapper) {
+        SpringAiImplicitMemoryModelClient client = clientReturning(
+                output, properties(Duration.ofSeconds(1), 3), executor(), objectMapper);
+        assertThatThrownBy(() -> client.analyze(request()))
+                .isInstanceOfSatisfying(ImplicitMemoryExtractionException.class,
+                        error -> assertThat(error.code()).isEqualTo(
+                                ImplicitMemoryExtractionException.Code.MODEL_PROTOCOL_ERROR));
     }
 
     private ChatClient chatClientReturning(String output) {
