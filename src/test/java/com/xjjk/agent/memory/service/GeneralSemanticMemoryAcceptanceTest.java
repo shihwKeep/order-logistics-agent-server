@@ -57,9 +57,6 @@ class GeneralSemanticMemoryAcceptanceTest {
                         MemoryType.WORK_CONTEXT, "occupation",
                         "跨境电商供应链平台建设", "跨境电商供应链平台建设",
                         "用户当前的职业是跨境电商供应链平台建设", "SEMANTIC_REQUIRED"),
-                fact("我今年32岁",
-                        MemoryType.PROFILE, "age",
-                        "32", "32岁", "用户曾表示年龄为32岁", "SEMANTIC_REQUIRED"),
                 fact("我最喜欢的城市是杭州",
                         MemoryType.PROFILE, "favorite_city",
                         "杭州", "杭州", "用户提供的个人画像事实（favorite_city）是杭州",
@@ -71,18 +68,59 @@ class GeneralSemanticMemoryAcceptanceTest {
         );
     }
 
-    @org.junit.jupiter.api.Test
-    void rejectsSensitiveOpenProfileFactsThroughTheFullValidator() {
-        String source = "我的手机号是13800138000";
-        MemoryFactCandidate candidate = new MemoryFactCandidate(
-                MemoryType.PROFILE, "phone_number", "13800138000", "13800138000",
-                source, MemoryStability.STABLE, 0.99);
-
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("sensitiveProfileFacts")
+    void rejectsSensitiveOpenProfileFactsThroughTheFullValidator(
+            String source,
+            MemoryFactCandidate candidate) {
         assertThatThrownBy(() -> validator.validate(candidate, source))
                 .isInstanceOfSatisfying(
                         MemoryCandidateValidationException.class,
                         error -> assertThat(error.reason())
                                 .isEqualTo(MemoryCandidateValidationException.Reason.SENSITIVE));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("safeProfileFacts")
+    void acceptsOrdinaryLowRiskProfileFacts(
+            String source,
+            MemoryFactCandidate candidate) {
+        assertThat(validator.validate(candidate, source).canonicalContent()).isNotBlank();
+    }
+
+    private static Stream<Arguments> sensitiveProfileFacts() {
+        return Stream.of(
+                profileFact("我的电话是138-0013-8000", "phone_number", "138-0013-8000"),
+                profileFact("我的身份证是320 311 1990 0101 1234", "identity_code",
+                        "320 311 1990 0101 1234"),
+                profileFact("我的银行卡是6222 0212 3456 7890 123", "payment_reference",
+                        "6222 0212 3456 7890 123"),
+                profileFact("我的家庭地址是上海市浦东新区世纪大道100号", "home_address",
+                        "上海市浦东新区世纪大道100号"),
+                profileFact("我被诊断为高血压", "health_status", "高血压")
+        );
+    }
+
+    private static Stream<Arguments> safeProfileFacts() {
+        return Stream.of(
+                profileFact("我今年32岁", "age", "32岁"),
+                profileFact("我最喜欢的城市是杭州", "favorite_city", "杭州"),
+                Arguments.of("我的职业是架构师",
+                        new MemoryFactCandidate(
+                                MemoryType.WORK_CONTEXT, "occupation", "架构师", "架构师",
+                                "我的职业是架构师", MemoryStability.STABLE, 0.99))
+        );
+    }
+
+    private static Arguments profileFact(String source, String predicate, String value) {
+        String canonicalValue = "age".equals(predicate)
+                ? value.replace("岁", "") : value;
+        return Arguments.of(source,
+                new MemoryFactCandidate(
+                        MemoryType.PROFILE, predicate, canonicalValue, value,
+                        source, "age".equals(predicate)
+                                ? MemoryStability.TIME_BOUND : MemoryStability.STABLE,
+                        0.99));
     }
 
     private static Arguments fact(

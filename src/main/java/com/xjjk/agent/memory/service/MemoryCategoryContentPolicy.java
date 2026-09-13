@@ -88,6 +88,7 @@ public class MemoryCategoryContentPolicy {
         Objects.requireNonNull(category, "category");
         return switch (category) {
             case PROFILE_PREFERRED_NAME -> supportsPreferredName(evidence, canonicalContent);
+            // 结构化画像暂不支持自由文本编辑；查看/删除仍由管理接口提供。
             case PROFILE_PERSONAL_FACT -> false;
             case PREFERENCE_LANGUAGE -> supportsKnownCanonicalGroup(
                     evidence, canonicalContent, LANGUAGES, "用户偏好使用", "交流");
@@ -105,6 +106,7 @@ public class MemoryCategoryContentPolicy {
         }
         return switch (category) {
             case PROFILE_PREFERRED_NAME -> preferredName(normalized);
+            // 保持 fail-closed，避免编辑内容与 schema v3 结构化字段不一致。
             case PROFILE_PERSONAL_FACT -> Optional.empty();
             case PREFERENCE_LANGUAGE -> singleGroup(
                     normalized, LANGUAGES, LANGUAGE_FILLERS, "用户偏好使用", "交流");

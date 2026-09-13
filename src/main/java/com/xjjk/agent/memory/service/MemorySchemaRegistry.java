@@ -39,6 +39,10 @@ public class MemorySchemaRegistry {
     private static final Pattern SAFE_OPEN_PREDICATE = Pattern.compile(
             "[a-z][a-z0-9_]{0,63}");
     private static final Pattern AGE = Pattern.compile("([0-9]{1,3})(?:岁)?");
+    private static final Set<String> SENSITIVE_PROFILE_PREDICATE_TOKENS = Set.of(
+            "phone", "mobile", "tel", "telephone", "contact", "id", "identity", "card",
+            "bank", "account", "address", "location", "health", "medical", "disease",
+            "diagnosis");
 
     private static final Map<String, String> ANSWER_LANGUAGES = Map.ofEntries(
             Map.entry("中文", "中文"), Map.entry("汉语", "中文"),
@@ -101,18 +105,24 @@ public class MemorySchemaRegistry {
             case COMMUNICATION_PREFERENCE -> aliasedStable(
                     normalized, "answer_language", "communication.answer_language",
                     "PREFERENCE_LANGUAGE", this::answerLanguage,
-                    value -> "用户偏好使用" + value + "交流",
+                    value -> isHistorical(normalized)
+                            ? "用户过去偏好使用" + value + "交流"
+                            : "用户偏好使用" + value + "交流",
                     DETERMINISTIC_ANSWER_LANGUAGES);
             case RESPONSE_PREFERENCE -> aliasedStable(
                     normalized, "answer_style", "response.answer_style",
                     "PREFERENCE_ANSWER_STYLE", this::answerStyle,
-                    value -> "用户偏好" + value + "回答",
+                    value -> isHistorical(normalized)
+                            ? "用户过去偏好" + value + "回答"
+                            : "用户偏好" + value + "回答",
                     DETERMINISTIC_ANSWER_STYLES);
             case WORK_CONTEXT -> work(normalized);
             case STABLE_PREFERENCE -> open(
-                    normalized, "STABLE_PREFERENCE", "用户的稳定偏好是");
+                    normalized, "STABLE_PREFERENCE",
+                    "用户的稳定偏好是", "用户过去的稳定偏好是");
             case STABLE_USER_FACT -> open(
-                    normalized, "STABLE_USER_FACT", "用户的稳定信息是");
+                    normalized, "STABLE_USER_FACT",
+                    "用户的稳定信息是", "用户过去的稳定信息是");
         };
     }
 
@@ -155,9 +165,9 @@ public class MemorySchemaRegistry {
 
     /** 开放画像事实保留受控 predicate/value，并始终要求语义复核。 */
     private SchemaResolution openProfile(MemoryFactCandidate candidate) {
-        requireSafeOpenPredicate(candidate.predicate());
+        requireSafeOpenProfilePredicate(candidate.predicate());
         String canonical = safeOpenValue(candidate.valueEvidence());
-        requireEquivalent(candidate.value(), canonical, this::safeOpenValue);
+        requireStrictlyEquivalent(candidate.value(), canonical, this::safeOpenValue);
         String key = "profile.open." + MemoryHashing.sha256(candidate.predicate());
         String prefix = isHistorical(candidate)
                 ? "用户曾提供的个人画像事实（" : "用户提供的个人画像事实（";
@@ -265,12 +275,14 @@ public class MemorySchemaRegistry {
     private SchemaResolution open(
             MemoryFactCandidate candidate,
             String legacyCategory,
-            String prefix) {
+            String currentPrefix,
+            String historicalPrefix) {
         String canonical = safeOpenValue(candidate.valueEvidence());
-        requireEquivalent(candidate.value(), canonical, this::safeOpenValue);
+        requireStrictlyEquivalent(candidate.value(), canonical, this::safeOpenValue);
+        String prefix = isHistorical(candidate) ? historicalPrefix : currentPrefix;
         String content = prefix + canonical;
         String key = "fact." + candidate.memoryType().name().toLowerCase(Locale.ROOT)
-                + "." + MemoryHashing.sha256(content);
+                + "." + MemoryHashing.sha256(currentPrefix + canonical);
         return resolved(candidate, key, content, canonical, legacyCategory, true);
     }
 
@@ -289,7 +301,7 @@ public class MemorySchemaRegistry {
                     : key;
             return new SchemaResolution(
                     temporalKey, content, objectMapper.writeValueAsString(canonicalValue),
-                    legacyCategory, semanticVerification);
+                    legacyCategory, semanticVerification || isHistorical(candidate));
         } catch (JsonProcessingException exception) {
             throw rejected(UNSUPPORTED);
         }
@@ -306,6 +318,21 @@ public class MemorySchemaRegistry {
             throw rejected(UNSUPPORTED);
         }
         if (!canonicalEvidence.equalsIgnoreCase(canonicalProposed)) {
+            throw rejected(UNSUPPORTED);
+        }
+    }
+
+    private void requireStrictlyEquivalent(
+            String proposed,
+            String canonicalEvidence,
+            Function<String, String> normalizer) {
+        final String canonicalProposed;
+        try {
+            canonicalProposed = normalizer.apply(proposed);
+        } catch (MemoryCandidateValidationException exception) {
+            throw rejected(UNSUPPORTED);
+        }
+        if (!canonicalEvidence.equals(canonicalProposed)) {
             throw rejected(UNSUPPORTED);
         }
     }
@@ -365,6 +392,15 @@ public class MemorySchemaRegistry {
     private static void requireSafeOpenPredicate(String predicate) {
         if (!SAFE_OPEN_PREDICATE.matcher(predicate).matches()) {
             throw rejected(SCHEMA);
+        }
+    }
+
+    private static void requireSafeOpenProfilePredicate(String predicate) {
+        requireSafeOpenPredicate(predicate);
+        for (String token : predicate.split("_")) {
+            if (SENSITIVE_PROFILE_PREDICATE_TOKENS.contains(token)) {
+                throw rejected(SCHEMA);
+            }
         }
     }
 

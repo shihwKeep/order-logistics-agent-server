@@ -6,6 +6,11 @@ import com.xjjk.agent.memory.domain.MemoryStability;
 import com.xjjk.agent.memory.domain.MemoryTemporalScope;
 import com.xjjk.agent.memory.domain.MemoryType;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -124,16 +129,24 @@ class MemorySchemaRegistryTest {
     @Test
     void resolvesAgeFromPlainOrSuffixedEvidence() {
         var result = registry.resolve(candidate(
-                MemoryType.PROFILE, "age", "32", "32岁"));
-        var inverseForm = registry.resolve(candidate(
-                MemoryType.PROFILE, "age", "32岁", "32"));
+                MemoryType.PROFILE, "age", "32", "32岁",
+                "我今年32岁", MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.CURRENT));
+        var historical = registry.resolve(candidate(
+                MemoryType.PROFILE, "age", "32岁", "32",
+                "我当时32岁", MemoryStability.TIME_BOUND,
+                MemoryTemporalScope.HISTORICAL));
 
         assertThat(result.canonicalKey()).isEqualTo("profile.age");
         assertThat(result.canonicalContent()).isEqualTo("用户曾表示年龄为32岁");
         assertThat(result.valueJson()).isEqualTo("\"32\"");
         assertThat(result.legacyCategory()).isEqualTo("PROFILE_PERSONAL_FACT");
         assertThat(result.requiresSemanticVerification()).isTrue();
-        assertThat(inverseForm).isEqualTo(result);
+        assertThat(historical.canonicalKey())
+                .matches("profile\\.age\\.history\\.[0-9a-f]{32}");
+        assertThat(historical.canonicalContent()).isEqualTo("用户曾表示年龄为32岁");
+        assertThat(historical.valueJson()).isEqualTo("\"32\"");
+        assertThat(historical.requiresSemanticVerification()).isTrue();
     }
 
     @Test
@@ -191,6 +204,42 @@ class MemorySchemaRegistryTest {
     }
 
     @Test
+    void rejectsSensitiveOpenProfilePredicates() {
+        for (String predicate : new String[]{
+                "phone", "mobile_number", "tel", "contact_phone", "id_card",
+                "identity_number", "national_id", "id_number", "credit_card",
+                "bank_account", "account_id",
+                "home_address", "current_location", "health_status", "medical_history",
+                "disease_history", "diagnosis_result"}) {
+            assertThatThrownBy(() -> registry.resolve(candidate(
+                    MemoryType.PROFILE, predicate, "普通值", "普通值")))
+                    .as(predicate)
+                    .isInstanceOf(MemoryCandidateValidationException.class)
+                    .extracting(error -> ((MemoryCandidateValidationException) error).reason())
+                    .isEqualTo(MemoryCandidateValidationException.Reason.SCHEMA);
+        }
+    }
+
+    @Test
+    void comparesOpenValuesAfterUnicodeNormalizationButNotCaseFolding() {
+        assertThat(registry.resolve(candidate(
+                MemoryType.PROFILE, "display_label", "Ａlice", "Alice"))
+                .valueJson()).isEqualTo("\"Alice\"");
+        assertThat(registry.resolve(candidate(
+                MemoryType.STABLE_USER_FACT, "display_label", "Ａlice", "Alice"))
+                .valueJson()).isEqualTo("\"Alice\"");
+
+        assertUnsupported(candidate(
+                MemoryType.PROFILE, "display_label", "Alice", "alice"));
+        assertUnsupported(candidate(
+                MemoryType.STABLE_USER_FACT, "display_label", "Alice", "alice"));
+
+        assertThat(registry.resolve(candidate(
+                MemoryType.WORK_CONTEXT, "primary_programming_language", "JAVA", "java"))
+                .valueJson()).isEqualTo("\"Java\"");
+    }
+
+    @Test
     void historicalAgeUsesAnIdempotentNonConflictingKeyAndPreservesScopeOnTypeCorrection() {
         MemoryFactCandidate candidate = candidate(
                 MemoryType.WORK_CONTEXT, "age", "32", "32岁",
@@ -230,6 +279,9 @@ class MemorySchemaRegistryTest {
 
     @Test
     void boundsHistoricalKeysToThePersistenceColumnLength() {
+        var current = registry.resolve(candidate(
+                MemoryType.STABLE_PREFERENCE, "learning_order",
+                "先看例子再看原理", "先看例子再看原理"));
         var result = registry.resolve(candidate(
                 MemoryType.STABLE_PREFERENCE, "learning_order",
                 "先看例子再看原理", "先看例子再看原理",
@@ -237,8 +289,51 @@ class MemorySchemaRegistryTest {
 
         assertThat(result.canonicalKey()).hasSizeLessThanOrEqualTo(128);
         assertThat(result.canonicalKey())
-                .matches("fact\\.stable_preference\\.[0-9a-f]{64}"
-                        + "\\.history\\.[0-9a-f]{32}");
+                .matches(current.canonicalKey() + "\\.history\\.[0-9a-f]{32}");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("historicalFacts")
+    void rendersEveryHistoricalMemoryTypeWithoutClaimingCurrentState(
+            String description,
+            MemoryFactCandidate candidate,
+            String expectedContent) {
+        var result = registry.resolve(candidate);
+
+        assertThat(result.canonicalContent()).isEqualTo(expectedContent);
+        assertThat(result.canonicalKey()).contains(".history.");
+        assertThat(result.requiresSemanticVerification()).isTrue();
+    }
+
+    private static Stream<Arguments> historicalFacts() {
+        return Stream.of(
+                historicalFact("profile", MemoryType.PROFILE, "preferred_name",
+                        "Alice", "用户过去希望被称为Alice"),
+                historicalFact("communication", MemoryType.COMMUNICATION_PREFERENCE,
+                        "answer_language", "英语", "用户过去偏好使用英文交流"),
+                historicalFact("response", MemoryType.RESPONSE_PREFERENCE,
+                        "answer_style", "简短", "用户过去偏好简洁回答"),
+                historicalFact("work", MemoryType.WORK_CONTEXT,
+                        "primary_programming_language", "java",
+                        "用户过去主要使用 Java 进行开发"),
+                historicalFact("stable preference", MemoryType.STABLE_PREFERENCE,
+                        "learning_order", "先看示例", "用户过去的稳定偏好是先看示例"),
+                historicalFact("stable user fact", MemoryType.STABLE_USER_FACT,
+                        "personal_note", "住过杭州", "用户过去的稳定信息是住过杭州")
+        );
+    }
+
+    private static Arguments historicalFact(
+            String description,
+            MemoryType type,
+            String predicate,
+            String value,
+            String expectedContent) {
+        return Arguments.of(description,
+                candidate(type, predicate, value, value,
+                        "以前的事实是" + value, MemoryStability.STABLE,
+                        MemoryTemporalScope.HISTORICAL),
+                expectedContent);
     }
 
     private static MemoryFactCandidate candidate(
@@ -247,7 +342,8 @@ class MemorySchemaRegistryTest {
             String value,
             String valueEvidence) {
         return candidate(type, predicate, value, valueEvidence,
-                "上下文中的" + valueEvidence + "事实", MemoryTemporalScope.CURRENT);
+                "上下文中的" + valueEvidence + "事实", MemoryStability.STABLE,
+                MemoryTemporalScope.CURRENT);
     }
 
     private static MemoryFactCandidate candidate(
@@ -257,8 +353,27 @@ class MemorySchemaRegistryTest {
             String valueEvidence,
             String evidenceText,
             MemoryTemporalScope temporalScope) {
+        return candidate(type, predicate, value, valueEvidence, evidenceText,
+                MemoryStability.STABLE, temporalScope);
+    }
+
+    private static MemoryFactCandidate candidate(
+            MemoryType type,
+            String predicate,
+            String value,
+            String valueEvidence,
+            String evidenceText,
+            MemoryStability stability,
+            MemoryTemporalScope temporalScope) {
         return new MemoryFactCandidate(
                 type, predicate, value, valueEvidence,
-                evidenceText, MemoryStability.STABLE, temporalScope, 0.96);
+                evidenceText, stability, temporalScope, 0.96);
+    }
+
+    private void assertUnsupported(MemoryFactCandidate candidate) {
+        assertThatThrownBy(() -> registry.resolve(candidate))
+                .isInstanceOf(MemoryCandidateValidationException.class)
+                .extracting(error -> ((MemoryCandidateValidationException) error).reason())
+                .isEqualTo(MemoryCandidateValidationException.Reason.UNSUPPORTED);
     }
 }

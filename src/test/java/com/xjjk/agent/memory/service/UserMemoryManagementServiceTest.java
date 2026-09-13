@@ -132,6 +132,21 @@ class UserMemoryManagementServiceTest {
     }
 
     @Test
+    void editRejectsStructuredPersonalFactsBecauseTheyAreFailClosed() {
+        UserMemoryEntity profile = explicit("profile-1", "用户曾表示年龄为32岁", 1L);
+        profile.setCategory("PROFILE_PERSONAL_FACT");
+        profile.setCanonicalKey("profile.age");
+        when(memoryMapper.selectOwnedVisibleExplicitForUpdate(1L, 2L, 7L, "profile-1"))
+                .thenReturn(profile);
+
+        assertThatThrownBy(() -> service.edit(identity, "profile-1",
+                "用户曾表示年龄为33岁", MemoryRetentionType.NORMAL))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        error -> assertThat(error.errorCode())
+                                .isEqualTo(ApiErrorCode.MEMORY_CONTENT_REJECTED));
+    }
+
+    @Test
     void deleteCreatesSuppressionAndDeleteOutbox() {
         UserMemoryEntity current = explicit("memory-1", "用户偏好简洁回答", 3L);
         when(memoryMapper.selectOwnedVisibleExplicitForUpdate(1L, 2L, 7L, "memory-1"))

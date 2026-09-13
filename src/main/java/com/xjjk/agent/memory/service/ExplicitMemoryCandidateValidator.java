@@ -94,7 +94,8 @@ public class ExplicitMemoryCandidateValidator {
             String originalMessage,
             boolean permanentCommand) {
         if (schemaRegistry == null || candidate.retentionType() == null
-                || candidate.semanticFact().stability() != MemoryStability.STABLE) {
+                || (candidate.semanticFact().stability() != MemoryStability.STABLE
+                && candidate.semanticFact().stability() != MemoryStability.TIME_BOUND)) {
             throw invalid();
         }
         String original = ExplicitMemoryCommandDetector.normalizeWhitespace(

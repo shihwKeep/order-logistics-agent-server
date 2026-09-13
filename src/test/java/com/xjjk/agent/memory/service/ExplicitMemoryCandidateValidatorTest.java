@@ -87,6 +87,28 @@ class ExplicitMemoryCandidateValidatorTest {
     }
 
     @Test
+    void acceptsTimeBoundAgeFromAnExplicitMemoryRequest() {
+        String source = "请记住我今年32岁";
+        MemoryFactCandidate modelFact = new MemoryFactCandidate(
+                MemoryType.PROFILE,
+                "age",
+                "32",
+                "32岁",
+                source,
+                MemoryStability.TIME_BOUND,
+                0.98);
+
+        ExplicitMemoryCandidate result = validator.validate(
+                ExplicitMemoryCandidate.semantic(modelFact, MemoryRetentionType.NORMAL),
+                source,
+                false);
+
+        assertThat(result.category()).isEqualTo(MemoryCategory.PROFILE_PERSONAL_FACT);
+        assertThat(result.canonicalKey()).isEqualTo("profile.age");
+        assertThat(result.content()).isEqualTo("用户曾表示年龄为32岁");
+    }
+
+    @Test
     void normalizesAndAcceptsMatchingCandidate() {
         ExplicitMemoryCandidate candidate = new ExplicitMemoryCandidate(
                 MemoryCategory.PREFERENCE_ANSWER_STYLE,

@@ -7,9 +7,12 @@ import java.util.regex.Pattern;
 
 public class MemorySensitiveContentPolicy {
 
-    private static final Pattern CHINESE_ID = Pattern.compile("(?<!\\d)\\d{17}[0-9Xx](?!\\d)");
+    private static final Pattern CHINESE_ID = Pattern.compile(
+            "(?<!\\d)(?:\\d{15}|\\d{17}[0-9Xx])(?!\\d)");
     private static final Pattern PHONE = Pattern.compile("(?<!\\d)1[3-9]\\d{9}(?!\\d)");
     private static final Pattern BANK_CARD = Pattern.compile("(?<!\\d)\\d{16,19}(?!\\d)");
+    private static final Pattern DIGIT_SEPARATORS = Pattern.compile(
+            "[\\s\\u00a0\\u3000\\-‐‑‒–—−]+");
     private static final Pattern HEALTH = Pattern.compile(
             "(?:诊断为|患者|病人|病历|病史|处方|疾病|高血压|糖尿病|癌症|肿瘤|"
                     + "肝炎|乙肝|甲肝|丙肝|艾滋|抑郁|焦虑|服用|用药|药物|药品|"
@@ -51,10 +54,11 @@ public class MemorySensitiveContentPolicy {
         } catch (RuntimeException exception) {
             return false;
         }
+        String normalizedDigits = DIGIT_SEPARATORS.matcher(value).replaceAll("");
         return sanitized.equals(value)
-                && !CHINESE_ID.matcher(value).find()
-                && !PHONE.matcher(value).find()
-                && !BANK_CARD.matcher(value).find()
+                && !CHINESE_ID.matcher(normalizedDigits).find()
+                && !PHONE.matcher(normalizedDigits).find()
+                && !BANK_CARD.matcher(normalizedDigits).find()
                 && !HEALTH.matcher(value).find()
                 && !BUSINESS_RECORD.matcher(value).find()
                 && !EXACT_ADDRESS.matcher(value).find()

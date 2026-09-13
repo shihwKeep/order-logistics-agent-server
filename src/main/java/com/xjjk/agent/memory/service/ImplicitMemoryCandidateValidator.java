@@ -57,7 +57,8 @@ public class ImplicitMemoryCandidateValidator {
                 || candidate.confidence() > 1.0) {
             throw semanticRejected(MemoryCandidateValidationException.Reason.CONFIDENCE);
         }
-        if (candidate.stability() != MemoryStability.STABLE) {
+        if (candidate.stability() != MemoryStability.STABLE
+                && candidate.stability() != MemoryStability.TIME_BOUND) {
             throw semanticRejected(MemoryCandidateValidationException.Reason.STABILITY);
         }
         String source = ExplicitMemoryCommandDetector.normalizeWhitespace(
