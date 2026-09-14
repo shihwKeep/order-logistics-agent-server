@@ -35,4 +35,10 @@ class ChatReplayLifecycleResultTest {
         assertThat(ChatReplayLifecycleResult.activated(List.of("ACTIVATED"))).isTrue();
         assertThat(ChatReplayLifecycleResult.activated(List.of("TERMINAL"))).isFalse();
     }
+
+    @Test
+    void recognizesNewAndIdempotentConversationBindings() {
+        assertThat(ChatReplayLifecycleResult.bound(List.of("BOUND"))).isTrue();
+        assertThat(ChatReplayLifecycleResult.bound(List.of("ALREADY_BOUND"))).isFalse();
+    }
 }

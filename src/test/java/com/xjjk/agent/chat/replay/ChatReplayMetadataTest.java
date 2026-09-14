@@ -5,8 +5,18 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 class ChatReplayMetadataTest {
+
+    @Test
+    void permitsConversationToBeBoundAfterIdempotentRequestCreation() {
+        Instant now = Instant.parse("2026-09-14T08:00:00Z");
+
+        assertThatCode(() -> new ChatReplayMetadata(
+                1L, 2L, 3L, null, "request", now, now.plusSeconds(30)))
+                .doesNotThrowAnyException();
+    }
 
     @Test
     void rejectsAnExpiryThatDoesNotFollowCreation() {

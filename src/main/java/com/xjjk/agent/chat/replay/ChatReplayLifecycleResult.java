@@ -39,6 +39,17 @@ public final class ChatReplayLifecycleResult {
         };
     }
 
+    public static boolean bound(List<?> result) {
+        String code = first(result);
+        return switch (code) {
+            case "BOUND" -> true;
+            case "ALREADY_BOUND" -> false;
+            case "NOT_FOUND", "IDENTITY_MISMATCH", "CONVERSATION_CONFLICT" ->
+                    throw unavailable();
+            default -> throw new ChatReplayUnavailableException("Redis 返回未知会话绑定结果");
+        };
+    }
+
     private static String first(List<?> result) {
         if (result == null || result.size() != 1) {
             throw new ChatReplayUnavailableException("Redis 生命周期脚本返回不完整");

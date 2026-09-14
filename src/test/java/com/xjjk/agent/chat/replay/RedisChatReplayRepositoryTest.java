@@ -113,6 +113,39 @@ class RedisChatReplayRepositoryTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void readsAnInitializingStatusBeforeConversationBinding() {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        HashOperations<String, Object, Object> hashes = mock(HashOperations.class);
+        when(redis.opsForHash()).thenReturn(hashes);
+        when(hashes.entries(any())).thenReturn(Map.of(
+                "tenantId", "1",
+                "userId", "2",
+                "conversationId", "",
+                "requestId", REQUEST_ID,
+                "state", "RUNNING",
+                "createdAt", "2026-09-14T08:00:00Z",
+                "expiresAt", "2026-09-14T08:00:30Z",
+                "lastSequence", "0"));
+        RedisChatReplayRepository repository = repository(redis);
+
+        assertThat(repository.status(IDENTITY, REQUEST_ID).orElseThrow()
+                .conversationId()).isNull();
+    }
+
+    @Test
+    void atomicallyBindsTheConversationChosenByTheWinningRequest() {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        doReturn(List.of("BOUND"))
+                .when(redis)
+                .execute(any(RedisScript.class), anyList(), any(Object[].class));
+        RedisChatReplayRepository repository = repository(redis);
+
+        assertThat(repository.bindConversation(
+                IDENTITY, REQUEST_ID, "conversation-1")).isTrue();
+    }
+
+    @Test
     void recordsACrossInstanceCancellationRequest() {
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
         doReturn(List.of("REQUESTED"))

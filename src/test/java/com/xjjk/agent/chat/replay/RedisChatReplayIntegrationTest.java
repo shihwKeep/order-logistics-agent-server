@@ -55,12 +55,16 @@ class RedisChatReplayIntegrationTest {
         String requestId = UUID.randomUUID().toString();
         Instant createdAt = Instant.now();
         ChatReplayMetadata metadata = new ChatReplayMetadata(
-                1L, 2L, 3L, "conversation-1", requestId,
+                1L, 2L, 3L, null, requestId,
                 createdAt, createdAt.plusSeconds(30));
 
         assertThat(repository.available()).isTrue();
         assertThat(repository.create(metadata)).isEqualTo(ChatReplayCreateResult.CREATED);
         assertThat(repository.create(metadata)).isEqualTo(ChatReplayCreateResult.EXISTING);
+        assertThat(repository.bindConversation(
+                identity, requestId, "conversation-1")).isTrue();
+        assertThat(repository.bindConversation(
+                identity, requestId, "conversation-1")).isFalse();
         assertThat(repository.activateConnection(identity, requestId, "connection-1")).isTrue();
         assertThat(repository.isActiveConnection(identity, requestId, "connection-1")).isTrue();
         assertThat(repository.activateConnection(identity, requestId, "connection-2")).isTrue();

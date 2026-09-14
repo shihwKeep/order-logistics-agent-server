@@ -10,6 +10,7 @@ import java.util.Optional;
 public interface ChatReplayRepository {
     boolean available();
     ChatReplayCreateResult create(ChatReplayMetadata metadata);
+    boolean bindConversation(AgentIdentity identity, String requestId, String conversationId);
     ChatReplayEvent append(AgentIdentity identity, String requestId, String type, Object payload);
     List<ChatReplayEvent> readAfter(AgentIdentity identity, String requestId,
                                     long afterSequence, Duration blockTimeout);

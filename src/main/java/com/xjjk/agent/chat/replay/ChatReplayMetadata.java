@@ -20,8 +20,8 @@ public record ChatReplayMetadata(
         if (tenantId <= 0 || userId <= 0 || orgId <= 0) {
             throw new IllegalArgumentException("聊天任务身份 ID 必须大于零");
         }
-        if (!StringUtils.hasText(conversationId) || !StringUtils.hasText(requestId)) {
-            throw new IllegalArgumentException("会话和请求 ID 不能为空");
+        if (!StringUtils.hasText(requestId)) {
+            throw new IllegalArgumentException("请求 ID 不能为空");
         }
         Objects.requireNonNull(createdAt, "创建时间不能为空");
         Objects.requireNonNull(expiresAt, "截止时间不能为空");

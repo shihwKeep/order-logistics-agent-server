@@ -35,12 +35,15 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
     private static final DefaultRedisScript<List> CANCEL_SCRIPT;
     @SuppressWarnings("rawtypes")
     private static final DefaultRedisScript<List> ACTIVATE_CONNECTION_SCRIPT;
+    @SuppressWarnings("rawtypes")
+    private static final DefaultRedisScript<List> BIND_CONVERSATION_SCRIPT;
 
     static {
         APPEND_SCRIPT = script("redis/chat-stream-append.lua");
         CREATE_SCRIPT = script("redis/chat-stream-create.lua");
         CANCEL_SCRIPT = script("redis/chat-stream-cancel.lua");
         ACTIVATE_CONNECTION_SCRIPT = script("redis/chat-stream-activate-connection.lua");
+        BIND_CONVERSATION_SCRIPT = script("redis/chat-stream-bind-conversation.lua");
     }
 
     @Override
@@ -54,7 +57,7 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
                 Long.toString(metadata.tenantId()),
                 Long.toString(metadata.userId()),
                 Long.toString(metadata.orgId()),
-                metadata.conversationId(),
+                metadata.conversationId() == null ? "" : metadata.conversationId(),
                 metadata.requestId(),
                 metadata.createdAt().toString(),
                 metadata.expiresAt().toString(),
@@ -79,7 +82,7 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
         }
         try {
             return Optional.of(new ChatReplaySnapshot(
-                    text(values, "conversationId"),
+                    nullableText(values, "conversationId"),
                     text(values, "requestId"),
                     ChatReplayState.valueOf(text(values, "state")),
                     Instant.parse(text(values, "createdAt")),
@@ -93,6 +96,26 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
             }
             throw new ChatReplayUnavailableException("Redis 聊天任务状态不合法", exception);
         }
+    }
+
+    @Override
+    public boolean bindConversation(
+            AgentIdentity identity,
+            String requestId,
+            String conversationId
+    ) {
+        Objects.requireNonNull(identity, "认证身份不能为空");
+        if (conversationId == null || conversationId.isBlank()) {
+            throw new IllegalArgumentException("会话 ID 不能为空");
+        }
+        List<?> result = execute(
+                BIND_CONVERSATION_SCRIPT,
+                List.of(keys.meta(identity.tenantId(), identity.userId(), requestId)),
+                Long.toString(identity.tenantId()),
+                Long.toString(identity.userId()),
+                conversationId,
+                Long.toString(properties.ttl().toMillis()));
+        return ChatReplayLifecycleResult.bound(result);
     }
 
     @Override
