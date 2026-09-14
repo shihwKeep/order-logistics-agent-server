@@ -29,4 +29,10 @@ class ChatReplayLifecycleResultTest {
         assertThat(ChatReplayLifecycleResult.cancelled(List.of("REQUESTED"))).isTrue();
         assertThat(ChatReplayLifecycleResult.cancelled(List.of("TERMINAL"))).isFalse();
     }
+
+    @Test
+    void recognizesAnActivatedRelayConnection() {
+        assertThat(ChatReplayLifecycleResult.activated(List.of("ACTIVATED"))).isTrue();
+        assertThat(ChatReplayLifecycleResult.activated(List.of("TERMINAL"))).isFalse();
+    }
 }

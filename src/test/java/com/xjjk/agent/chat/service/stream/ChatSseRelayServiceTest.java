@@ -35,6 +35,14 @@ class ChatSseRelayServiceTest {
         ChatReplayRepository repository = mock(ChatReplayRepository.class);
         ChatReplaySnapshot snapshot = runningSnapshot();
         when(repository.status(IDENTITY, REQUEST_ID)).thenReturn(Optional.of(snapshot));
+        when(repository.activateConnection(
+                org.mockito.ArgumentMatchers.eq(IDENTITY),
+                org.mockito.ArgumentMatchers.eq(REQUEST_ID),
+                org.mockito.ArgumentMatchers.anyString())).thenReturn(true);
+        when(repository.isActiveConnection(
+                org.mockito.ArgumentMatchers.eq(IDENTITY),
+                org.mockito.ArgumentMatchers.eq(REQUEST_ID),
+                org.mockito.ArgumentMatchers.anyString())).thenReturn(true);
         ChatReplayEvent done = new ChatReplayEvent(
                 8L, "done", Instant.now(),
                 new ObjectMapper().createObjectNode().put("messageId", "message-1"));

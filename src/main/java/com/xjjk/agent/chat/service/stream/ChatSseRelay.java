@@ -59,8 +59,16 @@ public final class ChatSseRelay implements Runnable {
         relayThread = Thread.currentThread();
         try {
             while (!disconnected.get()) {
+                if (!ownsActiveConnection()) {
+                    disconnected.set(true);
+                    return;
+                }
                 List<ChatReplayEvent> events = repository.readAfter(
                         identity, requestId, lastSequence, blockTimeout);
+                if (!ownsActiveConnection()) {
+                    disconnected.set(true);
+                    return;
+                }
                 for (ChatReplayEvent event : events) {
                     if (disconnected.get()) {
                         return;
@@ -101,6 +109,10 @@ public final class ChatSseRelay implements Runnable {
 
     public String connectionId() {
         return connectionId;
+    }
+
+    private boolean ownsActiveConnection() {
+        return repository.isActiveConnection(identity, requestId, connectionId);
     }
 
     private void send(ChatReplayEvent event) throws IOException {

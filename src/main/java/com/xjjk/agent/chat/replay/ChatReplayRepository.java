@@ -14,6 +14,8 @@ public interface ChatReplayRepository {
     List<ChatReplayEvent> readAfter(AgentIdentity identity, String requestId,
                                     long afterSequence, Duration blockTimeout);
     Optional<ChatReplaySnapshot> status(AgentIdentity identity, String requestId);
+    boolean activateConnection(AgentIdentity identity, String requestId, String connectionId);
+    boolean isActiveConnection(AgentIdentity identity, String requestId, String connectionId);
     boolean requestCancel(AgentIdentity identity, String requestId);
     boolean cancellationRequested(AgentIdentity identity, String requestId);
 }

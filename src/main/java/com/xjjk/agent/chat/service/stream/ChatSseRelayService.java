@@ -40,13 +40,17 @@ public class ChatSseRelayService {
     ) {
         validateRequest(requestId, afterSequence);
         ChatReplaySnapshot snapshot = ownedSnapshot(identity, requestId);
+        String connectionId = UUID.randomUUID().toString();
+        if (!repository.activateConnection(identity, requestId, connectionId)) {
+            throw new BusinessException(ApiErrorCode.CHAT_STREAM_NOT_FOUND);
+        }
         SseEmitter emitter = new SseEmitter(properties.timeout().toMillis());
         ChatSseRelay relay = new ChatSseRelay(
                 repository,
                 identity,
                 requestId,
                 afterSequence,
-                UUID.randomUUID().toString(),
+                connectionId,
                 properties.replay().readBlockTimeout(),
                 emitter);
 

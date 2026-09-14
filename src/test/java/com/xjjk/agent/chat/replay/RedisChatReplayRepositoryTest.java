@@ -124,6 +124,33 @@ class RedisChatReplayRepositoryTest {
     }
 
     @Test
+    void atomicallyActivatesTheLatestRelayConnection() {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        doReturn(List.of("ACTIVATED"))
+                .when(redis)
+                .execute(any(RedisScript.class), anyList(), any(Object[].class));
+        RedisChatReplayRepository repository = repository(redis);
+
+        assertThat(repository.activateConnection(
+                IDENTITY, REQUEST_ID, "connection-2")).isTrue();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void checksWhetherARelayStillOwnsTheActiveConnection() {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        HashOperations<String, Object, Object> hashes = mock(HashOperations.class);
+        when(redis.opsForHash()).thenReturn(hashes);
+        when(hashes.get(any(), any())).thenReturn("connection-2");
+        RedisChatReplayRepository repository = repository(redis);
+
+        assertThat(repository.isActiveConnection(
+                IDENTITY, REQUEST_ID, "connection-2")).isTrue();
+        assertThat(repository.isActiveConnection(
+                IDENTITY, REQUEST_ID, "connection-1")).isFalse();
+    }
+
+    @Test
     void returnsTheSequenceAssignedByTheAtomicAppendScript() {
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
         doReturn(List.of("OK", "7"))

@@ -33,11 +33,14 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
     private static final DefaultRedisScript<List> CREATE_SCRIPT;
     @SuppressWarnings("rawtypes")
     private static final DefaultRedisScript<List> CANCEL_SCRIPT;
+    @SuppressWarnings("rawtypes")
+    private static final DefaultRedisScript<List> ACTIVATE_CONNECTION_SCRIPT;
 
     static {
         APPEND_SCRIPT = script("redis/chat-stream-append.lua");
         CREATE_SCRIPT = script("redis/chat-stream-create.lua");
         CANCEL_SCRIPT = script("redis/chat-stream-cancel.lua");
+        ACTIVATE_CONNECTION_SCRIPT = script("redis/chat-stream-activate-connection.lua");
     }
 
     @Override
@@ -104,6 +107,46 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
                 Long.toString(identity.userId()),
                 Long.toString(properties.ttl().toMillis()));
         return ChatReplayLifecycleResult.cancelled(result);
+    }
+
+    @Override
+    public boolean activateConnection(
+            AgentIdentity identity,
+            String requestId,
+            String connectionId
+    ) {
+        Objects.requireNonNull(identity, "认证身份不能为空");
+        if (connectionId == null || connectionId.isBlank()) {
+            throw new IllegalArgumentException("连接 ID 不能为空");
+        }
+        List<?> result = execute(
+                ACTIVATE_CONNECTION_SCRIPT,
+                List.of(keys.meta(identity.tenantId(), identity.userId(), requestId)),
+                Long.toString(identity.tenantId()),
+                Long.toString(identity.userId()),
+                connectionId,
+                Long.toString(properties.ttl().toMillis()));
+        return ChatReplayLifecycleResult.activated(result);
+    }
+
+    @Override
+    public boolean isActiveConnection(
+            AgentIdentity identity,
+            String requestId,
+            String connectionId
+    ) {
+        Objects.requireNonNull(identity, "认证身份不能为空");
+        if (connectionId == null || connectionId.isBlank()) {
+            return false;
+        }
+        try {
+            Object activeConnectionId = redis.opsForHash().get(
+                    keys.meta(identity.tenantId(), identity.userId(), requestId),
+                    "activeConnectionId");
+            return connectionId.equals(activeConnectionId);
+        } catch (DataAccessException exception) {
+            throw new ChatReplayUnavailableException("Redis 聊天活动连接读取失败", exception);
+        }
     }
 
     @Override

@@ -29,6 +29,16 @@ public final class ChatReplayLifecycleResult {
         };
     }
 
+    public static boolean activated(List<?> result) {
+        String code = first(result);
+        return switch (code) {
+            case "ACTIVATED" -> true;
+            case "TERMINAL" -> false;
+            case "NOT_FOUND", "IDENTITY_MISMATCH" -> throw unavailable();
+            default -> throw new ChatReplayUnavailableException("Redis 返回未知连接接管结果");
+        };
+    }
+
     private static String first(List<?> result) {
         if (result == null || result.size() != 1) {
             throw new ChatReplayUnavailableException("Redis 生命周期脚本返回不完整");

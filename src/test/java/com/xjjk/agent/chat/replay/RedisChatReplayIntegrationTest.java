@@ -61,6 +61,11 @@ class RedisChatReplayIntegrationTest {
         assertThat(repository.available()).isTrue();
         assertThat(repository.create(metadata)).isEqualTo(ChatReplayCreateResult.CREATED);
         assertThat(repository.create(metadata)).isEqualTo(ChatReplayCreateResult.EXISTING);
+        assertThat(repository.activateConnection(identity, requestId, "connection-1")).isTrue();
+        assertThat(repository.isActiveConnection(identity, requestId, "connection-1")).isTrue();
+        assertThat(repository.activateConnection(identity, requestId, "connection-2")).isTrue();
+        assertThat(repository.isActiveConnection(identity, requestId, "connection-1")).isFalse();
+        assertThat(repository.isActiveConnection(identity, requestId, "connection-2")).isTrue();
         assertThat(repository.append(identity, requestId, "delta",
                 new ChatStreamPayloads.Delta("回答")).sequence()).isEqualTo(1L);
         assertThat(repository.readAfter(identity, requestId, 0L, Duration.ofMillis(100)))

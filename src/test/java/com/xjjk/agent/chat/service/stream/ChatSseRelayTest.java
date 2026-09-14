@@ -37,6 +37,8 @@ class ChatSseRelayTest {
                 new ObjectMapper().createObjectNode().put("messageId", "message-1"));
         when(repository.readAfter(IDENTITY, REQUEST_ID, 7L, blockTimeout))
                 .thenReturn(List.of(event));
+        when(repository.isActiveConnection(
+                IDENTITY, REQUEST_ID, "connection-1")).thenReturn(true);
         RecordingEmitter emitter = new RecordingEmitter();
         ChatSseRelay relay = new ChatSseRelay(
                 repository, IDENTITY, REQUEST_ID, 7L,
@@ -64,6 +66,31 @@ class ChatSseRelayTest {
         verify(repository, never()).requestCancel(IDENTITY, REQUEST_ID);
         verify(repository, never()).readAfter(
                 IDENTITY, REQUEST_ID, 0L, Duration.ofSeconds(5));
+    }
+
+    @Test
+    void replacementConnectionStopsTheOldRelayBeforeItSendsEvents() {
+        ChatReplayRepository repository = mock(ChatReplayRepository.class);
+        Duration blockTimeout = Duration.ofSeconds(5);
+        ChatReplayEvent event = new ChatReplayEvent(
+                1L,
+                "delta",
+                Instant.parse("2026-09-14T08:00:01Z"),
+                new ObjectMapper().createObjectNode().put("text", "不应发送"));
+        when(repository.isActiveConnection(
+                IDENTITY, REQUEST_ID, "connection-1"))
+                .thenReturn(true, false);
+        when(repository.readAfter(IDENTITY, REQUEST_ID, 0L, blockTimeout))
+                .thenReturn(List.of(event));
+        RecordingEmitter emitter = new RecordingEmitter();
+        ChatSseRelay relay = new ChatSseRelay(
+                repository, IDENTITY, REQUEST_ID, 0L,
+                "connection-1", blockTimeout, emitter);
+
+        relay.run();
+
+        assertThat(emitter.eventIds()).isEmpty();
+        verify(repository, never()).requestCancel(IDENTITY, REQUEST_ID);
     }
 
     private static final class RecordingEmitter extends SseEmitter {
