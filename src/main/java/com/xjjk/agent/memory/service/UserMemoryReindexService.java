@@ -4,6 +4,7 @@ import com.xjjk.agent.memory.persistence.entity.UserMemoryEntity;
 import com.xjjk.agent.memory.persistence.mapper.MemoryOutboxMapper;
 import com.xjjk.agent.memory.persistence.mapper.UserMemoryMapper;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -19,6 +20,7 @@ public class UserMemoryReindexService {
     private final MemoryOutboxMapper outbox;
     private final Clock clock;
 
+    @Autowired
     public UserMemoryReindexService(UserMemoryMapper memories, MemoryOutboxMapper outbox) {
         this(memories, outbox, Clock.systemUTC());
     }
