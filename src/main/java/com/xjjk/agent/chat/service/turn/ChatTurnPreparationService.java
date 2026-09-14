@@ -36,7 +36,8 @@ public class ChatTurnPreparationService {
     public ChatTurnContext prepare(
             String conversationId,
             AgentIdentity identity,
-            String userText
+            String userText,
+            String clientRequestId
     ) {
         Objects.requireNonNull(identity, "认证身份不能为空");
 
@@ -68,7 +69,22 @@ public class ChatTurnPreparationService {
         return startService.begin(
                 resolvedConversationId,
                 identity,
-                userText
+                userText,
+                clientRequestId
         );
+    }
+
+    /** 兼容旧的内部调用；HTTP 主链路始终传入客户端请求 ID。 */
+    @Deprecated(forRemoval = true)
+    public ChatTurnContext prepare(
+            String conversationId,
+            AgentIdentity identity,
+            String userText
+    ) {
+        return prepare(
+                conversationId,
+                identity,
+                userText,
+                java.util.UUID.randomUUID().toString());
     }
 }

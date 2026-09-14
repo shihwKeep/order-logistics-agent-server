@@ -69,6 +69,30 @@ class ChatTurnRunnerDeterministicMemoryTest {
     private ChatSseSession session;
 
     @Test
+    void forwardsValidatedClientRequestIdToTheStartTransaction() throws Exception {
+        String message = "我平时主要使用什么编程语言？";
+        String clientRequestId = "6f899318-0af5-4f2b-a593-84f6dac9dd1c";
+        ChatTurnContext turn = new ChatTurnContext(
+                1L, 10567L, "conversation", clientRequestId,
+                "user", "assistant", "prompt-v1");
+        ChatStreamControl control = new ChatStreamControl();
+        when(preparation.prepare(null, IDENTITY, message, clientRequestId)).thenReturn(turn);
+        when(explicitMemory.handle(turn, message))
+                .thenReturn(ExplicitMemoryCommandResult.notHandled());
+        when(planner.plan(message)).thenReturn(BusinessQueryPlan.general());
+        when(directMemory.answer(IDENTITY, message, clientRequestId))
+                .thenReturn(new DeterministicUserMemoryAnswerResult(
+                        DeterministicUserMemoryAnswerResult.Outcome.ANSWERED,
+                        "根据您之前提供的信息，您平时主要使用 Java。"));
+
+        runner().run(new ChatStreamRequest(null, message, null, clientRequestId),
+                IDENTITY, control, session, clientRequestId);
+
+        verify(preparation).prepare(null, IDENTITY, message, clientRequestId);
+        verify(session).session("conversation", clientRequestId);
+    }
+
+    @Test
     void generalDirectMemoryQuestionBypassesContextAndModel() throws Exception {
         String message = "我平时主要使用什么编程语言？";
         ChatTurnContext turn = turn();

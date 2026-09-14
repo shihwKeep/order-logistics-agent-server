@@ -1,6 +1,7 @@
 package com.xjjk.agent.chat.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.util.StringUtils;
 
 import java.time.Duration;
@@ -14,6 +15,7 @@ public record ChatStreamProperties(
         Reconnect reconnect
 ) {
 
+    @ConstructorBinding
     public ChatStreamProperties {
         if (timeout == null || timeout.isZero() || timeout.isNegative()) {
             throw new IllegalArgumentException("聊天流超时时间必须大于零");

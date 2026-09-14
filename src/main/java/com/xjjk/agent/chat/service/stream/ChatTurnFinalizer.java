@@ -110,7 +110,9 @@ public class ChatTurnFinalizer {
             MessageStatus stopReason,
             boolean saved
     ) throws IOException {
-        if (stopReason != null || execution.outputBroken) {
+        // 直连 SSE 已断开时没有继续写出的意义；Redis 回放发布器与连接解耦，
+        // 必须追加取消/超时终态，否则 status 与 resume 会长期误判为 RUNNING。
+        if ((stopReason != null && !session.detached()) || execution.outputBroken) {
             return;
         }
         if (execution.turn != null && saved && execution.status == MessageStatus.SUCCESS) {

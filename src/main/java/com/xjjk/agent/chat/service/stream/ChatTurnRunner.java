@@ -111,8 +111,15 @@ public class ChatTurnRunner {
 
         // 第一步：通过短事务创建本轮 USER/ASSISTANT 消息并占用会话。
         // 仅在任务真正获得线程执行时才创建记录；prepare 返回时开始事务已经提交。
-        execution.prepared(preparationService.prepare(
-                request.conversationId(), identity, request.message()));
+        if (StringUtils.hasText(request.clientRequestId())) {
+            execution.prepared(preparationService.prepare(
+                    request.conversationId(), identity, request.message(),
+                    request.clientRequestId()));
+        } else {
+            // 仅保留给当前单元测试和旧内部调用；HTTP Bean Validation 不允许为空。
+            execution.prepared(preparationService.prepare(
+                    request.conversationId(), identity, request.message()));
+        }
         if (control.isStopRequested()) {
             return;
         }
@@ -153,7 +160,8 @@ public class ChatTurnRunner {
                     new ChatStreamRequest(
                             request.conversationId(),
                             request.message(),
-                            queryPlan.directAction()),
+                            queryPlan.directAction(),
+                            request.clientRequestId()),
                     identity,
                     session,
                     execution);

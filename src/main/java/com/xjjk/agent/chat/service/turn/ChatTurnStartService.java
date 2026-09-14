@@ -50,13 +50,15 @@ public class ChatTurnStartService {
     public ChatTurnContext begin(
             String conversationId,
             AgentIdentity identity,
-            String userText
+            String userText,
+            String clientRequestId
     ) {
         Objects.requireNonNull(identity, "认证身份不能为空");
 
         if (!StringUtils.hasText(conversationId)
                 || !StringUtils.hasText(userText)
-                || userText.length() > 2000) {
+                || userText.length() > 2000
+                || !validRequestId(clientRequestId)) {
             throw new BusinessException(ApiErrorCode.VALIDATION_ERROR);
         }
 
@@ -87,7 +89,9 @@ public class ChatTurnStartService {
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC)
                 .truncatedTo(ChronoUnit.MILLIS);
 
-        String requestId = UUID.randomUUID().toString();
+        // requestId 由 Electron 主进程在首次发送前生成。重连必须沿用该值，
+        // 不能在后端重新生成，否则无法通过唯一键识别同一轮请求。
+        String requestId = clientRequestId;
         String promptVersion = promptProperties.version();
 
         long userSequence =
@@ -147,6 +151,31 @@ public class ChatTurnStartService {
                 assistantMessage.getMessageId(),
                 promptVersion
         );
+    }
+
+    /**
+     * 兼容尚未迁移的内部调用；HTTP 主链路必须调用四参数版本。
+     * 该入口将在所有调用方迁移完成后删除。
+     */
+    @Deprecated(forRemoval = true)
+    @Transactional(rollbackFor = Exception.class)
+    public ChatTurnContext begin(
+            String conversationId,
+            AgentIdentity identity,
+            String userText
+    ) {
+        return begin(conversationId, identity, userText, UUID.randomUUID().toString());
+    }
+
+    private boolean validRequestId(String requestId) {
+        if (!StringUtils.hasText(requestId)) {
+            return false;
+        }
+        try {
+            return UUID.fromString(requestId).toString().equalsIgnoreCase(requestId);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
     }
 
     /** 初始化一条消息的标识、归属、序号和时间。 */

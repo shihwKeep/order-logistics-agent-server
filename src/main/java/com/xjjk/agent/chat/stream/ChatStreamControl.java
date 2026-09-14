@@ -4,6 +4,7 @@ import com.xjjk.agent.chat.domain.MessageStatus;
 
 import java.util.Objects;
 import java.util.concurrent.FutureTask;
+import java.util.function.BooleanSupplier;
 
 /**
  * 单个 SSE 请求的执行控制对象。
@@ -13,6 +14,8 @@ import java.util.concurrent.FutureTask;
  */
 public final class ChatStreamControl {
 
+    private final BooleanSupplier externalCancellation;
+
     /** 本次请求对应的异步任务。 */
     private FutureTask<?> task;
 
@@ -21,6 +24,18 @@ public final class ChatStreamControl {
 
     /** 是否已经进入收尾阶段。 */
     private boolean finalizing;
+
+    public ChatStreamControl() {
+        this(() -> false);
+    }
+
+    /**
+     * @param externalCancellation 跨实例停止标志探针；可恢复模式下读取 Redis control
+     */
+    public ChatStreamControl(BooleanSupplier externalCancellation) {
+        this.externalCancellation = Objects.requireNonNull(
+                externalCancellation, "外部取消探针不能为空");
+    }
 
     /**
      * 绑定异步任务，只允许绑定一次。
@@ -70,9 +85,21 @@ public final class ChatStreamControl {
     }
 
     /** 由工作线程检查是否应停止准备工作或读取模型流。 */
-    public synchronized boolean isStopRequested() {
-        return stopReason != null
-                || Thread.currentThread().isInterrupted();
+    public boolean isStopRequested() {
+        synchronized (this) {
+            if (stopReason != null || Thread.currentThread().isInterrupted()) {
+                return true;
+            }
+        }
+
+        // Redis 查询不能持有对象锁，避免网络抖动阻塞取消回调和收尾线程。
+        if (externalCancellation.getAsBoolean()) {
+            requestStop(MessageStatus.CANCELLED);
+        }
+
+        synchronized (this) {
+            return stopReason != null || Thread.currentThread().isInterrupted();
+        }
     }
 
     /**
