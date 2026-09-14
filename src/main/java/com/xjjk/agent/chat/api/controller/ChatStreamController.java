@@ -37,6 +37,13 @@ public class ChatStreamController {
     private final ChatSseRelayService relayService;
     private final ChatStreamProperties properties;
 
+    /**
+     * 首次发送消息并建立 SSE 连接。
+     *
+     * <p>{@link ChatStreamService#open(ChatStreamRequest, AgentIdentity)} 负责创建或复用
+     * requestId、调度后台 Agent 任务，并根据 Redis 可用性决定是否支持断点恢复。
+     * Controller 只回传本次请求的恢复元数据和 SSE 输出通道，不在 HTTP 线程中执行模型调用。</p>
+     */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream(
             @Valid @RequestBody ChatStreamRequest request,
@@ -48,6 +55,13 @@ public class ChatStreamController {
         return opened.emitter();
     }
 
+    /**
+     * 网络或网关断开后的 SSE 恢复入口。
+     *
+     * <p>前端携带同一 requestId 和最后一个已消费的 afterSequence，服务端先校验任务归属及
+     * 回放状态，再从 Redis Streams 中补发该序号之后的事件。恢复连接不会重新创建 Agent
+     * 任务，也不会延长后台任务本身的最大执行时间。</p>
+     */
     @GetMapping(
             value = "/stream/{requestId}/resume",
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -63,6 +77,12 @@ public class ChatStreamController {
         return emitter;
     }
 
+    /**
+     * 查询聊天任务状态。
+     *
+     * <p>主要用于自动重连耗尽、桌面端重启等无法继续持有 SSE 的场景，帮助前端判断本轮
+     * 任务仍在运行，还是已经进入 DONE、ERROR、TIMEOUT 或 CANCELLED 终态。</p>
+     */
     @GetMapping("/stream/{requestId}/status")
     public ChatStreamStatusResponse status(
             @PathVariable String requestId,
@@ -71,6 +91,12 @@ public class ChatStreamController {
         return relayService.status(identity, requestId);
     }
 
+    /**
+     * 用户主动停止生成的入口。
+     *
+     * <p>主动取消和普通网络断开语义不同：网络断开只停止当前 SSE 中继，后台任务继续运行；
+     * 主动取消会写入分布式取消信号，并通知本机正在运行的任务尽快终止下游模型调用。</p>
+     */
     @PostMapping("/stream/{requestId}/cancel")
     public ChatStreamCancelResponse cancel(
             @PathVariable String requestId,
@@ -81,6 +107,13 @@ public class ChatStreamController {
         return streamService.cancel(identity, requestId);
     }
 
+    /**
+     * 写入客户端恢复 SSE 所需的响应头。
+     *
+     * <p>关闭缓存和代理缓冲可让事件及时到达前端；requestId、过期时间和 resumable 用于
+     * 决定是否能够断点续拉；重连次数、退避时间及抖动比例由后端统一下发，前端仍会执行
+     * 安全范围校验，避免异常配置导致无限重试。</p>
+     */
     private void streamHeaders(
             HttpServletResponse response,
             String requestId,
