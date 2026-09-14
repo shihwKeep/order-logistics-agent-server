@@ -6,6 +6,7 @@ import com.xjjk.agent.chat.replay.ReplayChatEventPublisher;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.time.Instant;
 
@@ -13,6 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -49,6 +51,12 @@ class ReplayChatEventPublisherTest {
                 .isEqualTo(new ChatStreamPayloads.Session(
                         "conversation-1", REQUEST_ID, expiresAt, true));
         assertThat(publisher.heartbeat()).isFalse();
+
+        InOrder bindingBeforeEvents = inOrder(repository);
+        bindingBeforeEvents.verify(repository).bindConversation(
+                IDENTITY, REQUEST_ID, "conversation-1");
+        bindingBeforeEvents.verify(repository).append(
+                eq(IDENTITY), eq(REQUEST_ID), eq("session"), any());
     }
 
     @Test

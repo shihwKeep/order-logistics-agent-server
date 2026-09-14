@@ -64,6 +64,8 @@ public final class ReplayChatEventPublisher implements ChatEventPublisher {
         if (!requestId.equals(eventRequestId)) {
             throw new IllegalArgumentException("事件请求 ID 与回放任务不一致");
         }
+        // 只有完成 MySQL 会话归属校验和本轮开始事务后，才绑定可信会话 ID。
+        repository.bindConversation(identity, requestId, conversationId);
         Instant effectiveExpiresAt = taskExpiresAt != null ? taskExpiresAt : expiresAt;
         append("session", new ChatStreamPayloads.Session(
                 conversationId, requestId, effectiveExpiresAt, true));

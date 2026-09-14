@@ -43,8 +43,8 @@ public final class ChatSseHeartbeat {
             }
             try {
                 session.heartbeat();
-            } catch (IOException exception) {
-                log.debug("Chat SSE heartbeat write failed; stopping stream", exception);
+            } catch (IOException | RuntimeException exception) {
+                log.debug("Chat heartbeat write failed; stopping producer", exception);
                 control.requestStop(MessageStatus.OUTPUT_ERROR);
                 lease.close();
             }

@@ -45,6 +45,15 @@ public class ChatSseHeartbeatScheduler {
         );
     }
 
+    public ScheduledFuture<?> schedule(Runnable task, Duration delay) {
+        Objects.requireNonNull(task, "延迟任务不能为空");
+        Objects.requireNonNull(delay, "延迟时间不能为空");
+        if (delay.isNegative()) {
+            throw new IllegalArgumentException("延迟时间不能小于零");
+        }
+        return executor.schedule(task, delay.toMillis(), TimeUnit.MILLISECONDS);
+    }
+
     @PreDestroy
     public void shutdown() {
         executor.shutdownNow();

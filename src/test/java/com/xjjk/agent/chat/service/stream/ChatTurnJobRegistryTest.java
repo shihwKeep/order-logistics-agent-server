@@ -84,6 +84,19 @@ class ChatTurnJobRegistryTest {
         assertThat(heartbeatClosed).isTrue();
     }
 
+    @Test
+    void removingFinishedJobAlsoClosesItsAbsoluteDeadlineLease() {
+        ChatTurnJobRegistry registry = new ChatTurnJobRegistry();
+        ChatTurnJob job = job(new ChatStreamControl());
+        AtomicBoolean deadlineClosed = new AtomicBoolean();
+        job.bindDeadline(() -> deadlineClosed.set(true));
+        registry.register(job);
+
+        assertThat(registry.remove(REQUEST_ID, job)).isTrue();
+
+        assertThat(deadlineClosed).isTrue();
+    }
+
     private ChatTurnJob job(ChatStreamControl control) {
         return new ChatTurnJob(
                 REQUEST_ID,

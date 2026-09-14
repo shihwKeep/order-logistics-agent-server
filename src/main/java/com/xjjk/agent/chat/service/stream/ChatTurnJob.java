@@ -20,6 +20,7 @@ public final class ChatTurnJob implements AutoCloseable {
     private final FutureTask<?> task;
     private final Instant expiresAt;
     private AutoCloseable heartbeatLease;
+    private AutoCloseable deadlineLease;
     private boolean closed;
 
     public ChatTurnJob(
@@ -74,6 +75,18 @@ public final class ChatTurnJob implements AutoCloseable {
         }
     }
 
+    /** 截止时间属于生产任务，不能随某一次 SSE 连接关闭。 */
+    public synchronized void bindDeadline(AutoCloseable lease) {
+        AutoCloseable value = Objects.requireNonNull(lease, "截止时间租约不能为空");
+        if (deadlineLease != null) {
+            throw new IllegalStateException("截止时间租约不能重复绑定");
+        }
+        deadlineLease = value;
+        if (closed) {
+            closeLease(value);
+        }
+    }
+
     public boolean cancel() {
         return control.requestStop(com.xjjk.agent.chat.domain.MessageStatus.CANCELLED);
     }
@@ -92,6 +105,9 @@ public final class ChatTurnJob implements AutoCloseable {
         closed = true;
         if (heartbeatLease != null) {
             closeLease(heartbeatLease);
+        }
+        if (deadlineLease != null) {
+            closeLease(deadlineLease);
         }
     }
 

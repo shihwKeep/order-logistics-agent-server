@@ -3,6 +3,7 @@ package com.xjjk.agent.chat.service.stream;
 import com.xjjk.agent.chat.config.ChatStreamProperties;
 import com.xjjk.agent.chat.domain.MessageStatus;
 import com.xjjk.agent.chat.stream.ChatSseSession;
+import com.xjjk.agent.chat.stream.ChatEventPublisher;
 import com.xjjk.agent.chat.stream.ChatStreamControl;
 import org.junit.jupiter.api.Test;
 import org.springframework.scheduling.TaskScheduler;
@@ -63,6 +64,23 @@ class ChatSseHeartbeatTest {
         scheduled.get().run();
 
         assertThat(turnTask.isCancelled()).isTrue();
+        assertThat(control.beginFinalization()).isEqualTo(MessageStatus.OUTPUT_ERROR);
+        verify(future).cancel(false);
+    }
+
+    @Test
+    void replayStorageFailureAlsoStopsTheProducer() throws Exception {
+        ChatSseHeartbeatScheduler scheduler = mock(ChatSseHeartbeatScheduler.class);
+        ScheduledFuture<?> future = mock(ScheduledFuture.class);
+        AtomicReference<Runnable> scheduled = captureScheduledTask(scheduler, future);
+        ChatEventPublisher publisher = mock(ChatEventPublisher.class);
+        when(publisher.heartbeat()).thenThrow(new IllegalStateException("Redis offline"));
+        ChatStreamControl control = new ChatStreamControl();
+        ChatSseHeartbeat heartbeat = new ChatSseHeartbeat(scheduler, properties());
+
+        heartbeat.start(publisher, control);
+        scheduled.get().run();
+
         assertThat(control.beginFinalization()).isEqualTo(MessageStatus.OUTPUT_ERROR);
         verify(future).cancel(false);
     }
