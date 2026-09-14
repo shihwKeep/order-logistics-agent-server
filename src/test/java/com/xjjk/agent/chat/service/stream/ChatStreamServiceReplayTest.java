@@ -6,6 +6,7 @@ import com.xjjk.agent.chat.replay.ChatReplayCreateResult;
 import com.xjjk.agent.chat.replay.ChatReplayMetadata;
 import com.xjjk.agent.chat.replay.ChatReplayRepository;
 import com.xjjk.agent.chat.replay.ChatReplayUnavailableException;
+import com.xjjk.agent.chat.observation.ChatStreamReplayMetrics;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -157,6 +158,7 @@ class ChatStreamServiceReplayTest {
         private final ChatSseRelayService relay = mock(ChatSseRelayService.class);
         private final ChatTurnJobRegistry registry = new ChatTurnJobRegistry();
         private final ChatTurnDeadline deadline = mock(ChatTurnDeadline.class);
+        private final ChatStreamReplayMetrics metrics = mock(ChatStreamReplayMetrics.class);
         private final ChatStreamService service;
 
         private Fixture() {
@@ -164,7 +166,7 @@ class ChatStreamServiceReplayTest {
             when(deadline.schedule(any(), any(), any())).thenReturn(() -> { });
             service = new ChatStreamService(
                     executor, runner, properties, heartbeat,
-                    repository, relay, registry, deadline);
+                    repository, relay, registry, deadline, metrics);
         }
     }
 }

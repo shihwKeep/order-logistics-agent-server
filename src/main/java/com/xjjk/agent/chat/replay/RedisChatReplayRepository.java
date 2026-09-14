@@ -3,6 +3,7 @@ package com.xjjk.agent.chat.replay;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xjjk.agent.chat.config.ChatStreamProperties;
 import com.xjjk.agent.chat.api.dto.ChatStreamPayloads;
+import com.xjjk.agent.chat.observation.ChatStreamReplayMetrics;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DataAccessException;
@@ -14,6 +15,7 @@ import org.springframework.data.redis.connection.stream.ReadOffset;
 import org.springframework.data.redis.connection.stream.StreamOffset;
 import org.springframework.data.redis.connection.stream.StreamReadOptions;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -231,17 +233,29 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
     private final ChatReplayEventCodec codec;
     private final ChatReplayKeyFactory keys;
     private final ChatStreamProperties.Replay properties;
+    private final ChatStreamReplayMetrics metrics;
 
     public RedisChatReplayRepository(
             StringRedisTemplate redis,
             ObjectMapper objectMapper,
             ChatStreamProperties streamProperties
     ) {
+        this(redis, objectMapper, streamProperties, null);
+    }
+
+    @Autowired
+    public RedisChatReplayRepository(
+            StringRedisTemplate redis,
+            ObjectMapper objectMapper,
+            ChatStreamProperties streamProperties,
+            ChatStreamReplayMetrics metrics
+    ) {
         this.redis = Objects.requireNonNull(redis, "Redis 客户端不能为空");
         this.codec = new ChatReplayEventCodec(objectMapper);
         this.properties = Objects.requireNonNull(
                 streamProperties, "聊天流配置不能为空").replay();
         this.keys = new ChatReplayKeyFactory(properties);
+        this.metrics = metrics;
     }
 
     @Override
@@ -286,11 +300,17 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
                 terminal.state(),
                 terminal.code(),
                 terminal.messageId());
-        long sequence = ChatReplayScriptResult.appendSequence(result);
-        return codec.decode(sequence, Map.of(
-                "type", encoded.type(),
-                "timestamp", encoded.timestamp(),
-                "payload", encoded.payloadJson()));
+        try {
+            long sequence = ChatReplayScriptResult.appendSequence(result);
+            if (metrics != null) metrics.replayEvent(encoded.type(), encoded.byteLength());
+            return codec.decode(sequence, Map.of(
+                    "type", encoded.type(),
+                    "timestamp", encoded.timestamp(),
+                    "payload", encoded.payloadJson()));
+        } catch (ChatReplayLimitException exception) {
+            if (metrics != null) metrics.failure("capacity");
+            throw exception;
+        }
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -299,6 +319,7 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
         try {
             return redis.execute(script, scriptKeys, (Object[]) arguments);
         } catch (DataAccessException exception) {
+            if (metrics != null) metrics.failure("redis");
             throw new ChatReplayUnavailableException("Redis 聊天流操作失败", exception);
         }
     }

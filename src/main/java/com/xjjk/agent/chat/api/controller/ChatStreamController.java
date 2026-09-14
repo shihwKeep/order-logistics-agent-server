@@ -76,6 +76,8 @@ public class ChatStreamController {
             @PathVariable String requestId,
             @CurrentAgentIdentity AgentIdentity identity
     ) {
+        // 取消前复用查询入口的租户与用户归属校验，避免仅凭 requestId 越权操作。
+        relayService.status(identity, requestId);
         return streamService.cancel(identity, requestId);
     }
 
@@ -88,7 +90,7 @@ public class ChatStreamController {
         response.setHeader("Cache-Control", "no-cache, no-transform");
         response.setHeader("X-Accel-Buffering", "no");
         response.setHeader("X-Chat-Request-Id", requestId);
-        response.setHeader("X-Chat-Task-Expires-At", expiresAt.toString());
+        response.setHeader("X-Chat-Expires-At", expiresAt.toString());
         response.setHeader("X-Chat-Resumable", Boolean.toString(resumable));
         response.setHeader("X-Chat-Reconnect-Max-Attempts",
                 Integer.toString(properties.reconnect().maxAttempts()));

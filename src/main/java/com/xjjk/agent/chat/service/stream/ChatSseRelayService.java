@@ -2,6 +2,7 @@ package com.xjjk.agent.chat.service.stream;
 
 import com.xjjk.agent.chat.api.dto.ChatStreamStatusResponse;
 import com.xjjk.agent.chat.config.ChatStreamProperties;
+import com.xjjk.agent.chat.observation.ChatStreamReplayMetrics;
 import com.xjjk.agent.chat.replay.ChatReplayRepository;
 import com.xjjk.agent.chat.replay.ChatReplaySnapshot;
 import com.xjjk.agent.common.api.ApiErrorCode;
@@ -22,15 +23,18 @@ public class ChatSseRelayService {
     private final ChatReplayRepository repository;
     private final ChatStreamProperties properties;
     private final TaskExecutor relayExecutor;
+    private final ChatStreamReplayMetrics metrics;
 
     public ChatSseRelayService(
             ChatReplayRepository repository,
             ChatStreamProperties properties,
-            @Qualifier("chatSseRelayExecutor") TaskExecutor relayExecutor
+            @Qualifier("chatSseRelayExecutor") TaskExecutor relayExecutor,
+            ChatStreamReplayMetrics metrics
     ) {
         this.repository = Objects.requireNonNull(repository, "回放仓储不能为空");
         this.properties = Objects.requireNonNull(properties, "聊天流配置不能为空");
         this.relayExecutor = Objects.requireNonNull(relayExecutor, "SSE 中继线程池不能为空");
+        this.metrics = Objects.requireNonNull(metrics, "聊天流指标不能为空");
     }
 
     public SseEmitter resume(
@@ -42,8 +46,11 @@ public class ChatSseRelayService {
         ChatReplaySnapshot snapshot = ownedSnapshot(identity, requestId);
         String connectionId = UUID.randomUUID().toString();
         if (!repository.activateConnection(identity, requestId, connectionId)) {
+            metrics.resume("rejected");
             throw new BusinessException(ApiErrorCode.CHAT_STREAM_NOT_FOUND);
         }
+        metrics.resume("success");
+        AutoCloseable relayMetric = metrics.relayConnection();
         SseEmitter emitter = new SseEmitter(properties.timeout().toMillis());
         ChatSseRelay relay = new ChatSseRelay(
                 repository,
@@ -55,14 +62,32 @@ public class ChatSseRelayService {
                 emitter);
 
         // 回调只控制该中继，绝不写取消标志，也不触碰 Agent Job。
-        emitter.onCompletion(relay::disconnect);
-        emitter.onError(ignored -> relay.disconnect());
-        emitter.onTimeout(() -> {
+        Runnable closeRelay = () -> {
             relay.disconnect();
+            closeMetric(relayMetric);
+        };
+        emitter.onCompletion(closeRelay);
+        emitter.onError(ignored -> closeRelay.run());
+        emitter.onTimeout(() -> {
+            closeRelay.run();
             emitter.complete();
         });
-        relayExecutor.execute(relay);
+        try {
+            relayExecutor.execute(relay);
+        } catch (RuntimeException exception) {
+            closeRelay.run();
+            metrics.resume("failure");
+            throw exception;
+        }
         return emitter;
+    }
+
+    private void closeMetric(AutoCloseable metric) {
+        try {
+            metric.close();
+        } catch (Exception exception) {
+            throw new IllegalStateException("关闭 SSE 中继指标失败", exception);
+        }
     }
 
     public ChatStreamStatusResponse status(AgentIdentity identity, String requestId) {

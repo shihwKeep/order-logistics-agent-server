@@ -4,6 +4,7 @@ import com.xjjk.agent.chat.api.dto.ChatStreamRequest;
 import com.xjjk.agent.chat.api.dto.ChatStreamCancelResponse;
 import com.xjjk.agent.chat.config.ChatStreamProperties;
 import com.xjjk.agent.chat.domain.MessageStatus;
+import com.xjjk.agent.chat.observation.ChatStreamReplayMetrics;
 import com.xjjk.agent.chat.replay.ChatReplayCreateResult;
 import com.xjjk.agent.chat.replay.ChatReplayMetadata;
 import com.xjjk.agent.chat.replay.ChatReplayRepository;
@@ -44,6 +45,7 @@ public class ChatStreamService {
     private final ChatSseRelayService relayService;
     private final ChatTurnJobRegistry jobRegistry;
     private final ChatTurnDeadline deadline;
+    private final ChatStreamReplayMetrics metrics;
 
     public ChatStreamService(
             @Qualifier("chatStreamExecutor") ThreadPoolTaskExecutor executor,
@@ -53,7 +55,8 @@ public class ChatStreamService {
             ChatReplayRepository replayRepository,
             ChatSseRelayService relayService,
             ChatTurnJobRegistry jobRegistry,
-            ChatTurnDeadline deadline
+            ChatTurnDeadline deadline,
+            ChatStreamReplayMetrics metrics
     ) {
         this.executor = Objects.requireNonNull(executor, "聊天生产线程池不能为空");
         this.runner = Objects.requireNonNull(runner, "聊天执行器不能为空");
@@ -63,6 +66,7 @@ public class ChatStreamService {
         this.relayService = Objects.requireNonNull(relayService, "SSE 中继服务不能为空");
         this.jobRegistry = Objects.requireNonNull(jobRegistry, "任务注册表不能为空");
         this.deadline = Objects.requireNonNull(deadline, "任务截止控制不能为空");
+        this.metrics = Objects.requireNonNull(metrics, "聊天流指标不能为空");
     }
 
     /** 兼容原有调用方；新 Controller 使用 open 读取恢复协议元数据。 */
@@ -97,11 +101,14 @@ public class ChatStreamService {
                                 null, requestId, createdAt, expiresAt));
             } catch (ChatReplayUnavailableException unavailable) {
                 // Redis 在业务消息创建前不可用时降级为直连；降级后不承诺断点恢复。
+                metrics.failure("redis");
+                metrics.mode("direct");
                 return startDirect(effectiveRequest, identity, requestId, expiresAt);
             }
             if (created == ChatReplayCreateResult.CREATED) {
                 startReplayProducer(effectiveRequest, identity, requestId, expiresAt);
             }
+            metrics.mode("resumable");
             return new ChatStreamOpenSession(
                     relayService.resume(identity, requestId, 0L),
                     requestId,
@@ -110,6 +117,7 @@ public class ChatStreamService {
                             .orElse(expiresAt),
                     true);
         }
+        metrics.mode("direct");
         return startDirect(effectiveRequest, identity, requestId, expiresAt);
     }
 
@@ -118,11 +126,14 @@ public class ChatStreamService {
         boolean local = jobRegistry.cancel(identity, requestId);
         try {
             boolean distributed = replayRepository.requestCancel(identity, requestId);
+            metrics.cancel(distributed || local ? "accepted" : "terminal");
             return new ChatStreamCancelResponse(requestId, distributed || local);
         } catch (ChatReplayUnavailableException unavailable) {
             if (local) {
+                metrics.cancel("accepted");
                 return new ChatStreamCancelResponse(requestId, true);
             }
+            metrics.cancel("failure");
             throw unavailable;
         }
     }

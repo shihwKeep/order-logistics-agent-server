@@ -16,6 +16,7 @@ import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ChatStreamControllerTest {
@@ -59,9 +60,24 @@ class ChatStreamControllerTest {
         assertHeaders(resumedResponse, expiresAt);
     }
 
+    @Test
+    void validatesReplayOwnershipBeforeCancellingARequest() {
+        ChatStreamService streams = mock(ChatStreamService.class);
+        ChatSseRelayService relays = mock(ChatSseRelayService.class);
+        ChatStreamController controller = new ChatStreamController(
+                streams,
+                relays,
+                new ChatStreamProperties(Duration.ofSeconds(30), Duration.ofSeconds(10)));
+
+        controller.cancel(REQUEST_ID, IDENTITY);
+
+        verify(relays).status(IDENTITY, REQUEST_ID);
+        verify(streams).cancel(IDENTITY, REQUEST_ID);
+    }
+
     private void assertHeaders(MockHttpServletResponse response, Instant expiresAt) {
         assertThat(response.getHeader("X-Chat-Request-Id")).isEqualTo(REQUEST_ID);
-        assertThat(response.getHeader("X-Chat-Task-Expires-At"))
+        assertThat(response.getHeader("X-Chat-Expires-At"))
                 .isEqualTo(expiresAt.toString());
         assertThat(response.getHeader("X-Chat-Resumable")).isEqualTo("true");
         assertThat(response.getHeader("X-Chat-Reconnect-Max-Attempts")).isEqualTo("5");

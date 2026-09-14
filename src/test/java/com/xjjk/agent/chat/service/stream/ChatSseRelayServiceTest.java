@@ -3,6 +3,7 @@ package com.xjjk.agent.chat.service.stream;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xjjk.agent.chat.api.dto.ChatStreamStatusResponse;
 import com.xjjk.agent.chat.config.ChatStreamProperties;
+import com.xjjk.agent.chat.observation.ChatStreamReplayMetrics;
 import com.xjjk.agent.chat.replay.ChatReplayEvent;
 import com.xjjk.agent.chat.replay.ChatReplayRepository;
 import com.xjjk.agent.chat.replay.ChatReplaySnapshot;
@@ -52,7 +53,8 @@ class ChatSseRelayServiceTest {
         ChatSseRelayService service = new ChatSseRelayService(
                 repository,
                 new ChatStreamProperties(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-                Runnable::run);
+                Runnable::run,
+                metrics());
 
         service.resume(IDENTITY, REQUEST_ID, 7L);
 
@@ -67,7 +69,8 @@ class ChatSseRelayServiceTest {
         ChatSseRelayService service = new ChatSseRelayService(
                 repository,
                 new ChatStreamProperties(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-                Runnable::run);
+                Runnable::run,
+                metrics());
 
         assertThatThrownBy(() -> service.status(IDENTITY, REQUEST_ID))
                 .isInstanceOfSatisfying(BusinessException.class,
@@ -83,7 +86,8 @@ class ChatSseRelayServiceTest {
         ChatSseRelayService service = new ChatSseRelayService(
                 repository,
                 new ChatStreamProperties(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-                Runnable::run);
+                Runnable::run,
+                metrics());
 
         ChatStreamStatusResponse response = service.status(IDENTITY, REQUEST_ID);
 
@@ -97,5 +101,10 @@ class ChatSseRelayServiceTest {
         return new ChatReplaySnapshot(
                 "conversation-1", REQUEST_ID, ChatReplayState.RUNNING,
                 created, created.plusSeconds(30), 7L, null, null);
+    }
+
+    private ChatStreamReplayMetrics metrics() {
+        return new ChatStreamReplayMetrics(
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
     }
 }
