@@ -314,14 +314,13 @@ min(maxBackoff, initialBackoff × 2^(n-1))
 指标：
 
 ```text
-chat_stream_reconnect_attempt_total
-chat_stream_reconnect_success_total
-chat_stream_reconnect_exhausted_total
-chat_stream_replay_events_total
-chat_stream_replay_latency
-chat_stream_replay_redis_error_total
-chat_stream_active_jobs
-chat_stream_active_relays
+agent.chat.stream.mode{mode=resumable|direct}
+agent.chat.stream.resume.attempt{result=success|not_found|rejected|failure}
+agent.chat.stream.replay.events{type=session|heartbeat|status|delta|result|done|error}
+agent.chat.stream.replay.bytes
+agent.chat.stream.replay.failure{reason=redis|capacity|relay|startup}
+agent.chat.stream.cancel{result=accepted|terminal|failure}
+agent.chat.stream.relay.active
 ```
 
 结构化日志只记录 requestId、connectionId、重连次数、事件序号范围、状态、耗时和失败分类，不记录事件 payload、Token、用户消息正文或工具结果内容。
