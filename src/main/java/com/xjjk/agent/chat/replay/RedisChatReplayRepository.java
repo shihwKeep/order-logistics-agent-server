@@ -25,7 +25,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Redis Streams 聊天事件仓储。 */
+/**
+ * Redis Streams 聊天事件仓储。
+ *
+ * <p>元数据、事件流和控制状态使用相同的 Redis Cluster Hash Tag，Lua 脚本因此可以在
+ * 一个分片内原子校验身份、推进事件序号并更新任务状态。Redis 只承担短期断点回放，
+ * 最终消息仍以 MySQL 持久化结果为准。</p>
+ */
 @Component
 public class RedisChatReplayRepository implements ChatReplayRepository {
 
@@ -51,6 +57,8 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
     @Override
     public ChatReplayCreateResult create(ChatReplayMetadata metadata) {
         Objects.requireNonNull(metadata, "聊天流补发元数据不能为空");
+        // 创建脚本同时初始化任务元数据和取消标志。同一个 requestId 再次到达时只返回
+        // EXISTING，不会重复创建生产任务；身份不一致时由脚本直接拒绝。
         List<?> result = execute(
                 CREATE_SCRIPT,
                 List.of(
@@ -78,6 +86,7 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
             throw new ChatReplayUnavailableException("Redis 聊天任务状态读取失败", exception);
         }
         if (values.isEmpty()) return Optional.empty();
+        // 即使 Key 是由服务端工厂生成，也不能用 Key 命中替代租户和用户归属校验。
         if (!Long.toString(identity.tenantId()).equals(text(values, "tenantId"))
                 || !Long.toString(identity.userId()).equals(text(values, "userId"))) {
             throw new ChatReplayUnavailableException("聊天任务不存在或不可访问");
@@ -144,6 +153,8 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
         if (connectionId == null || connectionId.isBlank()) {
             throw new IllegalArgumentException("连接 ID 不能为空");
         }
+        // 每次初始连接或恢复连接都写入新的 connectionId。中继读取期间会持续校验它，
+        // 因此后建立的连接能够淘汰旧连接，避免两条 SSE 同时向前端发送同一批事件。
         List<?> result = execute(
                 ACTIVATE_CONNECTION_SCRIPT,
                 List.of(keys.meta(identity.tenantId(), identity.userId(), requestId)),
@@ -178,6 +189,8 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
     public boolean cancellationRequested(AgentIdentity identity, String requestId) {
         Objects.requireNonNull(identity, "认证身份不能为空");
         try {
+            // 生产线程轮询分布式取消标志，网络断开本身不会写入该标志；只有用户主动
+            // 点击停止才会请求取消后台任务。
             Object value = redis.opsForHash().get(
                     keys.control(identity.tenantId(), identity.userId(), requestId),
                     "cancelRequested");
@@ -204,6 +217,8 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
         String eventKey = keys.events(identity.tenantId(), identity.userId(), requestId);
         List<MapRecord<String, Object, Object>> records;
         try {
+            // Stream ID 使用“业务 sequence-0”。XREAD 从已确认序号之后阻塞读取，既能
+            // 实时转发新事件，也能在重连时补发断开期间已写入 Redis 的事件。
             records = redis.opsForStream().read(
                     StreamReadOptions.empty()
                             .count(properties.maxEvents())
@@ -220,6 +235,7 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
         long previous = afterSequence;
         for (MapRecord<String, Object, Object> record : records) {
             long sequence = sequence(record.getId().getValue());
+            // 严格递增校验用于尽早暴露坏数据或协议错误，防止前端游标倒退后重复拼接。
             if (sequence <= previous) {
                 throw new ChatReplayUnavailableException("Redis 聊天事件序号未严格递增");
             }
@@ -262,6 +278,7 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
     public boolean available() {
         if (!properties.enabled()) return false;
         try {
+            // 在创建业务消息前探测 Redis；此时不可用可以安全降级为不可恢复的直连 SSE。
             String pong = redis.execute((RedisCallback<String>) connection -> connection.ping());
             return "PONG".equalsIgnoreCase(pong);
         } catch (DataAccessException exception) {
@@ -281,6 +298,8 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
         Instant timestamp = Instant.now();
         ChatReplayEncodedEvent encoded = codec.encode(type, timestamp, payload);
         TerminalMetadata terminal = terminalMetadata(type, payload);
+        // Lua 在一次原子操作中完成容量校验、sequence 递增、XADD、统计更新和终态迁移，
+        // 避免多个异步事件写入时出现重复序号或 done/error 被后续事件越过。
         List<?> result = execute(
                 APPEND_SCRIPT,
                 List.of(
@@ -319,6 +338,7 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
         try {
             return redis.execute(script, scriptKeys, (Object[]) arguments);
         } catch (DataAccessException exception) {
+            // Redis 基础设施异常统一转换为领域异常，由上层决定初始请求降级还是恢复失败。
             if (metrics != null) metrics.failure("redis");
             throw new ChatReplayUnavailableException("Redis 聊天流操作失败", exception);
         }
@@ -360,6 +380,8 @@ public class RedisChatReplayRepository implements ChatReplayRepository {
     }
 
     private TerminalMetadata terminalMetadata(String type, Object payload) {
+        // 终态与事件在同一个 append 脚本中提交，status 接口不会观察到“终态事件已写入，
+        // 但任务仍显示 RUNNING”的中间状态。
         if ("done".equals(type)) {
             if (!(payload instanceof ChatStreamPayloads.Done done)) {
                 throw new IllegalArgumentException("done 事件负载不合法");
