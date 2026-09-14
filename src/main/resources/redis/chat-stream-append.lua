@@ -43,6 +43,12 @@ redis.call('HSET', KEYS[1],
         'streamBytes', tostring(streamBytes + eventBytes))
 if terminal then
     redis.call('HSET', KEYS[1], 'state', terminalState)
+    if ARGV[12] ~= '' then
+        redis.call('HSET', KEYS[1], 'terminalCode', ARGV[12])
+    end
+    if ARGV[13] ~= '' then
+        redis.call('HSET', KEYS[1], 'terminalMessageId', ARGV[13])
+    end
 end
 redis.call('PEXPIRE', KEYS[1], ttlMillis)
 redis.call('PEXPIRE', KEYS[2], ttlMillis)
