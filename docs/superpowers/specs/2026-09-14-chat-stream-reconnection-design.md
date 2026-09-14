@@ -1,80 +1,80 @@
-# Chat Stream Reconnection and Replay Design
+# 聊天流断线重连与事件补发设计
 
-## 1. Goal
+## 1. 目标
 
-Add production-grade recovery for transient chat SSE disconnections without submitting the user's question or executing the Agent turn twice.
+为聊天 SSE 增加生产级临时断线恢复能力，并保证不会重复提交用户问题或重复执行 Agent 任务。
 
-The feature must:
+本功能必须满足：
 
-- keep the original backend turn running after an accidental network disconnect;
-- reconnect with bounded exponential backoff and jitter;
-- replay only events the client has not received;
-- keep the composer and competing chat actions locked while automatic recovery is active;
-- stop retrying and notify the user after the configured attempt limit;
-- distinguish an explicit user cancellation from an accidental transport disconnect;
-- preserve tenant and user isolation across every start, resume, status, and cancel operation;
-- degrade to the current non-resumable direct SSE path when Redis is unavailable before a turn starts.
+- 意外网络断开后，后端原任务继续运行；
+- 使用有上限的指数退避和随机抖动自动重连；
+- 只补发客户端尚未收到的事件；
+- 自动恢复期间锁定输入框及其他可能产生并发请求的操作；
+- 达到最大重试次数后停止重试并明确提醒用户；
+- 区分用户主动停止和意外网络断开；
+- start、resume、status、cancel 全链路执行租户及用户归属校验；
+- 一轮任务开始前 Redis 不可用时，降级为当前不可重连的直连 SSE，保证基本聊天可用。
 
-## 2. Scope and Non-goals
+## 2. 范围与非目标
 
-This design covers transient network, gateway, idle-timeout, and premature-EOF failures while the Electron application remains running.
+本设计处理 Electron 应用仍在运行期间发生的网络抖动、网关断开、空闲超时和未收到终态事件的裸 EOF。
 
-It does not persist a live stream cursor on the workstation. If Electron exits or crashes, the next launch restores durable messages from MySQL through the existing conversation-history flow rather than resuming the old SSE connection.
+本次不在用户电脑上持久化活动流游标。Electron 被彻底退出或崩溃后，再次启动时通过现有 MySQL 会话历史恢复最终消息，不继续恢复旧 SSE 实时流。
 
-It does not restart or migrate a running model invocation after the Agent process that owns it crashes. Events already committed to Redis remain replayable. Once the original turn deadline passes, the existing conditional recovery/finalization path marks the abandoned turn terminal without allowing a stale owner to overwrite newer state.
+本次不支持在持有模型任务的 Agent 实例崩溃后，把运行中的模型调用迁移到其他实例继续执行。已经写入 Redis 的事件仍可补发；原任务截止时间到达后，由现有条件恢复与收尾机制把遗留任务转为终态，并阻止旧实例恢复后覆盖新状态。
 
-## 3. Time Model
+## 3. 时间模型
 
-Three independent clocks are used:
+系统使用三套相互独立的时钟：
 
-1. The backend turn deadline remains `agent.chat.stream.timeout=30s`. It starts with the original POST and includes queueing, preparation, context and memory retrieval, knowledge/tool calls, model generation, answer persistence, and terminal confirmation. Reconnection never pauses, refreshes, or extends this deadline.
-2. Electron may perform at most five reconnect attempts for the entire turn. Nominal delays are 500 ms, 1 s, 2 s, 4 s, and 8 s, with bounded jitter.
-3. Redis replay data expires two minutes after the last appended event. This buffer permits event recovery; it does not extend model execution or replace MySQL message persistence.
+1. 后端一轮问答主链路的最大执行时间仍为 `agent.chat.stream.timeout=30s`。它从最初 POST 开始计时，包含线程池排队、会话准备、上下文与记忆召回、知识或工具调用、模型生成、回答落库和终态确认。重连不会暂停、刷新或延长该时间。
+2. Electron 针对整轮请求最多执行 5 次重连。标准退避时间为 500ms、1s、2s、4s、8s，并加入有界随机抖动。
+3. Redis 补发数据从最后一次事件写入后保留 2 分钟。它只用于事件恢复，不延长模型执行，也不替代 MySQL 消息持久化。
 
-Post-turn asynchronous summary generation, implicit-memory extraction, Milvus/Elasticsearch indexing, and cache warming are outside the 30-second user-visible turn deadline.
+会话摘要、隐式记忆抽取、Milvus/Elasticsearch 索引和缓存预热等对话后的异步任务，不属于 30 秒用户可见问答主链路。
 
-## 4. Selected Architecture
+## 4. 选定架构
 
-Redis Streams are the canonical short-lived event journal for resumable turns.
+可恢复任务使用 Redis Streams 作为短期事件日志。
 
-Alternatives were rejected:
+未采用的方案：
 
-- JVM memory cannot support reconnects routed to another instance and is lost on process restart.
-- A MySQL row per delta and heartbeat would create unnecessary write amplification and cleanup pressure on the durable business database.
+- JVM 内存缓冲无法支持请求落到其他实例，也会在进程重启后丢失；
+- 每个 delta 和 heartbeat 都写入 MySQL 会放大持久化数据库的写入和清理压力。
 
-For a resumable turn, generation and delivery are separated:
+可恢复任务把“任务生成”和“连接发送”解耦：
 
 ```text
-Agent turn producer
-    -> atomic Redis event append
-    -> Redis Stream
-    -> one or more short-lived SSE relays
-    -> Electron
+Agent 任务生产者
+    → 原子写入 Redis 事件
+    → Redis Stream
+    → 一个或多个短生命周期 SSE 转发器
+    → Electron
 ```
 
-The producer does not own an `SseEmitter`. Closing an emitter detaches only that relay. It does not cancel the Agent turn.
+任务生产者不再持有 `SseEmitter`。Emitter 关闭只会解除当前 SSE 转发器，不会取消 Agent 任务。
 
-For a direct fallback turn, the existing `ChatSseSession` continues to write to the current emitter and retains its existing cancellation-on-disconnect behavior.
+Redis 在任务开始前不可用时，使用现有 `ChatSseSession` 直接写入当前 Emitter，并保留当前“断连即取消”的不可恢复行为。
 
-## 5. Request Identity and Idempotency
+## 5. 请求标识与幂等
 
-Electron main generates a cryptographically random UUID before the initial HTTP request. Renderer input cannot choose or override it. The backend request DTO receives it as `clientRequestId`, validates UUID syntax, and uses it as the trusted turn `requestId` after binding it to the authenticated identity.
+Electron 主进程在首次 HTTP 请求前生成高随机性的 UUID。渲染进程不能指定或覆盖该值。后端 DTO 以 `clientRequestId` 接收并校验 UUID 格式，在绑定当前认证身份后将其作为本轮可信 `requestId`。
 
-The current MySQL schema already enforces one user message and one assistant message per globally unique request ID with `uk_request_role (request_id, role)`. This constraint is retained; no new message-table uniqueness migration is needed. Every request-ID lookup still includes authenticated tenant and user predicates even though the UUID uniqueness constraint is global.
+当前 MySQL 表已经存在 `uk_request_role (request_id, role)`，能够保证一个全局唯一 requestId 只创建一条用户消息和一条助手消息，因此不需要重复增加消息表唯一索引。虽然 UUID 全局唯一，但按 requestId 查询时仍必须带上当前认证用户的 tenantId 和 userId 条件。
 
-The effective uniqueness rule is:
+实际唯一规则为：
 
 ```text
 (request_id, role)
 ```
 
-Redis uses an atomic create-if-absent claim for the active request. A duplicate initial POST from the same authenticated user attaches to the existing request. It never inserts another message pair or invokes the model again.
+Redis 使用原子“仅不存在时创建”抢占活动请求。同一个认证用户重复提交相同初始请求时，只连接已有任务，不再次插入消息或调用模型。
 
-A request ID owned by another tenant or user is reported as inaccessible; the API does not reveal whether that identifier exists.
+如果 requestId 属于其他租户或用户，接口统一返回不可访问，不暴露该标识是否真实存在。
 
-## 6. HTTP API
+## 6. HTTP 接口
 
-The initial endpoint remains:
+初始接口保持不变：
 
 ```http
 POST /api/v1/chat/stream
@@ -82,7 +82,7 @@ Accept: text/event-stream
 Content-Type: application/json
 ```
 
-The internal main-process request body adds `clientRequestId`. The server returns recovery metadata in response headers so Electron can recover even if the connection drops before the first `session` event:
+Electron 主进程内部请求体新增 `clientRequestId`。服务器通过响应头下发恢复元数据，使连接即使在第一个 `session` 事件到达前断开，Electron 仍然知道如何恢复：
 
 ```text
 X-Chat-Request-Id
@@ -94,9 +94,9 @@ X-Chat-Reconnect-Max-Backoff-Ms
 X-Chat-Reconnect-Jitter-Ratio
 ```
 
-The `session` payload also includes `expiresAt` and `resumable` for protocol observability.
+`session` 事件也增加 `expiresAt` 和 `resumable`，方便协议观测。
 
-Resume endpoint:
+恢复接口：
 
 ```http
 GET /api/v1/chat/stream/{requestId}/resume?afterSequence={lastSequence}
@@ -104,27 +104,27 @@ Accept: text/event-stream
 Authorization: Bearer ...
 ```
 
-Status endpoint:
+状态接口：
 
 ```http
 GET /api/v1/chat/stream/{requestId}/status
 Authorization: Bearer ...
 ```
 
-Status returns identity-safe metadata only: request ID, conversation ID when available, state, resumable flag, deadline, last sequence, terminal message ID, and terminal error code. It does not return answer content.
+状态接口只返回经过身份隔离的元数据：requestId、可用时的 conversationId、任务状态、是否可恢复、截止时间、最后事件序号、终态消息 ID 和终态错误码，不返回回答正文。
 
-Explicit cancellation endpoint:
+主动取消接口：
 
 ```http
 POST /api/v1/chat/stream/{requestId}/cancel
 Authorization: Bearer ...
 ```
 
-Resume, status, and cancel construct lookups from the authenticated `tenantId` and `userId`; they never accept identity fields from query parameters or request bodies.
+恢复、状态和取消接口只能使用认证上下文中的 tenantId 和 userId 构造查询，禁止从请求体或查询参数接收身份字段。
 
-## 7. Redis Model
+## 7. Redis 数据模型
 
-Keys share a Redis Cluster hash tag so metadata and events can be updated atomically:
+相关 Key 使用相同的 Redis Cluster hash tag，使元数据和事件可以原子更新：
 
 ```text
 agent:chat:stream:v1:{tenantId:userId:requestId}:meta
@@ -132,38 +132,38 @@ agent:chat:stream:v1:{tenantId:userId:requestId}:events
 agent:chat:stream:v1:{tenantId:userId:requestId}:control
 ```
 
-Metadata includes:
+元数据包含：
 
 ```text
-tenantId, userId, orgId, conversationId, requestId
-state, resumable, createdAt, expiresAt
-lastSequence, totalEventCount, totalEventBytes
-ownerInstanceId, ownerLeaseUntil, activeConnectionId
-terminalMessageId, terminalErrorCode
+tenantId、userId、orgId、conversationId、requestId
+state、resumable、createdAt、expiresAt
+lastSequence、totalEventCount、totalEventBytes
+ownerInstanceId、ownerLeaseUntil、activeConnectionId
+terminalMessageId、terminalErrorCode
 ```
 
-Each Stream entry contains:
+每条 Stream 事件包含：
 
 ```text
-sequence, type, timestamp, payloadJson, payloadBytes
+sequence、type、timestamp、payloadJson、payloadBytes
 ```
 
-The Redis Stream ID is `<sequence>-0`.
+Redis Stream ID 使用 `<sequence>-0`。
 
-An atomic Lua append operation:
+Lua 原子追加脚本按以下顺序执行：
 
-1. verifies that the request is writable and not terminal;
-2. validates per-event, event-count, and total-byte limits;
-3. increments `lastSequence`;
-4. appends the event;
-5. updates counters and terminal state when applicable;
-6. refreshes metadata, event, and control TTLs.
+1. 校验请求仍允许写入且尚未终态；
+2. 校验单事件大小、事件总数和总字节数限制；
+3. 递增 `lastSequence`；
+4. 追加事件；
+5. 更新容量计数，并在需要时更新终态；
+6. 刷新 meta、events 和 control 的 TTL。
 
-This provides one ordering boundary for model, tool, heartbeat, and terminal events. Once `done` or `error` commits, later writes are rejected.
+模型线程、工具线程、心跳线程和收尾线程统一经过这个顺序边界。`done/error` 成功写入后，后续事件全部拒绝。
 
-## 8. Capacity and Retention
+## 8. 容量与保留策略
 
-Default Nacos properties:
+Nacos 默认配置：
 
 ```properties
 agent.chat.stream.replay.enabled=true
@@ -180,132 +180,138 @@ agent.chat.stream.reconnect.max-backoff=8s
 agent.chat.stream.reconnect.jitter-ratio=0.2
 ```
 
-The implementation reserves capacity for one small terminal event. If an event or stream limit would be exceeded, generation stops and the request becomes `CHAT_STREAM_REPLAY_LIMIT`. Existing events are never silently trimmed because trimming could make replay produce a false complete answer.
+系统为一个小型终态事件预留容量。如果写入会超过任意上限，则停止继续生成并将任务转为 `CHAT_STREAM_REPLAY_LIMIT`。不能静默裁剪旧事件，否则恢复后可能得到正文不完整但状态成功的错误结果。
 
-TTL is refreshed on each append and finalized from the `done/error` append. When replay data expires, durable chat messages remain in MySQL.
+每次追加事件都会刷新 TTL；`done/error` 写入后以终态写入时间重新计算 2 分钟。Redis 数据过期不会影响 MySQL 中的持久化聊天消息。
 
-## 9. Relays and Connection Supersession
+## 9. SSE 转发器与连接替换
 
-Initial and resume connections are Redis Stream relays. A relay:
+初始连接和恢复连接都通过 Redis Stream 转发器工作。每个转发器：
 
-1. replays entries strictly greater than `afterSequence`;
-2. blocks for new entries for at most the configured read-block timeout;
-3. rechecks connection ownership, request terminal state, and turn deadline;
-4. completes after forwarding `done/error`.
+1. 先补发严格大于 `afterSequence` 的事件；
+2. 最多按配置时间阻塞等待新事件；
+3. 每次醒来后重新检查连接归属、任务终态和任务截止时间；
+4. 转发 `done/error` 后结束。
 
-Attaching a relay assigns a new random `activeConnectionId`. A previous relay observes that it has been superseded and stops. Multiple connections may briefly overlap, but immutable sequence IDs and frontend deduplication prevent duplicate rendering.
+每次连接会生成新的 `activeConnectionId`。新连接建立后，旧转发器检测到自己已被替换并停止。新旧连接可以短暂重叠，但事件序号不可变，前端也会按序号去重，因此不会重复渲染。
 
-SSE relay completion, error, or timeout detaches only the relay for resumable turns. Explicit cancellation is the only client action that requests turn cancellation.
+可恢复模式下，SSE 转发器完成、异常或超时只会解除连接；只有显式取消接口能够请求取消任务。
 
-## 10. Cancellation and Process Failure
+## 10. 主动取消与进程故障
 
-The cancel endpoint atomically marks a durable Redis cancellation intent and attempts immediate cancellation through a local active-task registry. The owning instance observes cancellation through Redis notification plus checks at preparation, tool, model-chunk, heartbeat, and finalization boundaries. The durable cancellation flag is the fallback if notification is missed.
+取消接口原子写入 Redis 取消意图，并通过本地活动任务注册表尝试立即中断。任务所属实例通过 Redis 通知接收取消信号，同时在会话准备、工具调用、模型分片、心跳和收尾边界检查持久化取消标记。即使通知丢失，持久化标记仍能兜底。
 
-Cancellation finalizes the assistant message as `CANCELLED` and publishes a terminal error event when Redis is available.
+取消后，助手消息以 `CANCELLED` 收尾；Redis 可用时写入终态 error 事件。
 
-If the producer process crashes, no other instance restarts the model. A resume/status request may replay committed events, but after `expiresAt` it conditionally finalizes the still-owned database turn as `TIMEOUT` or `INTERRUPTED`. Existing request-ID and database lease conditions prevent a stale producer from overwriting recovered state.
+如果任务生产实例崩溃，其他实例不会重新执行模型。恢复或状态接口可以补发已经提交的事件；到达 `expiresAt` 后，通过 requestId、消息状态和会话占用条件更新，把遗留任务转为 `TIMEOUT` 或 `INTERRUPTED`。旧生产者恢复后不能覆盖已经恢复的状态。
 
-## 11. Redis Failure Semantics
+## 11. Redis 故障语义
 
-Before turn creation, failure to initialize replay storage selects the existing direct SSE mode. The session is marked `resumable=false`; Electron does not attempt resume for that turn. Chat availability is preserved.
+创建业务消息前，如果初始化补发存储失败，则选择现有直连 SSE 模式，并在 `session` 中返回 `resumable=false`。Electron 对这一轮不执行恢复，保证 Redis 故障不会使聊天入口整体不可用。
 
-Once a turn is declared resumable, Redis is part of the correctness boundary. An append failure cannot be treated as success because clients could miss answer content. The turn finalizes as `CHAT_STREAM_REPLAY_UNAVAILABLE`. If Redis cannot carry the terminal event, a later status request reconciles the durable MySQL state.
+一轮任务一旦声明为可恢复，Redis 就成为正确性边界。事件追加失败不能继续返回成功，否则客户端可能永久缺失正文。该轮以 `CHAT_STREAM_REPLAY_UNAVAILABLE` 收尾。如果 Redis 无法承载终态事件，后续状态接口从 MySQL 对账最终状态。
 
-No turn changes between direct and resumable mode after it starts.
+任务开始后不允许在直连和可恢复模式之间切换。
 
-## 12. Electron Main-process Recovery
+## 12. Electron 主进程恢复
 
-`AgentChatStreamClient` owns recovery because it already owns the access token and the actual Fetch readable stream.
+恢复逻辑放在 `AgentChatStreamClient`，因为 Bearer Token 和真正的 Fetch 可读流都在 Electron 主进程中。
 
-Per active stream it retains:
+每条活动流保存：
 
 ```text
-local streamId, owner renderer ID
-server requestId, conversationId
-last accepted sequence, expiresAt, resumable
-current reader/controller
-cumulative reconnect attempts
-unresolved terminal status when recovery is exhausted
+本地 streamId、所属渲染窗口 ID
+服务器 requestId、conversationId
+最后已接受 sequence、expiresAt、resumable
+当前 reader 和 controller
+整轮累计重连次数
+重试耗尽后尚待对账的请求状态
 ```
 
-On a retryable failure it returns a connection-state result to the renderer, applies exponential backoff with bounded jitter, opens the resume endpoint with `afterSequence`, replaces the reader, and continues parsing.
+遇到可重试错误后，主进程向渲染进程返回独立的连接状态，执行带随机抖动的指数退避，携带 `afterSequence` 打开恢复接口，替换 reader 后继续解析事件。
 
-The five-attempt budget is cumulative for the entire original request. A successful reconnect does not reset the counter, preventing an unstable network from creating an unbounded loop.
+最多 5 次的额度按整轮请求累计。一次恢复成功后不清零，防止持续抖动的网络形成无限重连。
 
-Electron never automatically repeats the initial POST.
+Electron 永远不会自动重放初始 POST。
 
-## 13. Renderer State and Input Locking
+## 13. 渲染状态与输入锁定
 
-The shared IPC read result gains a transport-state variant separate from server `ChatEvent`; local recovery state never consumes or fabricates a server event sequence.
+共享 IPC 读取结果增加独立的传输状态分支，不把本地重连状态伪造成服务器 ChatEvent，也不占用服务器事件 sequence。
 
-While recovery is active:
+自动恢复期间：
 
-- the existing active controller remains installed;
-- `chat.isStreaming` and `chat.isBusy` remain true;
-- the composer, send button, card operations, conversation switching, and new-conversation action remain disabled;
-- status text shows `连接中断，正在恢复（N/5）`;
-- already-rendered assistant content remains visible.
+- 保留现有 active controller；
+- `chat.isStreaming` 和 `chat.isBusy` 持续为 true；
+- 输入框、发送按钮、卡片操作、会话切换和新建会话继续禁用；
+- 状态文字显示 `连接中断，正在恢复（N/5）`；
+- 已经展示的助手正文继续保留。
 
-After successful resume, status returns to the next server status/event and missing events are applied. `ChatAccumulator` continues deduplicating by sequence.
+恢复成功后，状态跟随后续服务器事件变化，并应用补发事件。`ChatAccumulator` 继续按 sequence 去重。
 
-After the fifth failure:
+第 5 次失败后：
 
-- automatic recovery stops;
-- the partial assistant message is marked incomplete and is not represented as a successful answer;
-- the UI shows `连接恢复失败，请稍后重试`;
-- the composer unlocks;
-- Electron retains an unresolved request record for the running application.
+- 停止自动恢复；
+- 将部分助手消息标记为未完成，不伪装成成功回答；
+- 显示 `连接恢复失败，请稍后重试`；
+- 解锁输入框；
+- Electron 在当前应用进程内保留一个待对账 requestId。
 
-Before a later user message is added to the UI or sent, Electron queries the status endpoint:
+用户之后再次发送前，必须先查询状态：
 
-- `DONE`: refresh conversation history, clear the unresolved request, and then allow a new send;
-- `ERROR`, `TIMEOUT`, `CANCELLED`, or `INTERRUPTED`: clear the unresolved request and allow a new send;
-- `RUNNING`: do not send and show `上一轮仍在处理中`;
-- status network failure: do not send, retain the user's input text, and show that the prior state cannot yet be confirmed.
+- `DONE`：刷新会话历史，清除待对账请求，然后允许发送；
+- `ERROR`、`TIMEOUT`、`CANCELLED` 或 `INTERRUPTED`：清除待对账请求并允许发送；
+- `RUNNING`：不发送，提示 `上一轮仍在处理中`；
+- 状态接口仍不可用：不发送，保留用户输入，提示暂时无法确认上一轮状态。
 
-## 14. Retry Classification
+## 14. 重试错误分类
 
-Retryable:
+允许自动重试：
 
-- Fetch network rejection not caused by explicit abort;
-- TCP reset, premature EOF without `done/error`, and established-stream idle timeout;
-- HTTP 408, 429, 502, 503, and 504 from resume/status endpoints;
-- temporary Redis-unavailable responses from resume.
+- 非用户主动取消导致的 Fetch 网络异常；
+- TCP 重置、未收到 `done/error` 的裸 EOF、已建立连接后的空闲超时；
+- 恢复或状态接口返回 HTTP 408、429、502、503、504；
+- 恢复阶段 Redis 暂时不可用。
 
-Not retryable:
+禁止自动重试：
 
-- a server `error` terminal event;
-- HTTP 400 or 403;
-- HTTP 401, which triggers logout;
-- HTTP 404 or 410 for a missing or expired replay stream;
-- malformed, oversized, or over-queued SSE data;
-- explicit user cancellation;
-- a received `done` event.
+- 已收到服务器 `error` 终态事件；
+- HTTP 400 或 403；
+- HTTP 401，此时直接退出登录；
+- HTTP 404 或 410，表示请求不存在或补发数据已经过期；
+- SSE 格式非法、单事件过大或事件积压越界；
+- 用户主动停止；
+- 已收到 `done`。
 
-The delay before attempt `n` is `min(maxBackoff, initialBackoff * 2^(n-1))`, multiplied by bounded random jitter in `[0.8, 1.2]`. `Retry-After` may increase the wait for 429/503 but cannot extend the backend turn deadline.
+第 n 次重连的基准等待时间为：
 
-## 15. Terminal Races
+```text
+min(maxBackoff, initialBackoff × 2^(n-1))
+```
 
-Network restoration and turn completion are independent:
+然后乘以 `[0.8, 1.2]` 范围内的随机系数。HTTP 429/503 的 `Retry-After` 可以延长本次等待，但不能延长后端任务截止时间。
 
-- If the turn completed within its deadline, a later resume replays missing events and `done`, even if the wall clock is now past the original deadline.
-- If the turn did not complete before the deadline, resume/status returns or synthesizes the durable `CHAT_TIMEOUT` terminal result.
-- A successful HTTP reconnect therefore does not imply a successful Agent turn.
+## 15. 终态竞态
 
-Terminal writes use request ID, message status, and active lease/request conditions. Only one terminal transition wins.
+网络恢复和任务完成相互独立：
 
-## 16. Gateway Requirements
+- 任务在截止时间前已经完成时，即使恢复连接发生在截止时间之后，只要 Redis 事件仍在，就补发缺失事件和 `done`；
+- 任务在截止时间前没有完成时，恢复或状态接口返回或合成持久化的 `CHAT_TIMEOUT` 终态；
+- HTTP 恢复连接成功不等于 Agent 任务成功。
 
-The chat start and resume routes must:
+终态写入同时校验 requestId、消息状态和当前会话占用。只有一个终态转换能够成功。
 
-- disable proxy buffering and response compression for SSE;
-- use a read/response timeout greater than the backend turn deadline plus terminal-delivery grace (at least 45 seconds for a 30-second turn);
-- preserve authorization and the defined recovery response headers;
-- not automatically replay the initial POST.
+## 16. 网关要求
 
-## 17. Observability
+聊天初始和恢复路由必须：
 
-Metrics:
+- 禁用代理缓冲和 SSE 响应压缩；
+- read/response timeout 大于后端任务截止时间加终态发送宽限时间；30 秒任务至少配置 45 秒；
+- 保留 Authorization 和本设计定义的恢复响应头；
+- 禁止自动重放初始 POST。
+
+## 17. 可观测性
+
+指标：
 
 ```text
 chat_stream_reconnect_attempt_total
@@ -318,35 +324,35 @@ chat_stream_active_jobs
 chat_stream_active_relays
 ```
 
-Structured logs include request ID, connection ID, attempt number, sequence range, state, duration, and failure category. Event payloads, access tokens, user messages, and tool result contents are not logged.
+结构化日志只记录 requestId、connectionId、重连次数、事件序号范围、状态、耗时和失败分类，不记录事件 payload、Token、用户消息正文或工具结果内容。
 
-## 18. Verification
+## 18. 验证范围
 
-Backend tests cover:
+后端测试覆盖：
 
-- property validation;
-- atomic concurrent model/heartbeat append ordering;
-- replay strictly after a cursor;
-- terminal-write exclusion;
-- TTL, per-event, event-count, and byte limits;
-- authenticated tenant/user isolation;
-- duplicate initial-request idempotency;
-- accidental disconnect detach versus explicit cancellation;
-- Redis-startup failure direct-mode fallback;
-- mid-turn Redis failure safe termination;
-- timeout/completion races and stale-owner protection;
-- resume and status behavior after event expiry.
+- 配置参数校验；
+- 模型与心跳并发追加时的原子序号；
+- 严格补发游标之后的事件；
+- 终态写入后禁止继续追加；
+- TTL、单事件大小、事件总数和总字节限制；
+- 跨租户和跨用户访问拒绝；
+- 相同 clientRequestId 不重复执行；
+- 意外断线只解除连接，主动停止才取消任务；
+- Redis 启动前故障时降级为直连；
+- Redis 运行中故障时安全失败；
+- 超时与完成竞态、旧生产者保护；
+- Redis 事件过期后的恢复与状态行为。
 
-Electron tests use injected clocks, random values, and Fetch implementations to cover:
+Electron 测试通过注入时钟、随机数和 Fetch 实现覆盖：
 
-- 500 ms, 1 s, 2 s, 4 s, and 8 s nominal backoff with jitter bounds;
-- cumulative five-attempt limit;
-- retryable and non-retryable classification;
-- cursor advancement and replay deduplication;
-- busy/input lock through recovery;
-- explicit stop during delay and during a resumed stream;
-- exhaustion notification and unresolved status reconciliation;
-- user input preservation when reconciliation cannot complete;
-- no automatic initial POST replay.
+- 500ms、1s、2s、4s、8s 指数退避及抖动边界；
+- 整轮累计最多 5 次；
+- 可重试与不可重试错误分类；
+- 游标推进和补发事件去重；
+- 恢复期间 busy 状态与输入锁定；
+- 等待退避时和恢复连接后主动停止；
+- 重试耗尽提示与待对账状态；
+- 对账失败时保留用户输入；
+- 不自动重放初始 POST。
 
-Integration verification disconnects after a known sequence, resumes through a different server instance against the same Redis, checks ordered replay through `done`, and confirms the Agent turn and message pair were created exactly once.
+集成验证会在已知 sequence 后主动断开，通过共享 Redis 从另一个 Agent 实例恢复，检查事件按序补发到 `done`，并确认模型任务和消息对只创建一次。
