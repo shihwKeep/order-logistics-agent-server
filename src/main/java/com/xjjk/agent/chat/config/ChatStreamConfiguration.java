@@ -22,4 +22,17 @@ public class ChatStreamConfiguration {
         return executor;
     }
 
+    /** 阻塞读取 Redis Streams 的连接消费者必须与模型生产线程隔离。 */
+    @Bean("chatSseRelayExecutor")
+    public ThreadPoolTaskExecutor chatSseRelayExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(32);
+        executor.setQueueCapacity(100);
+        executor.setThreadNamePrefix("chat-sse-relay-");
+        executor.setWaitForTasksToCompleteOnShutdown(false);
+        executor.setAwaitTerminationSeconds(2);
+        return executor;
+    }
+
 }

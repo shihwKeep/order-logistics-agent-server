@@ -82,6 +82,12 @@ public enum ApiErrorCode {
             "本次请求已结束或不再有效"
     ),
 
+    CHAT_STREAM_NOT_FOUND(
+            HttpStatus.NOT_FOUND,
+            "CHAT_STREAM_NOT_FOUND",
+            "聊天任务不存在、已过期或无权访问"
+    ),
+
     CHAT_HISTORY_LOAD_FAILED(
             HttpStatus.SERVICE_UNAVAILABLE,
             "CHAT_HISTORY_LOAD_FAILED",
