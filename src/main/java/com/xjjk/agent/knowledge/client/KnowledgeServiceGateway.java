@@ -4,6 +4,7 @@ import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
 import com.xjjk.agent.knowledge.service.KnowledgeQueryGateway;
 import com.xjjk.agent.knowledge.service.KnowledgeServiceUnavailableException;
+import com.xjjk.agent.knowledge.service.KnowledgeModelBudgetExceededException;
 import feign.FeignException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -43,6 +44,9 @@ public class KnowledgeServiceGateway implements KnowledgeQueryGateway {
                     signed.signature(), requestId,
                     new KnowledgeClient.RetrievalRequest(normalizedQuestion, ids));
             return map(response);
+        } catch (KnowledgeModelBudgetExceededException exception) {
+            log.warn("knowledge_gateway_budget_exhausted requestId={}", requestId);
+            throw exception;
         } catch (FeignException | KnowledgeServiceUnavailableException exception) {
             log.warn("knowledge_gateway_failed requestId={}, exceptionType={}",
                     requestId, exception.getClass().getSimpleName());

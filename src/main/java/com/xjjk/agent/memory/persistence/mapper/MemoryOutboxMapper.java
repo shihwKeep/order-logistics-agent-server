@@ -3,6 +3,7 @@ package com.xjjk.agent.memory.persistence.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.xjjk.agent.memory.persistence.entity.MemoryOutboxEntity;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
@@ -12,6 +13,23 @@ import java.util.List;
 
 @Mapper
 public interface MemoryOutboxMapper extends BaseMapper<MemoryOutboxEntity> {
+
+    @Insert("""
+        INSERT IGNORE INTO agent_memory_outbox
+          (event_id, memory_id, tenant_id, user_id, memory_generation,
+           memory_version, operation, status, retry_count, next_run_at,
+           created_at, updated_at)
+        VALUES (#{eventId}, #{memoryId}, #{tenantId}, #{userId}, #{generation},
+                #{version}, 'UPSERT', 'PENDING', 0, #{now}, #{now}, #{now})
+        """)
+    int insertReindexEventIfAbsent(
+            @Param("eventId") String eventId,
+            @Param("memoryId") String memoryId,
+            @Param("tenantId") long tenantId,
+            @Param("userId") long userId,
+            @Param("generation") long generation,
+            @Param("version") long version,
+            @Param("now") LocalDateTime now);
 
     @Select("""
         SELECT * FROM agent_memory_outbox

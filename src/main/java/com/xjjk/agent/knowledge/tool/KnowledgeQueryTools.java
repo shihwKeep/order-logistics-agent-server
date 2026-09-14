@@ -3,6 +3,7 @@ package com.xjjk.agent.knowledge.tool;
 import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
 import com.xjjk.agent.knowledge.service.KnowledgeQueryGateway;
 import com.xjjk.agent.knowledge.service.KnowledgeServiceUnavailableException;
+import com.xjjk.agent.knowledge.service.KnowledgeModelBudgetExceededException;
 import com.xjjk.agent.tool.AgentToolRequestContext;
 import com.xjjk.agent.tool.ToolUiResult;
 import lombok.RequiredArgsConstructor;
@@ -41,6 +42,9 @@ public class KnowledgeQueryTools {
             return context.callGuard().execute(
                     "search_knowledge", normalized,
                     () -> execute(normalized, context));
+        } catch (KnowledgeModelBudgetExceededException exception) {
+            log.warn("knowledge_tool_budget_exhausted requestId={}", context.requestId());
+            return "知识检索模型本月额度已用尽，请联系管理员。";
         } catch (KnowledgeServiceUnavailableException exception) {
             log.warn("knowledge_tool_failed requestId={}, exceptionType={}",
                     context.requestId(), exception.getClass().getSimpleName());

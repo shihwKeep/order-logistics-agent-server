@@ -15,6 +15,19 @@ import java.util.List;
 public interface UserMemoryMapper extends BaseMapper<UserMemoryEntity> {
 
     @Select("""
+        SELECT * FROM agent_user_memory
+        WHERE id > #{afterId}
+          AND status = 'ACTIVE'
+          AND (expires_at IS NULL OR expires_at > #{now})
+        ORDER BY id
+        LIMIT #{limit}
+        """)
+    List<UserMemoryEntity> selectActiveForReindex(
+            @Param("afterId") long afterId,
+            @Param("now") LocalDateTime now,
+            @Param("limit") int limit);
+
+    @Select("""
         SELECT *
         FROM agent_user_memory
         WHERE tenant_id = #{tenantId}
