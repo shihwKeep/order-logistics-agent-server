@@ -1,5 +1,6 @@
 package com.xjjk.agent.chat.api.dto;
 
+import java.time.Instant;
 import java.time.OffsetDateTime;
 
 public final class ChatStreamPayloads {
@@ -9,8 +10,15 @@ public final class ChatStreamPayloads {
 
     public record Session(
             String conversationId,
-            String requestId
+            String requestId,
+            Instant expiresAt,
+            boolean resumable
     ) {
+
+        /** 旧直连模式不承诺断点恢复，暂不暴露任务截止时间。 */
+        public Session(String conversationId, String requestId) {
+            this(conversationId, requestId, null, false);
+        }
     }
 
     public record Heartbeat() {
