@@ -1,7 +1,7 @@
 package com.xjjk.agent.chat.service.stream;
 
 import com.xjjk.agent.chat.routing.BusinessQueryMode;
-import com.xjjk.agent.chat.stream.ChatSseSession;
+import com.xjjk.agent.chat.stream.ChatEventPublisher;
 import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -27,7 +27,7 @@ public class FreshBusinessResultGate {
      * <p>MODEL_REQUIRED 路径中，模型正文和卡片先缓存在请求对象中。只有至少产生
      * 一个结果，且所有实际结果类型都在计划白名单内，才允许发送给前端并进入收尾落库。</p>
      */
-    void flush(ChatTurnExecution execution, ChatSseSession session) throws IOException {
+    void flush(ChatTurnExecution execution, ChatEventPublisher session) throws IOException {
         if (execution.queryPlan.mode() != BusinessQueryMode.MODEL_REQUIRED) {
             return;
         }

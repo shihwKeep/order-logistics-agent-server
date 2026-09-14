@@ -2,7 +2,7 @@ package com.xjjk.agent.chat.service.stream;
 
 import com.xjjk.agent.chat.domain.MessageStatus;
 import com.xjjk.agent.chat.service.turn.ChatTurnFinishService;
-import com.xjjk.agent.chat.stream.ChatSseSession;
+import com.xjjk.agent.chat.stream.ChatEventPublisher;
 import com.xjjk.agent.chat.stream.ChatStreamControl;
 import com.xjjk.agent.chat.stream.ChatStreamError;
 import lombok.RequiredArgsConstructor;
@@ -27,7 +27,7 @@ public class ChatTurnFinalizer {
     void finish(
             ChatTurnExecution execution,
             ChatStreamControl control,
-            ChatSseSession session
+            ChatEventPublisher session
     ) {
         // beginFinalization 原子地冻结首个停止原因，并阻止后续回调反复改变最终状态。
         MessageStatus stopReason = control.beginFinalization();
@@ -106,7 +106,7 @@ public class ChatTurnFinalizer {
 
     private void emitTerminal(
             ChatTurnExecution execution,
-            ChatSseSession session,
+            ChatEventPublisher session,
             MessageStatus stopReason,
             boolean saved
     ) throws IOException {

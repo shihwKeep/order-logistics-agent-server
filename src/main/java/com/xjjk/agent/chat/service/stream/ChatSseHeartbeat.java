@@ -2,7 +2,7 @@ package com.xjjk.agent.chat.service.stream;
 
 import com.xjjk.agent.chat.config.ChatStreamProperties;
 import com.xjjk.agent.chat.domain.MessageStatus;
-import com.xjjk.agent.chat.stream.ChatSseSession;
+import com.xjjk.agent.chat.stream.ChatEventPublisher;
 import com.xjjk.agent.chat.stream.ChatStreamControl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,7 +32,7 @@ public final class ChatSseHeartbeat {
         this.properties = Objects.requireNonNull(properties, "聊天流配置不能为空");
     }
 
-    public Lease start(ChatSseSession session, ChatStreamControl control) {
+    public Lease start(ChatEventPublisher session, ChatStreamControl control) {
         Objects.requireNonNull(session, "SSE 会话不能为空");
         Objects.requireNonNull(control, "聊天流控制对象不能为空");
 

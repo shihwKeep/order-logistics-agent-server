@@ -13,7 +13,7 @@ import com.xjjk.agent.chat.routing.BusinessQueryMode;
 import com.xjjk.agent.chat.routing.BusinessQueryPlan;
 import com.xjjk.agent.chat.routing.BusinessQueryPlanner;
 import com.xjjk.agent.chat.service.turn.ChatTurnPreparationService;
-import com.xjjk.agent.chat.stream.ChatSseSession;
+import com.xjjk.agent.chat.stream.ChatEventPublisher;
 import com.xjjk.agent.chat.stream.ChatStreamControl;
 import com.xjjk.agent.chat.stream.ChatStreamError;
 import com.xjjk.agent.common.exception.BusinessException;
@@ -60,7 +60,7 @@ public class ChatTurnRunner {
             ChatStreamRequest request,
             AgentIdentity identity,
             ChatStreamControl control,
-            ChatSseSession session,
+            ChatEventPublisher session,
             String fallbackRequestId
     ) {
         // 每次请求独享一个执行上下文；Spring 单例服务中不保存正文、状态等可变数据。
@@ -102,7 +102,7 @@ public class ChatTurnRunner {
             ChatStreamRequest request,
             AgentIdentity identity,
             ChatStreamControl control,
-            ChatSseSession session,
+            ChatEventPublisher session,
             ChatTurnExecution execution
     ) throws IOException {
         if (control.isStopRequested()) {
@@ -215,7 +215,7 @@ public class ChatTurnRunner {
     private void executeAction(
             ChatStreamRequest request,
             AgentIdentity identity,
-            ChatSseSession session,
+            ChatEventPublisher session,
             ChatTurnExecution execution) throws IOException {
         /*
          * 卡片动作是后端白名单命令：不加载对话上下文，也不让模型判断调用哪个工具。
@@ -248,7 +248,7 @@ public class ChatTurnRunner {
             ChatContextSelection selection,
             AgentIdentity identity,
             ChatStreamControl control,
-            ChatSseSession session,
+            ChatEventPublisher session,
             ChatTurnExecution execution
     ) throws IOException {
         // try-with-resources 保证正常结束、异常和取消时都关闭上游模型流，释放 HTTP 连接。
@@ -275,7 +275,7 @@ public class ChatTurnRunner {
 
     private void publishToolResultUnchecked(
             ToolUiResult result,
-            ChatSseSession session,
+            ChatEventPublisher session,
             ChatTurnExecution execution) {
         try {
             publishToolResult(result, session, execution);
@@ -286,7 +286,7 @@ public class ChatTurnRunner {
 
     private void publishToolResult(
             ToolUiResult result,
-            ChatSseSession session,
+            ChatEventPublisher session,
             ChatTurnExecution execution) throws IOException {
         synchronized (execution) {
             /*
@@ -307,7 +307,7 @@ public class ChatTurnRunner {
 
     private void acceptResponse(
             ChatResponse response,
-            ChatSseSession session,
+            ChatEventPublisher session,
             ChatTurnExecution execution
     ) throws IOException {
         // 用量片段可能不带正文，必须先收集用量。
