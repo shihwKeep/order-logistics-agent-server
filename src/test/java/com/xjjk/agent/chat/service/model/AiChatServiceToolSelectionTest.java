@@ -178,7 +178,8 @@ class AiChatServiceToolSelectionTest {
         KnowledgeQueryTools knowledgeTools = new KnowledgeQueryTools(
                 (question, ids, identity, requestId) -> new KnowledgeRetrievalResult(
                         false, List.of(), "v1", "NONE", "EMPTY", OffsetDateTime.now()),
-                knowledgeAvailability);
+                knowledgeAvailability,
+                com.xjjk.agent.prompt.PromptCatalogTestFixture.catalog());
         return new AiChatService(
                 mock(ChatClient.class),
                 productTools,

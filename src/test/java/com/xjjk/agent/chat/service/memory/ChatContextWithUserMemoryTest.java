@@ -118,7 +118,8 @@ class ChatContextWithUserMemoryTest {
         ChatSummaryTaskScheduler scheduler = mock(ChatSummaryTaskScheduler.class);
         UserMemoryRecallService recall = mock(UserMemoryRecallService.class);
         UserMemoryContextRenderer renderer = mock(UserMemoryContextRenderer.class);
-        UserMemorySystemPromptPolicy policy = new UserMemorySystemPromptPolicy();
+        UserMemorySystemPromptPolicy policy = new UserMemorySystemPromptPolicy(
+                com.xjjk.agent.prompt.PromptCatalogTestFixture.catalog());
         ChatTurnContext turn = new ChatTurnContext(
                 1L, 10567L, "conversation-1", "request-1",
                 "user-message", "assistant-message", "prompt-v1");
