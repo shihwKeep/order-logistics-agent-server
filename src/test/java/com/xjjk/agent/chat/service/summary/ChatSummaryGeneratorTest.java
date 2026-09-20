@@ -21,6 +21,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static com.xjjk.agent.prompt.PromptCatalogTestFixture.catalog;
 
 class ChatSummaryGeneratorTest {
 
@@ -44,12 +45,7 @@ class ChatSummaryGeneratorTest {
                     .doesNotContain("secret123", "不完整回答");
             assertThat(request.corrective()).isFalse();
             assertThat(request.systemPrompt())
-                    .contains("\"schemaVersion\": 1")
-                    .contains("\"conversationFacts\"")
-                    .contains("\"importantEntities\"")
-                    .contains("\"entityType\"")
-                    .contains("\"displayValue\"")
-                    .contains("USER_MESSAGE", "ASSISTANT_MESSAGE");
+                    .isEqualTo("CONFIGURED_SUMMARY_SYSTEM");
         });
     }
 
@@ -184,7 +180,8 @@ class ChatSummaryGeneratorTest {
                 modelClient,
                 new SensitiveContentSanitizer(),
                 new ChatSummaryValidator(),
-                propertiesForSummaryTests()
+                propertiesForSummaryTests(),
+                catalog()
         );
     }
 

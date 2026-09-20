@@ -2,6 +2,8 @@ package com.xjjk.agent.chat.service.summary;
 
 import com.xjjk.agent.chat.config.ChatSummaryProperties;
 import com.xjjk.agent.chat.domain.summary.ChatSummaryGenerationException;
+import com.xjjk.agent.prompt.AgentPromptCatalogProperties;
+import com.xjjk.agent.prompt.StrictPromptTemplateRenderer;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.metadata.Usage;
@@ -11,6 +13,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.Objects;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -26,16 +29,22 @@ public class SpringAiChatSummaryModelClient
     private final ChatClient chatClient;
     private final ChatSummaryProperties properties;
     private final ExecutorService modelExecutor;
+    private final AgentPromptCatalogProperties promptCatalog;
+    private final StrictPromptTemplateRenderer promptRenderer;
 
     public SpringAiChatSummaryModelClient(
             @Qualifier("summaryChatClient") ChatClient chatClient,
             ChatSummaryProperties properties,
             @Qualifier("chatSummaryModelExecutor")
-            ExecutorService modelExecutor
+            ExecutorService modelExecutor,
+            AgentPromptCatalogProperties promptCatalog,
+            StrictPromptTemplateRenderer promptRenderer
     ) {
         this.chatClient = chatClient;
         this.properties = properties;
         this.modelExecutor = modelExecutor;
+        this.promptCatalog = promptCatalog;
+        this.promptRenderer = promptRenderer;
     }
 
     /**
@@ -91,12 +100,17 @@ public class SpringAiChatSummaryModelClient
      * 仍复用同一份受控输入，不允许模型通过纠偏阶段引入新的历史来源。
      */
     private Response invoke(Request request) {
-        String instruction = request.corrective()
-                ? "上次输出未通过结构校验。请仅根据同一输入重新输出严格 JSON，不要增加解释。\n"
-                : "请将以下滚动历史压缩为结构化摘要 JSON。\n";
+        String userPrompt = promptRenderer.render(
+                "agent.ai.prompt.catalog.summary.user-template",
+                promptCatalog.summary().userTemplate(),
+                Map.of(
+                        "promptVersion", properties.promptVersion(),
+                        "targetOutputTokens", Long.toString(properties.targetOutputTokens()),
+                        "formatCorrection", Boolean.toString(request.corrective()),
+                        "inputJson", request.inputJson()));
         ChatResponse response = chatClient.prompt()
                 .system(request.systemPrompt())
-                .user(instruction + request.inputJson())
+                .user(userPrompt)
                 .call()
                 .chatResponse();
         if (response == null || response.getResult() == null
