@@ -12,12 +12,15 @@ import com.xjjk.agent.memory.domain.MemoryRetentionType;
 import com.xjjk.agent.memory.domain.MemoryStability;
 import com.xjjk.agent.memory.domain.MemoryTemporalScope;
 import com.xjjk.agent.memory.domain.MemoryType;
+import com.xjjk.agent.prompt.AgentPromptCatalogProperties;
+import com.xjjk.agent.prompt.StrictPromptTemplateRenderer;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.Objects;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -25,36 +28,29 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+/**
+ * 基于 Spring AI 的显式记忆语义兜底实现。
+ *
+ * <p>模型只输出受限 JSON 分类和事实候选，不负责生成 canonicalKey、最终正文或授权写入；
+ * 调用被放入独立有界线程池并受超时控制，避免拖住聊天生产线程。</p>
+ */
 @Component
 public class SpringAiExplicitMemoryExtractor implements ExplicitMemoryExtractor {
-
-    private static final String SYSTEM_PROMPT = """
-            你是企业坐席系统的显式用户记忆意图分类器。只根据用户本轮原文输出一个 JSON 对象。
-            action 只能是 SAVE、CLARIFY、NONE。用户在语义上明确要求系统以后保存或持续遵守可跨会话复用的低风险个人事实/偏好时用 SAVE，不要求固定触发词，也不要依赖固定句式或技术词表；
-            意图像记忆但关键信息不完整时用 CLARIFY；普通问答、业务查询或并未要求长期保存时用 NONE。
-            可抽取年龄、职业、工作单位、技能、技术栈、沟通/回答偏好、称呼，以及其他稳定的个人偏好或事实。普通自述的年龄、职业和偏好可以进入候选。
-            SAVE 时必须输出 memoryType、predicate、value、valueEvidence、evidenceText、stability、temporalScope、retention、confidence；其他动作只需 action 和 confidence。
-            memoryType 只能是 PROFILE、COMMUNICATION_PREFERENCE、RESPONSE_PREFERENCE、WORK_CONTEXT、STABLE_PREFERENCE、STABLE_USER_FACT。
-            常用 predicate 包括 preferred_name、answer_language、answer_style、occupation、current_employer、primary_programming_language、technology_stack、common_scope；它们不是封闭词表，其他低风险画像可提出简短 snake_case predicate，由服务端模式、证据与安全策略决定是否接受。
-            stability 只能是 STABLE、TIME_BOUND、TEMPORARY、UNKNOWN。STABLE 表示长期稳定；TIME_BOUND 表示会随时间变化但其当前或历史状态仍有用，例如年龄、当前职业和工作单位。SAVE 只允许 STABLE 或 TIME_BOUND；TEMPORARY、UNKNOWN 不得 SAVE。
-            temporalScope 必填且只能是 CURRENT 或 HISTORICAL。现在、目前、今年，或没有历史提示且陈述当前状态时用 CURRENT；以前、曾经、过去时用 HISTORICAL；无法判断时态则不要 SAVE。
-            retention 只能是 NORMAL 或 PERMANENT；只有用户明确要求永久保存时才用 PERMANENT。temporalScope 与 retention 正交，历史事实也不自动表示永久保存。
-            valueEvidence 必须是直接支持 value 的用户原文连续片段，evidenceText 必须是用户原文连续片段并包含 valueEvidence，value 只能规范化 valueEvidence。禁止推断出生年、年龄递增后的当前年龄、隐含职业或其他原文未明说的事实。
-            canonicalKey、category 和最终 content 均由服务端生成，模型不得输出或决定。
-            禁止抽取高风险身份凭证、联系方式、账户或账号凭据、健康信息、精确地址、客户业务记录（含订单、退款、物流、支付）、客户资料和企业制度；最终服务端敏感策略不可绕过。
-            confidence 必须是 0 到 1 的数字。只输出 JSON，不要解释，不要 Markdown。
-            """;
 
     private final ChatClient chatClient;
     private final UserMemoryProperties properties;
     private final ExecutorService modelExecutor;
     private final ObjectReader responseReader;
+    private final AgentPromptCatalogProperties promptCatalog;
+    private final StrictPromptTemplateRenderer promptRenderer;
 
     public SpringAiExplicitMemoryExtractor(
             @Qualifier("memoryChatClient") ChatClient chatClient,
             UserMemoryProperties properties,
             @Qualifier("memoryExtractionModelExecutor") ExecutorService modelExecutor,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            AgentPromptCatalogProperties promptCatalog,
+            StrictPromptTemplateRenderer promptRenderer
     ) {
         this.chatClient = Objects.requireNonNull(chatClient, "chatClient");
         this.properties = Objects.requireNonNull(properties, "properties");
@@ -63,6 +59,8 @@ public class SpringAiExplicitMemoryExtractor implements ExplicitMemoryExtractor 
                 .readerFor(ModelResult.class)
                 .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
                 .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        this.promptCatalog = Objects.requireNonNull(promptCatalog, "promptCatalog");
+        this.promptRenderer = Objects.requireNonNull(promptRenderer, "promptRenderer");
     }
 
     @Override
@@ -70,18 +68,23 @@ public class SpringAiExplicitMemoryExtractor implements ExplicitMemoryExtractor 
         Objects.requireNonNull(originalMessage, "originalMessage");
         Future<ExplicitMemoryResolution> future;
         try {
+            // 第一步：将模型调用提交到记忆专用有界线程池，与普通聊天模型资源隔离。
             future = modelExecutor.submit(() -> invoke(originalMessage));
         } catch (RejectedExecutionException exception) {
+            // 队列已满时快速失败，不允许在调用线程中退化执行并放大系统压力。
             throw failure(CodeAlias.CALL);
         }
         try {
+            // 第二步：使用独立超时上限等待结果，避免显式记忆识别无限阻塞本轮回答。
             return future.get(properties.timeout().toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException exception) {
+            // 超时后中断任务并返回受控错误，不能把未完成结果当作 NONE 静默放行。
             future.cancel(true);
             throw new ExplicitMemoryExtractionException(
                     ExplicitMemoryExtractionException.Code.MODEL_TIMEOUT,
                     "显式记忆抽取超时");
         } catch (InterruptedException exception) {
+            // 保留线程中断标志，使上层取消和应用关闭语义能够继续传播。
             future.cancel(true);
             Thread.currentThread().interrupt();
             throw failure(CodeAlias.CALL);
@@ -96,10 +99,14 @@ public class SpringAiExplicitMemoryExtractor implements ExplicitMemoryExtractor 
     private ExplicitMemoryResolution invoke(String originalMessage) {
         final String output;
         try {
+            // 第三步：只发送协议版本和本轮用户原文；历史消息不能替用户产生保存意图。
             output = chatClient.prompt()
-                    .system(SYSTEM_PROMPT)
-                    .user("协议版本：" + properties.promptVersion()
-                            + "\n用户原文：" + originalMessage)
+                    .system(promptCatalog.memory().explicit().system())
+                    .user(promptRenderer.render(
+                            "agent.ai.prompt.catalog.memory.explicit.user-template",
+                            promptCatalog.memory().explicit().userTemplate(),
+                            Map.of("promptVersion", properties.promptVersion(),
+                                    "sourceMessage", originalMessage)))
                     .call()
                     .content();
         } catch (RuntimeException exception) {
@@ -109,10 +116,14 @@ public class SpringAiExplicitMemoryExtractor implements ExplicitMemoryExtractor 
             throw failure(CodeAlias.PROTOCOL);
         }
         try {
+            // 第四步：严格反序列化单个 JSON 对象，拒绝未知字段和尾随内容，
+            // 防止模型解释文字或协议漂移被误当作合法事实。
             ModelResult result = responseReader.readValue(output);
             ExplicitMemoryResolution.Action action = ExplicitMemoryResolution.Action.valueOf(
                     requireText(result.action()));
             double confidence = requireConfidence(result.confidence());
+            // 第五步：NONE/CLARIFY 不构造事实；SAVE 只构造原始语义候选，
+            // 后续 Validator 还会重新校验证据、时间、敏感内容和服务端 Schema。
             return switch (action) {
                 case NONE -> ExplicitMemoryResolution.none();
                 case CLARIFY -> ExplicitMemoryResolution.clarify(
@@ -139,6 +150,7 @@ public class SpringAiExplicitMemoryExtractor implements ExplicitMemoryExtractor 
     }
 
     private static double requireConfidence(Double confidence) {
+        // 这里只验证模型分数的协议范围；真正的接受阈值由混合解析器统一执行。
         if (confidence == null || !Double.isFinite(confidence)
                 || confidence < 0.0 || confidence > 1.0) {
             throw new IllegalArgumentException("invalid confidence");
@@ -154,6 +166,7 @@ public class SpringAiExplicitMemoryExtractor implements ExplicitMemoryExtractor 
     }
 
     private static ExplicitMemoryExtractionException failure(CodeAlias alias) {
+        // 区分模型调用故障与响应协议故障，便于指标和排障，但不向用户暴露供应商细节。
         if (alias == CodeAlias.PROTOCOL) {
             return new ExplicitMemoryExtractionException(
                     ExplicitMemoryExtractionException.Code.MODEL_PROTOCOL_ERROR,

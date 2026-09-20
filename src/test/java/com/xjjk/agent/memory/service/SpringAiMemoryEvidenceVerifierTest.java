@@ -25,6 +25,7 @@ import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static com.xjjk.agent.prompt.PromptCatalogTestFixture.catalog;
 
 class SpringAiMemoryEvidenceVerifierTest {
 
@@ -71,7 +72,8 @@ class SpringAiMemoryEvidenceVerifierTest {
         when(responseSpec.content()).thenReturn(
                 "{\"results\":[{\"candidateId\":\"candidate-0\",\"outcome\":\"SUPPORTED\"}]}");
         SpringAiMemoryEvidenceVerifier verifier = new SpringAiMemoryEvidenceVerifier(
-                client, properties(Duration.ofSeconds(1)), executor(), new ObjectMapper());
+                client, properties(Duration.ofSeconds(1)), executor(), new ObjectMapper(),
+                catalog(), new com.xjjk.agent.prompt.StrictPromptTemplateRenderer());
 
         verifier.verify(new MemoryEvidenceVerifier.Request(
                 "request-1", "我以前做后端开发", List.of(item(
@@ -82,17 +84,9 @@ class SpringAiMemoryEvidenceVerifierTest {
         ArgumentCaptor<String> userInput = ArgumentCaptor.forClass(String.class);
         verify(requestSpec).system(prompt.capture());
         verify(requestSpec).user(userInput.capture());
-        assertThat(prompt.getValue())
-                .contains("独立证据核验器")
-                .contains("SUPPORTED", "CONTRADICTED", "UNCERTAIN")
-                .contains("不得改写", "candidateId")
-                .contains("当前用户原文")
-                .contains("value", "predicate", "stability", "temporalScope")
-                .contains("时态", "CONTRADICTED")
-                // OpenAI-compatible providers reject json_object requests unless
-                // the messages explicitly contain the lowercase token "json".
-                .contains("json");
+        assertThat(prompt.getValue()).isEqualTo("EVIDENCE_SYSTEM");
         assertThat(userInput.getValue())
+                .startsWith("input=")
                 .contains("\"stability\":\"TIME_BOUND\"")
                 .contains("\"temporalScope\":\"HISTORICAL\"");
     }
@@ -116,7 +110,8 @@ class SpringAiMemoryEvidenceVerifierTest {
                     return "{\"results\":[]}";
                 });
         SpringAiMemoryEvidenceVerifier verifier = new SpringAiMemoryEvidenceVerifier(
-                slow, properties(Duration.ofMillis(20)), executor(), new ObjectMapper());
+                slow, properties(Duration.ofMillis(20)), executor(), new ObjectMapper(),
+                catalog(), new com.xjjk.agent.prompt.StrictPromptTemplateRenderer());
 
         assertThatThrownBy(() -> verifier.verify(new MemoryEvidenceVerifier.Request(
                 "request-1", "我长期做后端开发", List.of(item("candidate-0", "做后端开发")))))
@@ -140,7 +135,8 @@ class SpringAiMemoryEvidenceVerifierTest {
         when(client.prompt().system(anyString()).user(anyString()).call().content())
                 .thenReturn(output);
         return new SpringAiMemoryEvidenceVerifier(
-                client, properties(Duration.ofSeconds(1)), executor(), new ObjectMapper());
+                client, properties(Duration.ofSeconds(1)), executor(), new ObjectMapper(),
+                catalog(), new com.xjjk.agent.prompt.StrictPromptTemplateRenderer());
     }
 
     private ExecutorService executor() {

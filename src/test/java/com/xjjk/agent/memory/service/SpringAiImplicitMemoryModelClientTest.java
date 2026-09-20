@@ -29,6 +29,7 @@ import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static com.xjjk.agent.prompt.PromptCatalogTestFixture.catalog;
 
 class SpringAiImplicitMemoryModelClientTest {
 
@@ -242,28 +243,21 @@ class SpringAiImplicitMemoryModelClientTest {
                 "{\"decision\":\"IGNORE\",\"candidates\":[]}");
         SpringAiImplicitMemoryModelClient client = new SpringAiImplicitMemoryModelClient(
                 chatClient, properties(Duration.ofSeconds(1), 3), executor(),
-                new ObjectMapper());
+                new ObjectMapper(), catalog(),
+                new com.xjjk.agent.prompt.StrictPromptTemplateRenderer());
 
         client.analyze(new ImplicitMemoryModelClient.Request(
                 "request-1", "我平时用 Java 语言进行开发", null));
 
         ArgumentCaptor<String> systemPrompt = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> userPrompt = ArgumentCaptor.forClass(String.class);
         verify(requestSpec).system(systemPrompt.capture());
-        assertThat(systemPrompt.getValue())
-                .contains("IGNORE、SESSION_ONLY、LONG_TERM")
-                .contains("EXPLICIT", "IMPLICIT")
-                .contains("memoryType", "predicate", "value", "valueEvidence")
-                .contains("evidenceText", "stability", "temporalScope", "confidence")
-                .contains("一条候选只表达一个原子事实")
-                .contains("不要求出现固定触发词")
-                .contains("年龄", "职业", "工作单位", "技能", "技术栈", "沟通", "回答偏好", "称呼")
-                .contains("STABLE", "TIME_BOUND", "TEMPORARY", "UNKNOWN")
-                .contains("CURRENT", "HISTORICAL")
-                .contains("高风险身份凭证", "联系方式", "账户", "健康", "精确地址", "客户业务记录")
-                .contains("普通自述的年龄、职业和偏好可以进入候选")
-                .contains("禁止推断出生年", "隐含职业")
-                .doesNotContain("禁止账号凭据、身份信息")
-                .doesNotContain("category 只能是 PROFILE_PREFERRED_NAME");
+        verify(requestSpec).user(userPrompt.capture());
+        assertThat(systemPrompt.getValue()).isEqualTo("IMPLICIT_SYSTEM");
+        assertThat(userPrompt.getValue())
+                .contains("version=memory-semantic-v2")
+                .contains("previous=（无）")
+                .contains("current=我平时用 Java 语言进行开发");
     }
 
     @Test
@@ -282,7 +276,8 @@ class SpringAiImplicitMemoryModelClientTest {
                 });
         SpringAiImplicitMemoryModelClient client = new SpringAiImplicitMemoryModelClient(
                 slow, properties(Duration.ofMillis(20), 3), executor(),
-                new ObjectMapper());
+                new ObjectMapper(), catalog(),
+                new com.xjjk.agent.prompt.StrictPromptTemplateRenderer());
         assertThatThrownBy(() -> client.analyze(request()))
                 .isInstanceOfSatisfying(ImplicitMemoryExtractionException.class,
                         error -> assertThat(error.code())
@@ -297,7 +292,8 @@ class SpringAiImplicitMemoryModelClientTest {
                 .thenThrow(new RejectedExecutionException("provider secret"));
         SpringAiImplicitMemoryModelClient client = new SpringAiImplicitMemoryModelClient(
                 chatClientReturning("{}"), properties(Duration.ofSeconds(1), 3),
-                rejected, new ObjectMapper());
+                rejected, new ObjectMapper(), catalog(),
+                new com.xjjk.agent.prompt.StrictPromptTemplateRenderer());
 
         assertThatThrownBy(() -> client.analyze(request()))
                 .isInstanceOfSatisfying(ImplicitMemoryExtractionException.class, error -> {
@@ -335,7 +331,8 @@ class SpringAiImplicitMemoryModelClientTest {
             ExecutorService executor,
             ObjectMapper objectMapper) {
         return new SpringAiImplicitMemoryModelClient(
-                chatClientReturning(output), properties, executor, objectMapper);
+                chatClientReturning(output), properties, executor, objectMapper,
+                catalog(), new com.xjjk.agent.prompt.StrictPromptTemplateRenderer());
     }
 
     private void assertProtocolFailure(String output, ObjectMapper objectMapper) {

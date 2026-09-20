@@ -32,6 +32,7 @@ import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static com.xjjk.agent.prompt.PromptCatalogTestFixture.catalog;
 
 class SpringAiExplicitMemoryExtractorTest {
 
@@ -147,19 +148,12 @@ class SpringAiExplicitMemoryExtractorTest {
         extractor(client, properties(Duration.ofSeconds(1)), executor()).resolve("测试");
 
         ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> userPrompt = ArgumentCaptor.forClass(String.class);
         verify(requestSpec).system(prompt.capture());
-        assertThat(prompt.getValue())
-                .contains("memoryType", "predicate", "value", "valueEvidence", "stability", "temporalScope")
-                .contains("不要求固定触发词")
-                .contains("年龄", "职业", "工作单位", "技能", "技术栈", "沟通", "回答偏好", "称呼")
-                .contains("STABLE", "TIME_BOUND", "TEMPORARY", "UNKNOWN")
-                .contains("CURRENT", "HISTORICAL")
-                .contains("只有用户明确要求永久保存时才用 PERMANENT")
-                .contains("高风险身份凭证", "联系方式", "账户", "健康", "精确地址", "客户业务记录")
-                .contains("普通自述的年龄、职业和偏好可以进入候选")
-                .doesNotContain("禁止身份信息")
-                .contains("服务端生成")
-                .doesNotContain("category 只能是");
+        verify(requestSpec).user(userPrompt.capture());
+        assertThat(prompt.getValue()).isEqualTo("EXPLICIT_SYSTEM");
+        assertThat(userPrompt.getValue())
+                .contains("version=memory-explicit-test-v1", "source=测试");
     }
 
     @Test
@@ -276,7 +270,8 @@ class SpringAiExplicitMemoryExtractorTest {
             ExecutorService executor,
             ObjectMapper objectMapper) {
         return new SpringAiExplicitMemoryExtractor(
-                client, properties, executor, objectMapper);
+                client, properties, executor, objectMapper, catalog(),
+                new com.xjjk.agent.prompt.StrictPromptTemplateRenderer());
     }
 
     private UserMemoryProperties properties(Duration timeout) {
