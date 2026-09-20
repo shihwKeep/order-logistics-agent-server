@@ -27,10 +27,9 @@ public class CustomerOrderQueryTools {
 
     private final CustomerOrderQueryService service;
 
-    @Tool(name = "list_customer_orders",
-            description = "按完整客户编号查询当前坐席有权访问的该客户订单列表。只有用户明确提供客户编号并询问该客户订单时调用。")
+    @Tool(name = "list_customer_orders")
     public String listCustomerOrders(
-            @ToolParam(description = "完整客户编号") String customerCode,
+            @ToolParam String customerCode,
             ToolContext toolContext) {
         // 先拒绝空值、控制字符和超长编号，参数错误不消耗单轮调用额度。
         String validationError = validate(customerCode);

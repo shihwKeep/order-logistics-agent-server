@@ -31,16 +31,15 @@ public class AfterSaleQueryTools {
     private final AfterSaleQueryGateway gateway;
     private final AfterSaleToolAvailability availability;
 
-    @Tool(name = "search_after_sales",
-            description = "按售后工单号、原订单号、客户编号或客户姓名查询售后工单；可选售后创建时间范围。")
+    @Tool(name = "search_after_sales")
     public String searchAfterSales(
-            @ToolParam(description = "AFTER_SALE_CODE、ORDER_CODE、CUSTOMER_CODE、CUSTOMER_NAME")
+            @ToolParam
             String identifierType,
-            @ToolParam(description = "对应的售后工单号、原订单号、客户编号或客户姓名")
+            @ToolParam
             String identifier,
-            @ToolParam(description = "可选开始时间，ISO-8601", required = false)
+            @ToolParam(required = false)
             String startTime,
-            @ToolParam(description = "可选结束时间，ISO-8601", required = false)
+            @ToolParam(required = false)
             String endTime,
             ToolContext toolContext) {
         // 先统一校验匹配类型、查询值和可选时间范围，错误参数不会访问下游。
@@ -63,10 +62,9 @@ public class AfterSaleQueryTools {
         }
     }
 
-    @Tool(name = "get_after_sale_detail",
-            description = "按完整售后工单号查询售后详情、商品与退款汇总。")
+    @Tool(name = "get_after_sale_detail")
     public String getAfterSaleDetail(
-            @ToolParam(description = "完整售后工单号") String afterSaleCode,
+            @ToolParam String afterSaleCode,
             ToolContext toolContext) {
         // 详情只接受单一完整工单号，不允许模型传递售后内部主键。
         String normalized = normalizeCode(afterSaleCode);

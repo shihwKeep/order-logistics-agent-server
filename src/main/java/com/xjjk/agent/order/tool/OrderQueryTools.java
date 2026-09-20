@@ -33,10 +33,10 @@ public class OrderQueryTools {
      *
      * <p>模型只得到有界摘要；下游返回的完整脱敏订单卡片通过 SSE 直接交给前端。</p>
      */
-    @Tool(name = "search_orders", description = "按完整订单号、外部订单号或运单号精确查询订单。用户提供了完整业务编号并询问订单信息时调用。")
+    @Tool(name = "search_orders")
     public String searchOrders(
-            @ToolParam(description = "完整订单号、外部订单号或运单号") String identifier,
-            @ToolParam(description = "匹配类型：AUTO、ORDER_CODE、OUTER_ORDER_CODE、LOGISTICS_CODE；不确定时用AUTO", required = false)
+            @ToolParam String identifier,
+            @ToolParam(required = false)
             String identifierType,
             ToolContext toolContext) {
         // 先规范化模型参数，错误参数直接返回可理解提示，不访问下游也不占用调用额度。
@@ -59,10 +59,10 @@ public class OrderQueryTools {
     }
 
     /** 按完整业务编号查询订单对应的多运单物流时间线。 */
-    @Tool(name = "get_order_logistics", description = "按完整订单号、外部订单号或运单号查询物流最新状态。用户提供了完整业务编号并询问物流、配送或轨迹时调用。")
+    @Tool(name = "get_order_logistics")
     public String getOrderLogistics(
-            @ToolParam(description = "完整订单号、外部订单号或运单号") String identifier,
-            @ToolParam(description = "匹配类型：AUTO、ORDER_CODE、OUTER_ORDER_CODE、LOGISTICS_CODE；不确定时用AUTO", required = false)
+            @ToolParam String identifier,
+            @ToolParam(required = false)
             String identifierType,
             ToolContext toolContext) {
         // 订单查询与物流查询使用相同的编号规范，但使用不同工具名形成不同幂等键。

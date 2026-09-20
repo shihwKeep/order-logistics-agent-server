@@ -191,7 +191,10 @@ class AiChatServiceToolSelectionTest {
                 afterSaleTools,
                 afterSaleAvailability,
                 knowledgeTools,
-                knowledgeAvailability);
+                knowledgeAvailability,
+                new com.xjjk.agent.prompt.ConfiguredToolCallbackFactory(
+                        new com.fasterxml.jackson.databind.ObjectMapper(),
+                        com.xjjk.agent.prompt.PromptCatalogTestFixture.catalog()));
     }
 
     private CustomerToolAvailability.Capability customerCapability(

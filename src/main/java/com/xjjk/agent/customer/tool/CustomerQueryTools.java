@@ -27,11 +27,10 @@ public class CustomerQueryTools {
     private static final int MAX_MODEL_TEXT = 1600;
     private final CustomerQueryGateway gateway;
 
-    @Tool(name = "search_customers",
-            description = "按完整客户编号或完整客户姓名查询当前坐席有权访问的客户。姓名重名时返回列表供用户确认。")
+    @Tool(name = "search_customers")
     public String searchCustomers(
-            @ToolParam(description = "完整客户编号或完整客户姓名") String keyword,
-            @ToolParam(description = "AUTO、CUSTOMER_CODE、CUSTOMER_NAME；不确定时用AUTO", required = false)
+            @ToolParam String keyword,
+            @ToolParam(required = false)
             String matchType,
             ToolContext toolContext) {
         // 模型参数先在本地规范化，错误输入不进入 Guard，也不会调用客户服务。

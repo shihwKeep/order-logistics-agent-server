@@ -11,14 +11,15 @@ public final class PromptCatalogTestFixture {
     public static AgentPromptCatalogProperties catalog() {
         Map<String, AgentPromptCatalogProperties.ToolPrompt> tools =
                 new LinkedHashMap<>();
-        for (String name : new String[]{
-                "search_products", "search_orders", "get_order_logistics",
-                "search_customers", "list_customer_orders",
-                "search_after_sales", "get_after_sale_detail",
-                "search_knowledge"}) {
-            tools.put(name, new AgentPromptCatalogProperties.ToolPrompt(
-                    "description-" + name, Map.of("value", "value")));
-        }
+        put(tools, "search_products", "keyword", "pageIndex");
+        put(tools, "search_orders", "identifier", "identifierType");
+        put(tools, "get_order_logistics", "identifier", "identifierType");
+        put(tools, "search_customers", "keyword", "matchType");
+        put(tools, "list_customer_orders", "customerCode");
+        put(tools, "search_after_sales", "identifierType", "identifier",
+                "startTime", "endTime");
+        put(tools, "get_after_sale_detail", "afterSaleCode");
+        put(tools, "search_knowledge", "question");
         return new AgentPromptCatalogProperties(
                 new AgentPromptCatalogProperties.Summary(
                         "CONFIGURED_SUMMARY_SYSTEM",
@@ -47,5 +48,17 @@ public final class PromptCatalogTestFixture {
                 new AgentPromptCatalogProperties.Knowledge(
                         "CONFIGURED_EVIDENCE_HEADER"),
                 Map.copyOf(tools));
+    }
+
+    private static void put(
+            Map<String, AgentPromptCatalogProperties.ToolPrompt> tools,
+            String name,
+            String... parameters) {
+        Map<String, String> descriptions = new LinkedHashMap<>();
+        for (String parameter : parameters) {
+            descriptions.put(parameter, "description-" + parameter);
+        }
+        tools.put(name, new AgentPromptCatalogProperties.ToolPrompt(
+                "description-" + name, Map.copyOf(descriptions)));
     }
 }

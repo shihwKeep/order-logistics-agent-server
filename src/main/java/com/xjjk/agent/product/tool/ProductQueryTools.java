@@ -31,10 +31,10 @@ public class ProductQueryTools {
     /**
      * 完整数据发布给前端，模型只接收去掉图片地址后的紧凑文本，控制 Token 开销。
      */
-    @Tool(name = "search_products", description = "根据商品名称、SPU编码、SKU编码或条码查询商品列表、规格、价格、库存和上下架状态。用户询问具体商品信息时必须调用。")
+    @Tool(name = "search_products")
     public String searchProducts(
-            @ToolParam(description = "商品名称、SPU编码、SKU编码或条码") String keyword,
-            @ToolParam(description = "页码，从1开始", required = false) Integer pageIndex,
+            @ToolParam String keyword,
+            @ToolParam(required = false) Integer pageIndex,
             ToolContext toolContext) {
         // ToolContext 由服务端在本轮模型请求中注入，先恢复可信身份、输出器和调用保护器。
         AgentToolRequestContext requestContext = requestContext(toolContext);

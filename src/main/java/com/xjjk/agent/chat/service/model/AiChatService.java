@@ -18,8 +18,8 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
+import com.xjjk.agent.prompt.ConfiguredToolCallbackFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
@@ -66,14 +66,17 @@ public class AiChatService {
             AfterSaleQueryTools afterSaleQueryTools,
             AfterSaleToolAvailability afterSaleToolAvailability,
             KnowledgeQueryTools knowledgeQueryTools,
-            KnowledgeToolAvailability knowledgeToolAvailability
+            KnowledgeToolAvailability knowledgeToolAvailability,
+            ConfiguredToolCallbackFactory configuredToolCallbackFactory
     ) {
         this.chatClient = chatClient;
         // Spring AI 根据 @Tool 方法生成 ToolCallback；商品能力当前始终注册。
-        this.productToolCallbacks = List.of(ToolCallbacks.from(productQueryTools));
+        this.productToolCallbacks = List.of(
+                configuredToolCallbackFactory.from(productQueryTools));
         // 一个工具对象可能声明多个 @Tool 方法，按工具名建立只读索引，
         // 后续才能分别控制订单查询和物流查询的组织级可见性。
-        this.orderToolCallbacks = Arrays.stream(ToolCallbacks.from(orderQueryTools))
+        this.orderToolCallbacks = Arrays.stream(
+                        configuredToolCallbackFactory.from(orderQueryTools))
                 .collect(Collectors.toUnmodifiableMap(
                         callback -> callback.getToolDefinition().name(),
                         Function.identity()));
@@ -82,15 +85,17 @@ public class AiChatService {
         this.afterSaleToolAvailability = afterSaleToolAvailability;
         this.knowledgeToolAvailability = knowledgeToolAvailability;
         this.customerToolCallback = requireSingleCallback(
-                customerQueryTools, "search_customers");
+                customerQueryTools, "search_customers", configuredToolCallbackFactory);
         this.customerOrderToolCallback = requireSingleCallback(
-                customerOrderQueryTools, "list_customer_orders");
-        this.afterSaleToolCallbacks = Arrays.stream(ToolCallbacks.from(afterSaleQueryTools))
+                customerOrderQueryTools, "list_customer_orders",
+                configuredToolCallbackFactory);
+        this.afterSaleToolCallbacks = Arrays.stream(
+                        configuredToolCallbackFactory.from(afterSaleQueryTools))
                 .collect(Collectors.toUnmodifiableMap(
                         callback -> callback.getToolDefinition().name(),
                         Function.identity()));
         this.knowledgeToolCallback = requireSingleCallback(
-                knowledgeQueryTools, "search_knowledge");
+                knowledgeQueryTools, "search_knowledge", configuredToolCallbackFactory);
 
         // 启动期即验证代码声明的工具名，避免注解改名后灰度选择静默失效。
         requireOrderCallback("search_orders");
@@ -189,8 +194,11 @@ public class AiChatService {
     }
 
     /** 将只允许声明一个方法的工具对象转换为回调，并在启动阶段核对工具名。 */
-    private ToolCallback requireSingleCallback(Object toolObject, String expectedName) {
-        ToolCallback[] callbacks = ToolCallbacks.from(toolObject);
+    private ToolCallback requireSingleCallback(
+            Object toolObject,
+            String expectedName,
+            ConfiguredToolCallbackFactory configuredToolCallbackFactory) {
+        ToolCallback[] callbacks = configuredToolCallbackFactory.from(toolObject);
         if (callbacks.length != 1
                 || !expectedName.equals(callbacks[0].getToolDefinition().name())) {
             throw new IllegalStateException("缺少工具定义: " + expectedName);
