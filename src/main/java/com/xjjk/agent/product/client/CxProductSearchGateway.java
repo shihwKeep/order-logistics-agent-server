@@ -5,8 +5,10 @@ import com.xjjk.agent.product.domain.ProductSearchQuery;
 import com.xjjk.agent.product.domain.ProductSearchResult;
 import com.xjjk.agent.product.service.ProductSearchGateway;
 import com.xjjk.agent.product.service.ProductSearchUnavailableException;
+import com.xjjk.agent.integration.observation.DownstreamCallMetrics;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -19,6 +21,7 @@ public class CxProductSearchGateway implements ProductSearchGateway {
 
     private final CxProductClient client;
     private final String internalToken;
+    private DownstreamCallMetrics downstreamMetrics;
 
     public CxProductSearchGateway(
             CxProductClient client,
@@ -30,8 +33,20 @@ public class CxProductSearchGateway implements ProductSearchGateway {
         this.internalToken = internalToken;
     }
 
+    @Autowired
+    void setDownstreamMetrics(DownstreamCallMetrics downstreamMetrics) {
+        this.downstreamMetrics = downstreamMetrics;
+    }
+
     @Override
     public ProductSearchResult search(ProductSearchQuery query) {
+        if (downstreamMetrics == null) {
+            return doSearch(query);
+        }
+        return downstreamMetrics.observe("product", "search", () -> doSearch(query));
+    }
+
+    private ProductSearchResult doSearch(ProductSearchQuery query) {
         CxProductResponse<CxProductSearchData> response;
         try {
             // 内部 Token 只在适配器边界注入，模型工具与前端均无法读取或覆盖。

@@ -7,6 +7,7 @@ import com.xjjk.agent.aftersale.domain.AfterSaleSearchResult;
 import com.xjjk.agent.aftersale.service.AfterSaleQueryGateway;
 import com.xjjk.agent.aftersale.service.AfterSaleServiceUnavailableException;
 import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.integration.observation.DownstreamCallMetrics;
 import feign.FeignException;
 import feign.RetryableException;
 import lombok.extern.slf4j.Slf4j;
@@ -45,6 +46,7 @@ public class AfterSaleServiceGateway implements AfterSaleQueryGateway {
     private final String internalToken;
     private final CircuitBreaker searchCircuitBreaker;
     private final CircuitBreaker detailCircuitBreaker;
+    private DownstreamCallMetrics downstreamMetrics;
 
     @Autowired
     public AfterSaleServiceGateway(
@@ -77,6 +79,11 @@ public class AfterSaleServiceGateway implements AfterSaleQueryGateway {
         this.detailCircuitBreaker = detailCircuitBreaker;
     }
 
+    @Autowired
+    void setDownstreamMetrics(DownstreamCallMetrics downstreamMetrics) {
+        this.downstreamMetrics = downstreamMetrics;
+    }
+
     @Override
     public AfterSaleSearchResult search(
             AfterSaleIdentifierType type,
@@ -94,7 +101,7 @@ public class AfterSaleServiceGateway implements AfterSaleQueryGateway {
                                 identity.tenantId(), identity.userId(), identity.orgId(), requestId,
                                 new AfterSaleClient.SearchRequest(
                                         type, identifier.strip(), startTime, endTime))));
-        return run(searchCircuitBreaker, invocation);
+        return observe("search", () -> run(searchCircuitBreaker, invocation));
     }
 
     @Override
@@ -113,7 +120,7 @@ public class AfterSaleServiceGateway implements AfterSaleQueryGateway {
                                 internalToken,
                                 identity.tenantId(), identity.userId(), identity.orgId(), requestId,
                                 new AfterSaleClient.DetailRequest(afterSaleCode.strip()))));
-        return run(detailCircuitBreaker, invocation);
+        return observe("detail", () -> run(detailCircuitBreaker, invocation));
     }
 
     /** 执行受保护的下游调用；测试构造器未注入熔断器时直接执行。 */
@@ -124,6 +131,12 @@ public class AfterSaleServiceGateway implements AfterSaleQueryGateway {
         return circuitBreaker.run(invocation, failure -> {
             throw new AfterSaleServiceUnavailableException("售后服务调用失败");
         });
+    }
+
+    private <T> T observe(String operation, Supplier<T> invocation) {
+        return downstreamMetrics == null
+                ? invocation.get()
+                : downstreamMetrics.observe("after_sale", operation, invocation);
     }
 
     /** 仅网络瞬时故障及 502/503/504 重试一次，业务与权限错误绝不重试。 */

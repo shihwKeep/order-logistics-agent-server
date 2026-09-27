@@ -5,6 +5,7 @@ import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
 import com.xjjk.agent.knowledge.service.KnowledgeQueryGateway;
 import com.xjjk.agent.knowledge.service.KnowledgeServiceUnavailableException;
 import com.xjjk.agent.knowledge.service.KnowledgeModelBudgetExceededException;
+import com.xjjk.agent.integration.observation.DownstreamCallMetrics;
 import feign.FeignException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,12 @@ public class KnowledgeServiceGateway implements KnowledgeQueryGateway {
 
     private final KnowledgeClient client;
     private final KnowledgeRequestSigner signer;
+    private DownstreamCallMetrics downstreamMetrics;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void setDownstreamMetrics(DownstreamCallMetrics downstreamMetrics) {
+        this.downstreamMetrics = downstreamMetrics;
+    }
 
     @Override
     public KnowledgeRetrievalResult retrieve(
@@ -38,24 +45,29 @@ public class KnowledgeServiceGateway implements KnowledgeQueryGateway {
         List<Long> ids = knowledgeBaseIds == null ? List.of() : List.copyOf(knowledgeBaseIds);
         KnowledgeRequestSigner.SignedHeaders signed = signer.sign(
                 identity.tenantId(), identity.userId(), normalizedQuestion, ids);
-        try {
+        java.util.function.Supplier<KnowledgeRetrievalResult> invocation = () -> {
+            try {
             KnowledgeClient.ServiceResponse<KnowledgeClient.RetrievalData> response = client.retrieve(
                     identity.tenantId(), identity.userId(), signed.timestamp(), signed.nonce(),
                     signed.signature(), requestId,
                     new KnowledgeClient.RetrievalRequest(normalizedQuestion, ids));
-            return map(response);
-        } catch (KnowledgeModelBudgetExceededException exception) {
+                return map(response);
+            } catch (KnowledgeModelBudgetExceededException exception) {
             log.warn("knowledge_gateway_budget_exhausted requestId={}", requestId);
             throw exception;
-        } catch (FeignException | KnowledgeServiceUnavailableException exception) {
+            } catch (FeignException | KnowledgeServiceUnavailableException exception) {
             log.warn("knowledge_gateway_failed requestId={}, exceptionType={}",
                     requestId, exception.getClass().getSimpleName());
             throw new KnowledgeServiceUnavailableException();
-        } catch (RuntimeException exception) {
+            } catch (RuntimeException exception) {
             log.warn("knowledge_gateway_invalid_response requestId={}, exceptionType={}",
                     requestId, exception.getClass().getSimpleName());
             throw new KnowledgeServiceUnavailableException();
-        }
+            }
+        };
+        return downstreamMetrics == null
+                ? invocation.get()
+                : downstreamMetrics.observe("knowledge", "retrieve", invocation);
     }
 
     private KnowledgeRetrievalResult map(

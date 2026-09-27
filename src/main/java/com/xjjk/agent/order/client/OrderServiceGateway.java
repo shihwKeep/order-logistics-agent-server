@@ -14,6 +14,7 @@ import com.xjjk.agent.order.domain.TrackNode;
 import com.xjjk.agent.order.service.OrderQueryGateway;
 import com.xjjk.agent.order.service.OrderServiceUnavailableException;
 import com.xjjk.agent.order.config.OrderIntegrationCircuitBreakerConfiguration;
+import com.xjjk.agent.integration.observation.DownstreamCallMetrics;
 import feign.FeignException;
 import feign.RetryableException;
 import java.net.ConnectException;
@@ -57,6 +58,7 @@ public class OrderServiceGateway implements OrderQueryGateway {
     private final String internalToken;
     private final CircuitBreaker searchCircuitBreaker;
     private final CircuitBreaker logisticsCircuitBreaker;
+    private DownstreamCallMetrics downstreamMetrics;
 
     @Autowired
     public OrderServiceGateway(
@@ -77,6 +79,11 @@ public class OrderServiceGateway implements OrderQueryGateway {
                 OrderIntegrationCircuitBreakerConfiguration.ORDER_SEARCH);
         this.logisticsCircuitBreaker = circuitBreakerFactory.create(
                 OrderIntegrationCircuitBreakerConfiguration.ORDER_LOGISTICS);
+    }
+
+    @Autowired
+    void setDownstreamMetrics(DownstreamCallMetrics downstreamMetrics) {
+        this.downstreamMetrics = downstreamMetrics;
     }
 
     /** 兼容不启动 Spring 容器的单元测试；生产环境始终使用带熔断器的构造器。 */
@@ -118,7 +125,7 @@ public class OrderServiceGateway implements OrderQueryGateway {
         long startedAt = System.nanoTime();
 
         // tenant/user/org 均来自已认证身份，模型和调用方没有覆盖可信头的入口。
-        OrderSearchResult result = runProtected(
+        OrderSearchResult result = observe("search", () -> runProtected(
                 searchCircuitBreaker,
                 () -> mapSearchResponse(invokeWithRetry(
                         "order_search",
@@ -131,7 +138,7 @@ public class OrderServiceGateway implements OrderQueryGateway {
                                 identity.orgId(),
                                 requestId,
                                 new OrderSearchClient.OrderSearchRequest(
-                                        identifier.trim(), identifierType)))));
+                                        identifier.trim(), identifierType))))));
         log.info(
                 "order_gateway requestId={}, operation=order_search, identifierType={}, resultCount={}, durationMs={}, status=SUCCESS",
                 requestId,
@@ -151,7 +158,7 @@ public class OrderServiceGateway implements OrderQueryGateway {
         long startedAt = System.nanoTime();
 
         // customerId 由上游可信解析链路产生；日志仍只记录查询类型和结果数量。
-        OrderSearchResult result = runProtected(
+        OrderSearchResult result = observe("search_by_customer", () -> runProtected(
                 searchCircuitBreaker,
                 () -> requireCustomerSearchResult(mapSearchResponse(invokeWithRetry(
                                 "order_search_by_customer",
@@ -163,7 +170,7 @@ public class OrderServiceGateway implements OrderQueryGateway {
                                         identity.userId(),
                                         identity.orgId(),
                                         requestId,
-                                        new OrderCustomerClient.CustomerOrderRequest(customerId))))));
+                                        new OrderCustomerClient.CustomerOrderRequest(customerId)))))));
         log.info(
                 "order_gateway requestId={}, operation=order_search_by_customer, identifierType=CUSTOMER, resultCount={}, durationMs={}, status=SUCCESS",
                 requestId,
@@ -191,7 +198,7 @@ public class OrderServiceGateway implements OrderQueryGateway {
         long startedAt = System.nanoTime();
 
         // 物流查询同样只传业务编号，禁止把 orderId 暴露为可调用参数。
-        OrderLogisticsResult result = runProtected(
+        OrderLogisticsResult result = observe("logistics", () -> runProtected(
                 logisticsCircuitBreaker,
                 () -> mapLogisticsResponse(invokeWithRetry(
                         "order_logistics",
@@ -204,7 +211,7 @@ public class OrderServiceGateway implements OrderQueryGateway {
                                 identity.orgId(),
                                 requestId,
                                 new OrderLogisticsClient.OrderLogisticsRequest(
-                                        identifier.trim(), identifierType)))));
+                                        identifier.trim(), identifierType))))));
         log.info(
                 "order_gateway requestId={}, operation=order_logistics, identifierType={}, resultCount={}, durationMs={}, status=SUCCESS",
                 requestId,
@@ -225,6 +232,12 @@ public class OrderServiceGateway implements OrderQueryGateway {
             // 开路、超时和原始下游异常统一切断异常链，防止响应正文或请求头泄露到上层。
             throw new OrderServiceUnavailableException("订单服务调用失败");
         });
+    }
+
+    private <T> T observe(String operation, Supplier<T> invocation) {
+        return downstreamMetrics == null
+                ? invocation.get()
+                : downstreamMetrics.observe("order", operation, invocation);
     }
 
     private <T> OrderServiceResponse<T> invokeWithRetry(

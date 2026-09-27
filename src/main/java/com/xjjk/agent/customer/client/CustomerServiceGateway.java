@@ -7,6 +7,7 @@ import com.xjjk.agent.customer.domain.CustomerSearchResult;
 import com.xjjk.agent.customer.service.CustomerQueryGateway;
 import com.xjjk.agent.customer.service.CustomerServiceUnavailableException;
 import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.integration.observation.DownstreamCallMetrics;
 import feign.FeignException;
 import feign.RetryableException;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +42,7 @@ public class CustomerServiceGateway implements CustomerQueryGateway {
     private final CustomerSearchClient client;
     private final String internalToken;
     private final CircuitBreaker circuitBreaker;
+    private DownstreamCallMetrics downstreamMetrics;
 
     @Autowired
     public CustomerServiceGateway(CustomerSearchClient client,
@@ -66,6 +68,11 @@ public class CustomerServiceGateway implements CustomerQueryGateway {
         this.circuitBreaker = circuitBreaker;
     }
 
+    @Autowired
+    void setDownstreamMetrics(DownstreamCallMetrics downstreamMetrics) {
+        this.downstreamMetrics = downstreamMetrics;
+    }
+
     @Override
     public CustomerSearchResult search(String keyword,
                                        CustomerMatchType matchType,
@@ -79,13 +86,18 @@ public class CustomerServiceGateway implements CustomerQueryGateway {
                 () -> client.search(internalToken, identity.tenantId(), identity.userId(),
                         identity.orgId(), requestId,
                         new CustomerSearchClient.SearchRequest(keyword.strip(), matchType))));
-        if (circuitBreaker == null) {
-            return invocation.get();
-        }
-        return circuitBreaker.run(invocation, failure -> {
+        Supplier<CustomerSearchResult> protectedInvocation = () -> {
+            if (circuitBreaker == null) {
+                return invocation.get();
+            }
+            return circuitBreaker.run(invocation, failure -> {
             // 熔断器失败回调切断原始异常链，工具层只能看到固定的领域不可用语义。
             throw new CustomerServiceUnavailableException("客户服务调用失败");
-        });
+            });
+        };
+        return downstreamMetrics == null
+                ? protectedInvocation.get()
+                : downstreamMetrics.observe("customer", "search", protectedInvocation);
     }
 
     /** 仅对明确的瞬时网络故障进行至多一次重试。 */
