@@ -1,0 +1,117 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: order-logistics-agent-server
+          metrics_path: /actuator/prometheus
+          static_configs:
+            - targets: ["${env:AGENT_METRICS_TARGET}"]
+        - job_name: order-logistics-knowledge-service
+          metrics_path: /actuator/prometheus
+          static_configs:
+            - targets: ["${env:KNOWLEDGE_METRICS_TARGET}"]
+  file_log/agent:
+    include: [/var/log/order-logistics/agent/*.json]
+    start_at: end
+    operators:
+      - type: json_parser
+  file_log/knowledge:
+    include: [/var/log/order-logistics/knowledge/*.json]
+    start_at: end
+    operators:
+      - type: json_parser
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: ${env:DEPLOYMENT_ENVIRONMENT}
+        action: upsert
+  attributes/redact:
+    actions:
+      - key: http.request.header.authorization
+        action: delete
+      - key: http.request.header.cookie
+        action: delete
+      - key: user.message
+        action: delete
+      - key: model.prompt
+        action: delete
+      - key: knowledge.evidence
+        action: delete
+      - key: memory.content
+        action: delete
+  tail_sampling:
+    decision_wait: 5s
+    num_traces: 50000
+    expected_new_traces_per_sec: 200
+    policies:
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: evaluation
+        type: string_attribute
+        string_attribute:
+          key: evaluation.run_id
+          values: [".+"]
+          enabled_regex_matching: true
+      - name: normal-sample
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 10
+  batch:
+    send_batch_size: 1024
+    timeout: 2s
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_constant_labels:
+      included: ["*"]
+  otlp_http/tempo:
+    endpoint: http://tempo:4318
+    tls:
+      insecure: true
+  otlp_http/loki:
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
+  pipelines:
+    metrics:
+      receivers: [prometheus]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, attributes/redact, tail_sampling, batch]
+      exporters: [otlp_http/tempo]
+    logs:
+      receivers: [file_log/agent, file_log/knowledge, otlp]
+      processors: [memory_limiter, resource, attributes/redact, batch]
+      exporters: [otlp_http/loki]

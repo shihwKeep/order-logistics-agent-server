@@ -35,3 +35,7 @@ build/
 
 ### Local secrets ###
 .env.local
+infra/observability/.env.observability
+
+### Runtime logs ###
+logs/

@@ -1,0 +1,130 @@
+name: order-logistics-observability
+
+x-runtime-defaults: &runtime-defaults
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: 20m
+      max-file: "3"
+
+services:
+  otel-collector:
+    <<: *runtime-defaults
+    image: otel/opentelemetry-collector-contrib:${OTEL_COLLECTOR_VERSION}
+    command: ["--config=/etc/otelcol/config.yml"]
+    environment:
+      DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT}
+      AGENT_METRICS_TARGET: host.docker.internal:8082
+      KNOWLEDGE_METRICS_TARGET: host.docker.internal:8084
+    mem_limit: 768m
+    cpus: "1.0"
+    ports:
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:13133:13133"
+      - "127.0.0.1:8889:8889"
+    volumes:
+      - ./collector/otel-collector.yml:/etc/otelcol/config.yml:ro
+      - ../../logs:/var/log/order-logistics/agent:ro
+      - ../../../order-logistics-knowledge-service/logs:/var/log/order-logistics/knowledge:ro
+    depends_on:
+      tempo:
+        condition: service_started
+      loki:
+        condition: service_started
+
+  prometheus:
+    <<: *runtime-defaults
+    image: prom/prometheus:v${PROMETHEUS_VERSION}
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+      - --web.enable-remote-write-receiver
+    mem_limit: 1g
+    cpus: "1.0"
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  tempo:
+    <<: *runtime-defaults
+    image: grafana/tempo:${TEMPO_VERSION}
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    mem_limit: 1g
+    cpus: "1.0"
+    ports:
+      - "127.0.0.1:3200:3200"
+    volumes:
+      - ./tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo-data:/var/tempo
+
+  loki:
+    <<: *runtime-defaults
+    image: grafana/loki:${LOKI_VERSION}
+    command: ["-config.file=/etc/loki/loki.yml"]
+    mem_limit: 1g
+    cpus: "1.0"
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - ./loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki-data:/loki
+
+  alertmanager:
+    <<: *runtime-defaults
+    image: prom/alertmanager:v${ALERTMANAGER_VERSION}
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    mem_limit: 256m
+    cpus: "0.5"
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+
+  grafana:
+    <<: *runtime-defaults
+    image: grafana/grafana:${GRAFANA_VERSION}
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    mem_limit: 768m
+    cpus: "1.0"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      tempo:
+        condition: service_started
+      loki:
+        condition: service_started
+
+volumes:
+  prometheus-data:
+  tempo-data:
+  loki-data:
+  alertmanager-data:
+  grafana-data:
