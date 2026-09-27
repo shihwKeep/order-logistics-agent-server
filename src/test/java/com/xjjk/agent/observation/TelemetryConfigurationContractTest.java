@@ -3,6 +3,8 @@ package com.xjjk.agent.observation;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
@@ -27,5 +29,19 @@ class TelemetryConfigurationContractTest {
                 .isEqualTo("${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://127.0.0.1:4318/v1/traces}");
         assertThat(properties.getProperty("management.observations.annotations.enabled"))
                 .isEqualTo("true");
+    }
+
+    @Test
+    void shouldUseStructuredLogConfiguration() throws IOException {
+        try (InputStream input = getClass().getResourceAsStream("/logback-spring.xml")) {
+            assertThat(input).isNotNull();
+            String xml = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            assertThat(xml)
+                    .contains("LogstashEncoder")
+                    .contains("traceId")
+                    .contains("spanId")
+                    .contains("requestId")
+                    .contains("OBSERVABILITY_LOG_DIR");
+        }
     }
 }
