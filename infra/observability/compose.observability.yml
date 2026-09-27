@@ -15,9 +15,9 @@ services:
     command: ["--config=/etc/otelcol/config.yml"]
     environment:
       DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT}
-      AGENT_METRICS_TARGET: host.docker.internal:8082
-      # Knowledge Service 本地默认端口为 8085；生产环境通过同名环境变量覆盖。
-      KNOWLEDGE_METRICS_TARGET: ${KNOWLEDGE_METRICS_TARGET:-host.docker.internal:8085}
+      AGENT_METRICS_TARGET: ${AGENT_METRICS_TARGET:-host.docker.internal:18082}
+      # 独立管理端口只供 Collector 抓取，生产环境通过同名环境变量覆盖。
+      KNOWLEDGE_METRICS_TARGET: ${KNOWLEDGE_METRICS_TARGET:-host.docker.internal:18085}
     mem_limit: 768m
     cpus: "1.0"
     ports:

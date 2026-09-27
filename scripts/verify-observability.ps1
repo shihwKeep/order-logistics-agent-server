@@ -1,6 +1,7 @@
 param(
     [switch]$SkipBusinessServices,
-    [string]$KnowledgeServiceHealthUrl = 'http://127.0.0.1:8085/actuator/health'
+    [string]$AgentManagementHealthUrl = 'http://127.0.0.1:18082/actuator/health',
+    [string]$KnowledgeServiceHealthUrl = 'http://127.0.0.1:18085/actuator/health'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -85,7 +86,7 @@ foreach ($entry in $observabilityEndpoints.GetEnumerator()) {
 }
 
 if (-not $SkipBusinessServices) {
-    Wait-HttpOk -Name 'Agent Server' -Uri 'http://127.0.0.1:8082/actuator/health' -Attempts 3
+    Wait-HttpOk -Name 'Agent Server management' -Uri $AgentManagementHealthUrl -Attempts 3
     Wait-HttpOk -Name 'Knowledge Service' -Uri $KnowledgeServiceHealthUrl -Attempts 3
 
     $targets = Invoke-RestMethod -Uri 'http://127.0.0.1:9090/api/v1/targets' -TimeoutSec 5
