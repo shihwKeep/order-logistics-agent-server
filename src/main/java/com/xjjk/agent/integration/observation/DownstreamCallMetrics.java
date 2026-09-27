@@ -33,7 +33,7 @@ public final class DownstreamCallMetrics {
             "search", "search_by_customer", "logistics", "detail", "retrieve");
     private static final Set<String> OUTCOMES = Set.of(
             "SUCCESS", "REMOTE_REJECTED", "SERVER_ERROR", "CONNECT_FAILURE",
-            "READ_TIMEOUT", "PROTOCOL_ERROR", "CLIENT_ERROR", "UNKNOWN");
+            "READ_TIMEOUT", "PROTOCOL_ERROR", "CIRCUIT_OPEN", "CLIENT_ERROR", "UNKNOWN");
 
     private final MeterRegistry meters;
     private final ObservationRegistry observations;
@@ -100,6 +100,9 @@ public final class DownstreamCallMetrics {
         if (failure == null) {
             return "SUCCESS";
         }
+        if (containsSimpleName(failure, "CallNotPermittedException")) {
+            return "CIRCUIT_OPEN";
+        }
         if (failure instanceof FeignException feign) {
             int status = feign.status();
             if (status == 401 || status == 403 || status == 404 || status == 409
@@ -126,6 +129,15 @@ public final class DownstreamCallMetrics {
     private boolean contains(Throwable failure, Class<? extends Throwable> type) {
         for (Throwable current = failure; current != null; current = current.getCause()) {
             if (type.isInstance(current)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsSimpleName(Throwable failure, String typeName) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (typeName.equals(current.getClass().getSimpleName())) {
                 return true;
             }
         }
