@@ -107,9 +107,13 @@ public class CustomerServiceGateway implements CustomerQueryGateway {
             Supplier<CustomerServiceResponse<CustomerSearchClient.SearchData>> invocation) {
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-                return invocation.get();
+                CustomerServiceResponse<CustomerSearchClient.SearchData> response = invocation.get();
+                recordAttempt(attempt, null, false);
+                return response;
             } catch (RuntimeException exception) {
-                if (!transientFailure(exception) || attempt == MAX_ATTEMPTS) {
+                boolean retryable = transientFailure(exception);
+                recordAttempt(attempt, exception, retryable && attempt < MAX_ATTEMPTS);
+                if (!retryable || attempt == MAX_ATTEMPTS) {
                     log.warn("customer_gateway requestId={}, matchType={}, attempt={}, status=FAILED",
                             requestId, type, attempt);
                     // 切断 Feign 异常链，避免下游正文或内部请求头越过边界。
@@ -120,6 +124,12 @@ public class CustomerServiceGateway implements CustomerQueryGateway {
             }
         }
         throw new IllegalStateException("unreachable");
+    }
+
+    private void recordAttempt(int attempt, Throwable failure, boolean retry) {
+        if (downstreamMetrics != null) {
+            downstreamMetrics.attempt("customer", "search", attempt, failure, retry);
+        }
     }
 
     /** 判断异常是否属于可能通过立即重试恢复的 502/503/504 或连接超时。 */

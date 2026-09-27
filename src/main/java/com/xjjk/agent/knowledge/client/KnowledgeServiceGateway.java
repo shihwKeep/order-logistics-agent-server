@@ -51,15 +51,24 @@ public class KnowledgeServiceGateway implements KnowledgeQueryGateway {
                     identity.tenantId(), identity.userId(), signed.timestamp(), signed.nonce(),
                     signed.signature(), requestId,
                     new KnowledgeClient.RetrievalRequest(normalizedQuestion, ids));
+                if (downstreamMetrics != null) {
+                    downstreamMetrics.attempt("knowledge", "retrieve", 1, null, false);
+                }
                 return map(response);
             } catch (KnowledgeModelBudgetExceededException exception) {
             log.warn("knowledge_gateway_budget_exhausted requestId={}", requestId);
             throw exception;
             } catch (FeignException | KnowledgeServiceUnavailableException exception) {
+            if (downstreamMetrics != null) {
+                downstreamMetrics.attempt("knowledge", "retrieve", 1, exception, false);
+            }
             log.warn("knowledge_gateway_failed requestId={}, exceptionType={}",
                     requestId, exception.getClass().getSimpleName());
             throw new KnowledgeServiceUnavailableException();
             } catch (RuntimeException exception) {
+            if (downstreamMetrics != null) {
+                downstreamMetrics.attempt("knowledge", "retrieve", 1, exception, false);
+            }
             log.warn("knowledge_gateway_invalid_response requestId={}, exceptionType={}",
                     requestId, exception.getClass().getSimpleName());
             throw new KnowledgeServiceUnavailableException();

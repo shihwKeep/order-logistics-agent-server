@@ -247,9 +247,13 @@ public class OrderServiceGateway implements OrderQueryGateway {
             Supplier<OrderServiceResponse<T>> invocation) {
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-                return invocation.get();
+                OrderServiceResponse<T> response = invocation.get();
+                recordAttempt(operation, attempt, null, false);
+                return response;
             } catch (RuntimeException exception) {
                 boolean retryable = isTransientFailure(exception);
+                recordAttempt(operation, attempt, exception,
+                        retryable && attempt < MAX_ATTEMPTS);
                 if (!retryable || attempt == MAX_ATTEMPTS) {
                     log.warn(
                             "order_gateway requestId={}, operation={}, identifierType={}, attempt={}, status=FAILED, failureCategory={}",
@@ -271,6 +275,23 @@ public class OrderServiceGateway implements OrderQueryGateway {
             }
         }
         throw new IllegalStateException("unreachable");
+    }
+
+    private void recordAttempt(
+            String operation,
+            int attempt,
+            Throwable failure,
+            boolean retry) {
+        if (downstreamMetrics == null) {
+            return;
+        }
+        String boundedOperation = switch (operation) {
+            case "order_search", "order_search_by_customer" ->
+                    operation.endsWith("by_customer") ? "search_by_customer" : "search";
+            case "order_logistics" -> "logistics";
+            default -> "unknown";
+        };
+        downstreamMetrics.attempt("order", boundedOperation, attempt, failure, retry);
     }
 
     private boolean isTransientFailure(RuntimeException exception) {

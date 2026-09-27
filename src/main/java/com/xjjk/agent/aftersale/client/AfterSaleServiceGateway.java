@@ -146,9 +146,13 @@ public class AfterSaleServiceGateway implements AfterSaleQueryGateway {
             Supplier<T> invocation) {
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-                return invocation.get();
+                T response = invocation.get();
+                recordAttempt(operation, attempt, null, false);
+                return response;
             } catch (RuntimeException exception) {
                 boolean retryable = transientFailure(exception);
+                recordAttempt(operation, attempt, exception,
+                        retryable && attempt < MAX_ATTEMPTS);
                 if (!retryable || attempt == MAX_ATTEMPTS) {
                     log.warn("after_sale_gateway requestId={}, operation={}, attempt={}, status=FAILED, failureCategory={}",
                             requestId, operation, attempt, failureCategory(exception));
@@ -160,6 +164,16 @@ public class AfterSaleServiceGateway implements AfterSaleQueryGateway {
             }
         }
         throw new IllegalStateException("unreachable");
+    }
+
+    private void recordAttempt(
+            String operation,
+            int attempt,
+            Throwable failure,
+            boolean retry) {
+        if (downstreamMetrics != null) {
+            downstreamMetrics.attempt("after_sale", operation, attempt, failure, retry);
+        }
     }
 
     /** 区分可短暂恢复的网络故障与 DNS、TLS、协议和业务错误。 */

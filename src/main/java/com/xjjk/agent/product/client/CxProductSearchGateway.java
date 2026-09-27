@@ -54,7 +54,13 @@ public class CxProductSearchGateway implements ProductSearchGateway {
                     internalToken,
                     new CxProductSearchRequest(
                             query.keyword(), query.pageIndex(), query.pageSize()));
+            if (downstreamMetrics != null) {
+                downstreamMetrics.attempt("product", "search", 1, null, false);
+            }
         } catch (RuntimeException exception) {
+            if (downstreamMetrics != null) {
+                downstreamMetrics.attempt("product", "search", 1, exception, false);
+            }
             throw new ProductSearchUnavailableException("商品服务调用失败", exception);
         }
         if (response == null || response.code() == null
