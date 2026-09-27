@@ -26,6 +26,7 @@ import com.xjjk.agent.memory.service.ExplicitMemoryCommandService;
 import com.xjjk.agent.tool.AgentToolRequestContext;
 import com.xjjk.agent.tool.ToolCallGuard;
 import com.xjjk.agent.tool.ToolUiResult;
+import com.xjjk.agent.tool.observation.ToolCallMetrics;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -59,11 +60,18 @@ public class ChatTurnRunner {
     private final ExplicitMemoryCommandService explicitMemoryCommandService;
     private final DeterministicUserMemoryAnswerService deterministicMemoryAnswerService;
     private AgentTurnTelemetry turnTelemetry;
+    private ToolCallMetrics toolCallMetrics;
 
     /** 可选 setter 不改变既有构造签名，Spring 运行时会注入，纯单元测试可继续直接构造。 */
     @Autowired
     void setTurnTelemetry(AgentTurnTelemetry turnTelemetry) {
         this.turnTelemetry = turnTelemetry;
+    }
+
+    /** 观测组件不改变既有构造签名，便于保持现有单元测试的组装方式。 */
+    @Autowired
+    void setToolCallMetrics(ToolCallMetrics toolCallMetrics) {
+        this.toolCallMetrics = toolCallMetrics;
     }
 
     public void run(
@@ -299,7 +307,7 @@ public class ChatTurnRunner {
                 execution.requestId,
                 identity,
                 result -> publishToolResultUnchecked(result, session, execution),
-                new ToolCallGuard(3));
+                new ToolCallGuard(3, toolCallMetrics));
         try (var responses = aiChatService
                 .stream(message, selection, toolContext)
                 .toStream(1)) {
@@ -334,15 +342,30 @@ public class ChatTurnRunner {
              * 固定顺序不能调整：先完成字段、JSON 和 UTF-8 字节上限校验，
              * 再登记到本轮待落库集合，最后才向前端发送 SSE result。
              */
-            PendingMessageResult pending = resultRecorder.prepare(
-                    result, execution.nextResultSequence());
+            PendingMessageResult pending;
+            try {
+                pending = resultRecorder.prepare(
+                        result, execution.nextResultSequence());
+            } catch (RuntimeException exception) {
+                recordToolResult(result == null ? null : result.kind(),
+                        "PROTOCOL_REJECTED");
+                throw exception;
+            }
             if (execution.buffersModelOutput()) {
                 // 模型业务查询先暂存，待本轮结果类型校验通过后再发布和持久化。
                 execution.stageResult(pending, result);
+                recordToolResult(result.kind(), "STAGED");
             } else {
                 execution.addResult(pending);
                 session.result(result);
+                recordToolResult(result.kind(), "PUBLISHED");
             }
+        }
+    }
+
+    private void recordToolResult(String kind, String outcome) {
+        if (toolCallMetrics != null) {
+            toolCallMetrics.result(kind, outcome);
         }
     }
 

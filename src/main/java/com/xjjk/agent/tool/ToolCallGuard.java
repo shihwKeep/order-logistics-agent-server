@@ -1,5 +1,7 @@
 package com.xjjk.agent.tool;
 
+import com.xjjk.agent.tool.observation.ToolCallMetrics;
+
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -20,12 +22,18 @@ public final class ToolCallGuard {
     private final ConcurrentHashMap<String, CompletableFuture<String>> calls =
             new ConcurrentHashMap<>();
     private final Object admissionLock = new Object();
+    private final ToolCallMetrics metrics;
 
     public ToolCallGuard(int maxDistinctCalls) {
+        this(maxDistinctCalls, null);
+    }
+
+    public ToolCallGuard(int maxDistinctCalls, ToolCallMetrics metrics) {
         if (maxDistinctCalls <= 0) {
             throw new IllegalArgumentException("工具调用上限必须大于0");
         }
         this.maxDistinctCalls = maxDistinctCalls;
+        this.metrics = metrics;
     }
 
     /**
@@ -56,25 +64,37 @@ public final class ToolCallGuard {
             }
         }
         if (existing != null) {
+            recordGuard(toolName, "REUSED");
             return await(existing);
         }
 
         if (limitExceeded) {
+            recordGuard(toolName, "LIMIT_EXCEEDED");
             ToolCallLimitExceededException exception =
                     new ToolCallLimitExceededException(maxDistinctCalls);
             completeFailedCall(callKey, candidate, exception);
             throw exception;
         }
 
+        recordGuard(toolName, "FIRST");
         try {
-            String result = action.get();
+            String result = metrics == null
+                    ? action.get()
+                    : metrics.execute(toolName, action);
             // 成功 Future 保留到本轮结束，保证重复调用既不访问下游，也不重复发布 SSE。
             candidate.complete(result);
             return result;
         } catch (RuntimeException | Error exception) {
             // 失败键不应永久占用调用额度；移除后调用方可按明确策略重新尝试。
+            recordGuard(toolName, "FAILED_RELEASED");
             completeFailedCall(callKey, candidate, exception);
             throw exception;
+        }
+    }
+
+    private void recordGuard(String toolName, String decision) {
+        if (metrics != null) {
+            metrics.guard(toolName, decision);
         }
     }
 

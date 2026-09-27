@@ -3,7 +3,9 @@ package com.xjjk.agent.chat.service.stream;
 import com.xjjk.agent.chat.routing.BusinessQueryMode;
 import com.xjjk.agent.chat.stream.ChatEventPublisher;
 import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
+import com.xjjk.agent.tool.observation.ToolCallMetrics;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -15,6 +17,13 @@ import java.util.stream.Collectors;
 @Slf4j
 @Component
 public class FreshBusinessResultGate {
+
+    private ToolCallMetrics toolCallMetrics;
+
+    @Autowired
+    void setToolCallMetrics(ToolCallMetrics toolCallMetrics) {
+        this.toolCallMetrics = toolCallMetrics;
+    }
 
     static final String MISSING_RESULT_MESSAGE =
             "本轮未完成实时业务查询，请补充查询条件或稍后重试。";
@@ -43,6 +52,7 @@ public class FreshBusinessResultGate {
                 && staged.stream().allMatch(this::isAnswerableKnowledge));
         if (!accepted || !grounded) {
             // 丢弃模型可能已经生成的“查询成功”话术，替换为固定安全提示。
+            recordGateRejected(execution, staged);
             execution.discardStagedResults();
             String safeMessage = knowledgeRequired
                     ? NO_KNOWLEDGE_MESSAGE : MISSING_RESULT_MESSAGE;
@@ -64,6 +74,7 @@ public class FreshBusinessResultGate {
         execution.resolveBufferedOutput();
         for (StagedToolResult value : staged) {
             session.result(value.uiResult());
+            recordResult(value.uiResult().kind(), "PUBLISHED");
         }
         String text = execution.content.toString();
         if (!text.isEmpty()) {
@@ -89,11 +100,31 @@ public class FreshBusinessResultGate {
         }
         boolean knowledgeRequired = execution.queryPlan.acceptedResultKinds()
                 .contains("knowledge-citations");
+        List<StagedToolResult> staged = execution.stagedResultSnapshot();
+        recordGateRejected(execution, staged);
         execution.discardStagedResults();
         execution.replaceContent(knowledgeRequired
                 ? NO_KNOWLEDGE_MESSAGE : MISSING_RESULT_MESSAGE);
         execution.resolveBufferedOutput();
         logOutcome(execution, Set.of(), "UNVERIFIED_OUTPUT_DISCARDED");
+    }
+
+    private void recordGateRejected(
+            ChatTurnExecution execution,
+            List<StagedToolResult> staged) {
+        if (staged.isEmpty()) {
+            execution.queryPlan.acceptedResultKinds()
+                    .forEach(kind -> recordResult(kind, "GATE_REJECTED"));
+            return;
+        }
+        staged.forEach(value -> recordResult(
+                value.uiResult().kind(), "GATE_REJECTED"));
+    }
+
+    private void recordResult(String kind, String outcome) {
+        if (toolCallMetrics != null) {
+            toolCallMetrics.result(kind, outcome);
+        }
     }
 
     /** 只有 Knowledge Service 明确判定可回答且携带真实证据，才允许知识结论通过。 */

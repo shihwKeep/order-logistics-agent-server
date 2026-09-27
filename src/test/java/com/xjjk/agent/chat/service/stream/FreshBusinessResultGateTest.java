@@ -6,6 +6,9 @@ import com.xjjk.agent.chat.routing.BusinessQueryPlan;
 import com.xjjk.agent.chat.stream.ChatSseSession;
 import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
 import com.xjjk.agent.tool.ToolUiResult;
+import com.xjjk.agent.tool.observation.ToolCallMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
@@ -135,6 +138,36 @@ class FreshBusinessResultGateTest {
 
         assertThat(execution.content.toString()).isEqualTo("详情卡片已展示");
         assertThat(execution.resultSnapshot()).hasSize(1);
+    }
+
+    @Test
+    void recordsPublishedAndRejectedStructuredResults() throws Exception {
+        SimpleMeterRegistry meters = new SimpleMeterRegistry();
+        FreshBusinessResultGate observedGate = new FreshBusinessResultGate();
+        observedGate.setToolCallMetrics(new ToolCallMetrics(
+                meters, ObservationRegistry.create()));
+
+        ChatTurnExecution accepted = execution(
+                BusinessQueryPlan.modelRequired(Set.of("after-sale-detail")));
+        accepted.stageResult(
+                pending(1, "after-sale-detail"), uiResult("after-sale-detail"));
+        accepted.content.append("详情卡片已展示");
+        observedGate.flush(accepted, mock(ChatSseSession.class));
+
+        ChatTurnExecution rejected = execution(
+                BusinessQueryPlan.modelRequired(Set.of("after-sale-detail")));
+        rejected.stageResult(pending(1, "product-list"), uiResult("product-list"));
+        rejected.content.append("不应该通过");
+        observedGate.flush(rejected, mock(ChatSseSession.class));
+
+        assertThat(meters.counter(
+                "agent.tool.result",
+                "kind", "after-sale-detail",
+                "outcome", "PUBLISHED").count()).isEqualTo(1D);
+        assertThat(meters.counter(
+                "agent.tool.result",
+                "kind", "product-list",
+                "outcome", "GATE_REJECTED").count()).isEqualTo(1D);
     }
 
     private ChatTurnExecution execution(BusinessQueryPlan plan) {
