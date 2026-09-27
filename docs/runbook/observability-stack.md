@@ -1,0 +1,94 @@
+# 可观测性平台运行手册
+
+## 本地启动
+
+```powershell
+Copy-Item infra\observability\.env.observability.example infra\observability\.env.observability
+notepad infra\observability\.env.observability
+docker compose --env-file infra\observability\.env.observability -f infra\observability\compose.observability.yml up -d
+.\scripts\verify-observability.ps1
+```
+
+启动前必须修改 `GRAFANA_ADMIN_PASSWORD`。`.env.observability` 包含本机凭据，不得提交 Git。
+
+如果暂时没有启动 Agent Server 和 Knowledge Service，可先使用下面的命令只验证观测基础设施：
+
+```powershell
+.\scripts\verify-observability.ps1 -SkipBusinessServices
+```
+
+完整验收必须去掉该参数，确保两个业务健康接口正常，并且 Collector 确实抓取到了两个业务服务的指标。
+
+## 地址
+
+| 组件 | 地址 |
+|---|---|
+| Grafana | `http://127.0.0.1:3000` |
+| Prometheus | `http://127.0.0.1:9090` |
+| Alertmanager | `http://127.0.0.1:9093` |
+| Tempo API | `http://127.0.0.1:3200` |
+| Loki API | `http://127.0.0.1:3100` |
+| Collector Health | `http://127.0.0.1:13133` |
+
+Tempo 和 Loki 不直接作为日常查询界面，统一从 Grafana Explore 进入。
+
+## 常用命令
+
+```powershell
+docker compose --env-file infra\observability\.env.observability -f infra\observability\compose.observability.yml ps
+docker compose --env-file infra\observability\.env.observability -f infra\observability\compose.observability.yml logs --tail 200 otel-collector
+docker compose --env-file infra\observability\.env.observability -f infra\observability\compose.observability.yml restart otel-collector
+docker compose --env-file infra\observability\.env.observability -f infra\observability\compose.observability.yml down
+```
+
+日常停止不能增加 `-v`，否则会删除本地指标、Trace、日志和 Grafana 数据卷。
+
+## 单次请求排查
+
+1. 从客户端或服务日志取得 `requestId`。
+2. 在 Grafana Explore 选择 Loki，查询 `{service=~"order-logistics-.*"} |= "<requestId>"`。
+3. 从日志字段取得 `traceId`，点击派生字段 `TraceID` 跳转 Tempo。
+4. 在 Tempo 确认失败 Span 及其 `error.type`、服务版本、阶段和依赖耗时。
+5. 回到 Loki 按 `traceId` 查看同一次请求在两个服务中的结构化日志。
+
+禁止把用户原始消息、完整 Prompt、知识证据、记忆正文、Authorization 和 Cookie 复制到工单。
+
+## 故障处理
+
+### Collector不可用
+
+检查 `otel-collector` 日志中的接收、队列、批处理和导出错误。业务服务必须继续提供服务；如果业务线程等待 Collector，立即按 P1 处理并回滚遥测变更。Collector 恢复后确认 `otelcol_exporter_send_failed_*` 不再增长。
+
+### Prometheus目标Down
+
+打开 `http://127.0.0.1:9090/targets`，先确认 Collector 的 `:8889/metrics` 可访问，再查询 `up{job=~"order-logistics-.*"}` 判断 Agent 端口 8082 和 Knowledge 端口 8084 的 `/actuator/prometheus` 是否可访问。检查认证拦截器是否错误保护了 Actuator 端点。
+
+### Tempo或Loki不可写
+
+检查组件 `/ready`、Collector 导出错误和 Docker 卷磁盘空间。禁止通过关闭 Collector 队列上限来掩盖故障；先恢复后端，再确认丢弃计数和告警恢复。
+
+### 磁盘不足
+
+使用 `docker system df -v` 和宿主机磁盘工具定位增长来源。先缩短开发环境留存或归档数据，不直接删除未知 Docker 卷。生产环境按对象存储生命周期和备份策略处理。
+
+## Collector故障演练
+
+先确保完整验证脚本通过，然后执行：
+
+```powershell
+docker compose --env-file infra\observability\.env.observability -f infra\observability\compose.observability.yml stop otel-collector
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8082/actuator/health
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8084/actuator/health
+docker compose --env-file infra\observability\.env.observability -f infra\observability\compose.observability.yml start otel-collector
+.\scripts\verify-observability.ps1
+```
+
+预期是 Collector 停止期间两个业务健康接口仍返回 200；这证明遥测导出失败不会阻断业务线程。演练结束必须恢复 Collector 并重新执行完整验证。
+
+## 生产边界
+
+本目录 Compose 只用于本地集成验证。生产环境必须启用 TLS 与认证、独立 Secret、对象存储、组件多副本、容量配额、备份恢复和网络策略；Prometheus、Tempo、Loki 和 Grafana 不能直接暴露公网。生产日志与 Trace 访问必须审计。
+
+## 留存与敏感数据
+
+本地指标保留 30 天、Trace 保留 7 天、日志保留 14 天。生产期限由合规策略配置。发现敏感内容进入 Loki 或 Tempo 时，立即停止相关日志源、限制访问、记录事件范围、删除受影响数据并修复产生敏感字段的埋点，然后再恢复采集。
