@@ -51,6 +51,9 @@ docker compose --env-file infra\observability\.env.observability -f infra\observ
 
 ## 单次请求排查
 
+完整的场景验收矩阵、通过标准和敏感数据检查见
+[`agent-runtime-telemetry.md`](agent-runtime-telemetry.md)。
+
 1. 从客户端或服务日志取得 `requestId`。
 2. 在 Grafana Explore 选择 Loki，查询 `{service=~"order-logistics-.*"} |= "<requestId>"`。
 3. 从日志字段取得 `traceId`，点击派生字段 `TraceID` 跳转 Tempo。
