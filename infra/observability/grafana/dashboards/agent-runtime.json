@@ -1,0 +1,12 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {"id": 1, "type": "timeseries", "title": "Agent吞吐", "datasource": {"type": "prometheus", "uid": "prometheus"}, "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}, "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}, "targets": [{"expr": "sum(rate(agent_turn_completed_total[5m])) by (mode)", "legendFormat": "{{mode}}", "refId": "A"}]},
+    {"id": 2, "type": "timeseries", "title": "Agent失败率", "datasource": {"type": "prometheus", "uid": "prometheus"}, "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}, "fieldConfig": {"defaults": {"unit": "percentunit", "max": 1}, "overrides": []}, "targets": [{"expr": "sum(rate(agent_turn_completed_total{outcome!=\"SUCCESS\"}[5m])) / clamp_min(sum(rate(agent_turn_completed_total[5m])), 0.001)", "legendFormat": "failure", "refId": "A"}]},
+    {"id": 3, "type": "timeseries", "title": "Agent P95耗时", "datasource": {"type": "prometheus", "uid": "prometheus"}, "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}, "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}, "targets": [{"expr": "histogram_quantile(0.95, sum(rate(agent_turn_duration_seconds_bucket[5m])) by (le, mode))", "legendFormat": "{{mode}}", "refId": "A"}]},
+    {"id": 4, "type": "timeseries", "title": "首Token延迟", "datasource": {"type": "prometheus", "uid": "prometheus"}, "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}, "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}, "targets": [{"expr": "histogram_quantile(0.95, sum(rate(agent_model_first_delta_seconds_bucket[5m])) by (le, model_family))", "legendFormat": "{{model_family}}", "refId": "A"}]}
+  ],
+  "refresh": "30s", "schemaVersion": 41, "tags": ["order-logistics", "agent"], "templating": {"list": []}, "time": {"from": "now-1h", "to": "now"}, "timezone": "browser", "title": "Agent Runtime", "uid": "order-logistics-agent-runtime", "version": 1
+}

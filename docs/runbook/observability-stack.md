@@ -32,6 +32,12 @@ docker compose --env-file infra\observability\.env.observability -f infra\observ
 
 Tempo 和 Loki 不直接作为日常查询界面，统一从 Grafana Explore 进入。
 
+## Agent 业务看板
+
+Grafana 会自动加载四个看板：总览、Agent Runtime、Tool Calls 和 SSE Stream。Agent Runtime 查看单轮吞吐、终态失败率、P95 总耗时和首 Token 延迟；Tool Calls 查看真实下游调用、保护器复用与超限、结构化结果门禁；SSE Stream 查看活动中继、直连与可恢复模式、断点恢复结果、心跳、Redis 回放故障和取消结果。
+
+关键指标的标签只使用服务端白名单值。`requestId`、`conversationId`、业务编号、问题正文、模型正文和工具载荷只允许出现在受控 Trace 或排障日志上下文，不能作为 Prometheus 标签。
+
 ## 常用命令
 
 ```powershell

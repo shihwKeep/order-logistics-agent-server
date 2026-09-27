@@ -31,3 +31,48 @@ groups:
         annotations:
           summary: Collector持续丢弃Trace
           runbook: docs/runbook/observability-stack.md
+
+      - alert: AgentTurnHighFailureRate
+        expr: |
+          sum(rate(agent_turn_completed_total{outcome=~"FAILED|TIMEOUT|OUTPUT_ERROR"}[5m]))
+          /
+          clamp_min(sum(rate(agent_turn_completed_total[5m])), 0.001) > 0.10
+        for: 5m
+        labels:
+          severity: P1
+        annotations:
+          summary: Agent问答失败率连续5分钟超过10%
+          runbook: docs/runbook/observability-stack.md
+
+      - alert: DownstreamCallFailureRateHigh
+        expr: |
+          sum(rate(agent_downstream_call_duration_count{outcome!="SUCCESS"}[5m])) by (service, operation)
+          /
+          clamp_min(sum(rate(agent_downstream_call_duration_count[5m])) by (service, operation), 0.001) > 0.20
+        for: 5m
+        labels:
+          severity: P1
+        annotations:
+          summary: "下游{{ $labels.service }}/{{ $labels.operation }}失败率超过20%"
+          runbook: docs/runbook/observability-stack.md
+
+      - alert: SseResumeFailureRateHigh
+        expr: |
+          sum(rate(agent_chat_stream_resume_attempt_total{result="failure"}[5m]))
+          /
+          clamp_min(sum(rate(agent_chat_stream_resume_attempt_total[5m])), 0.001) > 0.10
+        for: 5m
+        labels:
+          severity: P1
+        annotations:
+          summary: SSE断点恢复失败率连续5分钟超过10%
+          runbook: docs/runbook/observability-stack.md
+
+      - alert: SseRedisReplayFailure
+        expr: sum(rate(agent_chat_stream_replay_failure_total{reason="redis"}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: P1
+        annotations:
+          summary: SSE Redis回放持续失败
+          runbook: docs/runbook/observability-stack.md

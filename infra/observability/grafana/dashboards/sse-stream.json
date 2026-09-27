@@ -1,0 +1,11 @@
+{
+  "annotations": {"list": []}, "editable": false, "graphTooltip": 1,
+  "panels": [
+    {"id": 1, "type": "stat", "title": "活动SSE中继", "datasource": {"type": "prometheus", "uid": "prometheus"}, "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0}, "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}, "targets": [{"expr": "agent_chat_stream_relay_active", "refId": "A"}]},
+    {"id": 2, "type": "timeseries", "title": "连接模式", "datasource": {"type": "prometheus", "uid": "prometheus"}, "gridPos": {"h": 8, "w": 18, "x": 6, "y": 0}, "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}, "targets": [{"expr": "sum(rate(agent_chat_stream_mode_total[5m])) by (mode)", "legendFormat": "{{mode}}", "refId": "A"}]},
+    {"id": 3, "type": "timeseries", "title": "断点恢复结果", "datasource": {"type": "prometheus", "uid": "prometheus"}, "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}, "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}, "targets": [{"expr": "sum(rate(agent_chat_stream_resume_attempt_total[5m])) by (result)", "legendFormat": "{{result}}", "refId": "A"}]},
+    {"id": 4, "type": "timeseries", "title": "回放事件与心跳", "datasource": {"type": "prometheus", "uid": "prometheus"}, "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}, "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}, "targets": [{"expr": "sum(rate(agent_chat_stream_replay_events_total[5m])) by (type)", "legendFormat": "{{type}}", "refId": "A"}]},
+    {"id": 5, "type": "timeseries", "title": "SSE故障与取消", "datasource": {"type": "prometheus", "uid": "prometheus"}, "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}, "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}, "targets": [{"expr": "sum(rate(agent_chat_stream_replay_failure_total[5m])) by (reason)", "legendFormat": "failure {{reason}}", "refId": "A"}, {"expr": "sum(rate(agent_chat_stream_cancel_total[5m])) by (result)", "legendFormat": "cancel {{result}}", "refId": "B"}]}
+  ],
+  "refresh": "30s", "schemaVersion": 41, "tags": ["order-logistics", "sse"], "templating": {"list": []}, "time": {"from": "now-1h", "to": "now"}, "timezone": "browser", "title": "SSE Stream", "uid": "order-logistics-sse-stream", "version": 1
+}

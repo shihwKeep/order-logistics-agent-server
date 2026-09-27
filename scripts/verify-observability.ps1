@@ -43,6 +43,29 @@ if (-not (Test-Path -LiteralPath $environmentFile)) {
     throw "Missing local environment file: $environmentFile; copy .env.observability.example and change the password"
 }
 
+$dashboardDirectory = Join-Path $repoRoot 'infra\observability\grafana\dashboards'
+$expectedDashboards = @(
+    'observability-overview.json',
+    'agent-runtime.json',
+    'tool-calls.json',
+    'sse-stream.json'
+)
+foreach ($dashboardName in $expectedDashboards) {
+    $dashboardPath = Join-Path $dashboardDirectory $dashboardName
+    if (-not (Test-Path -LiteralPath $dashboardPath)) {
+        throw "Missing Grafana dashboard: $dashboardPath"
+    }
+    try {
+        $dashboard = Get-Content -Raw -LiteralPath $dashboardPath | ConvertFrom-Json
+    } catch {
+        throw "Invalid Grafana dashboard JSON: $dashboardPath; $($_.Exception.Message)"
+    }
+    if ([string]::IsNullOrWhiteSpace($dashboard.uid)) {
+        throw "Grafana dashboard has no UID: $dashboardPath"
+    }
+}
+Write-Output '[OK] Grafana dashboard JSON and UIDs'
+
 & docker compose --env-file $environmentFile -f $compose config --quiet
 if ($LASTEXITCODE -ne 0) {
     throw 'Observability compose validation failed'
