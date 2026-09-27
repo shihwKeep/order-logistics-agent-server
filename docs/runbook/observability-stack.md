@@ -70,7 +70,7 @@ docker compose --env-file infra\observability\.env.observability -f infra\observ
 
 ### Prometheus目标Down
 
-打开 `http://127.0.0.1:9090/targets`，先确认 Collector 的 `:8889/metrics` 可访问，再查询 `up{job=~"order-logistics-.*"}` 判断 Agent 管理端口 18082 和 Knowledge 管理端口 18085 的 `/actuator/prometheus` 是否可访问。生产环境可通过 `AGENT_METRICS_TARGET`、`KNOWLEDGE_METRICS_TARGET` 覆盖目标地址。业务端口不承担指标采集。
+打开 `http://127.0.0.1:9090/targets`，先确认 Collector 的 `:8889/metrics` 可访问，再查询 `up{exported_job=~"order-logistics-.*"}` 判断 Agent 管理端口 18082 和 Knowledge 管理端口 18085 的 `/actuator/prometheus` 是否可访问。生产环境可通过 `AGENT_METRICS_TARGET`、`KNOWLEDGE_METRICS_TARGET` 覆盖目标地址。业务端口不承担指标采集。
 
 ### Tempo或Loki不可写
 

@@ -97,11 +97,13 @@ if (-not $SkipBusinessServices) {
 
     # Business metrics are scraped by the Collector and re-exposed to Prometheus.
     # Query the embedded business job up series in addition to Prometheus targets.
-    $upQuery = [Uri]::EscapeDataString('up{job=~"order-logistics-agent-server|order-logistics-knowledge-service"}')
+    # Collector 通过 Prometheus exporter 转发时会保留原始 job 为 exported_job，
+    # 外层 job 会变成 otel-collector；按 exported_job 校验业务采集目标。
+    $upQuery = [Uri]::EscapeDataString('up{exported_job=~"order-logistics-agent-server|order-logistics-knowledge-service"}')
     $upResult = Invoke-RestMethod -Uri "http://127.0.0.1:9090/api/v1/query?query=$upQuery" -TimeoutSec 5
     $series = @($upResult.data.result)
     foreach ($job in @('order-logistics-agent-server', 'order-logistics-knowledge-service')) {
-        $jobSeries = @($series | Where-Object { $_.metric.job -eq $job })
+        $jobSeries = @($series | Where-Object { $_.metric.exported_job -eq $job })
         if ($jobSeries.Count -eq 0 -or [double]$jobSeries[0].value[1] -ne 1) {
             throw "Business metrics scrape target is unavailable: $job"
         }
