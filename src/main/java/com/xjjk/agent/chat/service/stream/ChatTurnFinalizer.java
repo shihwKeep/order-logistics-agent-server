@@ -1,12 +1,13 @@
 package com.xjjk.agent.chat.service.stream;
 
 import com.xjjk.agent.chat.domain.MessageStatus;
+import com.xjjk.agent.chat.observation.AgentTurnTelemetry;
 import com.xjjk.agent.chat.service.turn.ChatTurnFinishService;
 import com.xjjk.agent.chat.stream.ChatEventPublisher;
 import com.xjjk.agent.chat.stream.ChatStreamControl;
 import com.xjjk.agent.chat.stream.ChatStreamError;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -18,10 +19,24 @@ import java.io.IOException;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ChatTurnFinalizer {
 
     private final ChatTurnFinishService finishService;
+    private final AgentTurnTelemetry turnTelemetry;
+
+    @Autowired
+    public ChatTurnFinalizer(
+            ChatTurnFinishService finishService,
+            AgentTurnTelemetry turnTelemetry
+    ) {
+        this.finishService = finishService;
+        this.turnTelemetry = turnTelemetry;
+    }
+
+    /** 兼容不启动 Spring 容器的既有单元测试。 */
+    ChatTurnFinalizer(ChatTurnFinishService finishService) {
+        this(finishService, null);
+    }
 
     // 包级入口，仅供本模块的工作线程执行器调用。
     void finish(
@@ -65,6 +80,12 @@ public class ChatTurnFinalizer {
                 if (execution.metrics != null) {
                     log.info("chat_call_metrics={}",
                             execution.metrics.snapshot(metricStatus, execution.finishReason));
+                }
+                if (turnTelemetry != null) {
+                    turnTelemetry.completeCurrent(
+                            metricStatus,
+                            "UNKNOWN",
+                            execution.turn == null ? null : execution.turn.conversationId());
                 }
             } finally {
                 if (restoreInterrupt) {

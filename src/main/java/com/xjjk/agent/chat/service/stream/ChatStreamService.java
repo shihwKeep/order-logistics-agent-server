@@ -5,6 +5,7 @@ import com.xjjk.agent.chat.api.dto.ChatStreamCancelResponse;
 import com.xjjk.agent.chat.config.ChatStreamProperties;
 import com.xjjk.agent.chat.domain.MessageStatus;
 import com.xjjk.agent.chat.observation.ChatStreamReplayMetrics;
+import com.xjjk.agent.chat.observation.AgentTurnTelemetry;
 import com.xjjk.agent.chat.replay.ChatReplayCreateResult;
 import com.xjjk.agent.chat.replay.ChatReplayMetadata;
 import com.xjjk.agent.chat.replay.ChatReplayRepository;
@@ -46,6 +47,7 @@ public class ChatStreamService {
     private final ChatTurnJobRegistry jobRegistry;
     private final ChatTurnDeadline deadline;
     private final ChatStreamReplayMetrics metrics;
+    private final AgentTurnTelemetry turnTelemetry;
 
     public ChatStreamService(
             @Qualifier("chatStreamExecutor") ThreadPoolTaskExecutor executor,
@@ -56,7 +58,8 @@ public class ChatStreamService {
             ChatSseRelayService relayService,
             ChatTurnJobRegistry jobRegistry,
             ChatTurnDeadline deadline,
-            ChatStreamReplayMetrics metrics
+            ChatStreamReplayMetrics metrics,
+            AgentTurnTelemetry turnTelemetry
     ) {
         this.executor = Objects.requireNonNull(executor, "聊天生产线程池不能为空");
         this.runner = Objects.requireNonNull(runner, "聊天执行器不能为空");
@@ -67,6 +70,7 @@ public class ChatStreamService {
         this.jobRegistry = Objects.requireNonNull(jobRegistry, "任务注册表不能为空");
         this.deadline = Objects.requireNonNull(deadline, "任务截止控制不能为空");
         this.metrics = Objects.requireNonNull(metrics, "聊天流指标不能为空");
+        this.turnTelemetry = Objects.requireNonNull(turnTelemetry, "Agent 单轮遥测不能为空");
     }
 
     /** 兼容原有调用方；新 Controller 使用 open 读取恢复协议元数据。 */
@@ -151,7 +155,8 @@ public class ChatStreamService {
                         replayRepository, identity, requestId, Duration.ofMillis(250)));
         AtomicReference<ChatTurnJob> jobReference = new AtomicReference<>();
         FutureTask<Void> task = new FutureTask<>(() -> {
-            runner.run(request, identity, control, publisher, requestId);
+            turnTelemetry.run("resumable", requestId, request.conversationId(),
+                    () -> runner.run(request, identity, control, publisher, requestId));
             return null;
         }) {
             @Override
@@ -223,7 +228,8 @@ public class ChatStreamService {
         // runner 内部才会创建业务消息、读取上下文、调用模型并完成数据库收尾。
         FutureTask<Void> task = new FutureTask<>(() -> {
             try {
-                runner.run(request, identity, control, session, requestId);
+                turnTelemetry.run("direct", requestId, request.conversationId(),
+                        () -> runner.run(request, identity, control, session, requestId));
             } finally {
                 heartbeatLease.close();
             }
