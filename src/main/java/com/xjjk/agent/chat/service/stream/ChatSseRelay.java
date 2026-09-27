@@ -1,6 +1,7 @@
 package com.xjjk.agent.chat.service.stream;
 
 import com.xjjk.agent.chat.api.dto.ChatStreamEvent;
+import com.xjjk.agent.chat.observation.ChatStreamReplayMetrics;
 import com.xjjk.agent.chat.replay.ChatReplayEvent;
 import com.xjjk.agent.chat.replay.ChatReplayRepository;
 import com.xjjk.agent.identity.domain.AgentIdentity;
@@ -27,6 +28,7 @@ public final class ChatSseRelay implements Runnable {
     private final Duration blockTimeout;
     private final SseEmitter emitter;
     private final AtomicBoolean disconnected = new AtomicBoolean();
+    private ChatStreamReplayMetrics metrics;
     private long lastSequence;
     private volatile Thread relayThread;
 
@@ -88,8 +90,14 @@ public final class ChatSseRelay implements Runnable {
         } catch (IOException exception) {
             // 网络输出失败只关闭本中继；生产任务继续写 Redis，等待客户端恢复。
             disconnected.set(true);
+            if (metrics != null) {
+                metrics.failure("relay");
+            }
         } catch (RuntimeException exception) {
             disconnected.set(true);
+            if (metrics != null) {
+                metrics.failure("redis");
+            }
             if (!Thread.currentThread().isInterrupted()) {
                 emitter.completeWithError(exception);
             }
@@ -109,6 +117,10 @@ public final class ChatSseRelay implements Runnable {
 
     public String connectionId() {
         return connectionId;
+    }
+
+    public void metrics(ChatStreamReplayMetrics metrics) {
+        this.metrics = metrics;
     }
 
     private boolean ownsActiveConnection() {

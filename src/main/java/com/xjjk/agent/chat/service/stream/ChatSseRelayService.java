@@ -60,6 +60,7 @@ public class ChatSseRelayService {
                 connectionId,
                 properties.replay().readBlockTimeout(),
                 emitter);
+        relay.metrics(metrics);
 
         // 回调只控制该中继，绝不写取消标志，也不触碰 Agent Job。
         Runnable closeRelay = () -> {

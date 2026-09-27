@@ -1,6 +1,7 @@
 package com.xjjk.agent.chat.service.stream;
 
 import com.xjjk.agent.chat.config.ChatStreamProperties;
+import com.xjjk.agent.chat.observation.ChatStreamReplayMetrics;
 import com.xjjk.agent.chat.domain.MessageStatus;
 import com.xjjk.agent.chat.stream.ChatEventPublisher;
 import com.xjjk.agent.chat.stream.ChatStreamControl;
@@ -23,6 +24,7 @@ public final class ChatSseHeartbeat {
 
     private final ChatSseHeartbeatScheduler scheduler;
     private final ChatStreamProperties properties;
+    private ChatStreamReplayMetrics metrics;
 
     public ChatSseHeartbeat(
             ChatSseHeartbeatScheduler scheduler,
@@ -30,6 +32,11 @@ public final class ChatSseHeartbeat {
     ) {
         this.scheduler = Objects.requireNonNull(scheduler, "心跳调度器不能为空");
         this.properties = Objects.requireNonNull(properties, "聊天流配置不能为空");
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void setMetrics(ChatStreamReplayMetrics metrics) {
+        this.metrics = metrics;
     }
 
     public Lease start(ChatEventPublisher session, ChatStreamControl control) {
@@ -43,6 +50,9 @@ public final class ChatSseHeartbeat {
             }
             try {
                 session.heartbeat();
+                if (metrics != null) {
+                    metrics.replayEvent("heartbeat", 0);
+                }
             } catch (IOException | RuntimeException exception) {
                 log.debug("Chat heartbeat write failed; stopping producer", exception);
                 control.requestStop(MessageStatus.OUTPUT_ERROR);
