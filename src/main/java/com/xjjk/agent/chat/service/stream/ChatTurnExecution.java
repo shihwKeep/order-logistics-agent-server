@@ -33,6 +33,8 @@ final class ChatTurnExecution {
     private final List<StagedToolResult> stagedResults = new ArrayList<>();
     /** 当前消息的业务查询计划；普通问答不暂存输出。 */
     BusinessQueryPlan queryPlan = BusinessQueryPlan.general();
+    /** 本轮最终采用的低基数意图类型，仅用于遥测，不参与业务路由。 */
+    String intent = "UNKNOWN";
     /** 缓冲正文是否已经通过结果门禁或被替换为安全答复。 */
     private boolean bufferedOutputResolved;
     String finishReason;
@@ -70,6 +72,10 @@ final class ChatTurnExecution {
 
     void queryPlan(BusinessQueryPlan plan) {
         queryPlan = Objects.requireNonNull(plan, "业务查询计划不能为空");
+    }
+
+    void intent(String value) {
+        intent = Objects.requireNonNull(value, "意图类型不能为空");
     }
 
     boolean buffersModelOutput() {

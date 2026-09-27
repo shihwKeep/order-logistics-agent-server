@@ -5,6 +5,7 @@ import com.xjjk.agent.chat.action.ChatActionType;
 import com.xjjk.agent.chat.api.dto.ChatStreamRequest;
 import com.xjjk.agent.chat.domain.MessageStatus;
 import com.xjjk.agent.chat.domain.memory.ChatContextSelection;
+import com.xjjk.agent.chat.observation.AgentTurnTelemetry;
 import com.xjjk.agent.chat.service.memory.ChatContextPreparationService;
 import com.xjjk.agent.chat.service.model.AiChatService;
 import com.xjjk.agent.chat.result.ChatToolResultRecorder;
@@ -27,6 +28,7 @@ import com.xjjk.agent.tool.ToolCallGuard;
 import com.xjjk.agent.tool.ToolUiResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -34,6 +36,7 @@ import org.springframework.util.StringUtils;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.concurrent.CancellationException;
+import java.util.function.Supplier;
 
 /**
  * 单轮聊天执行器：准备业务记录、准备上下文、消费模型流。
@@ -55,6 +58,13 @@ public class ChatTurnRunner {
     private final FreshBusinessResultGate freshBusinessResultGate;
     private final ExplicitMemoryCommandService explicitMemoryCommandService;
     private final DeterministicUserMemoryAnswerService deterministicMemoryAnswerService;
+    private AgentTurnTelemetry turnTelemetry;
+
+    /** 可选 setter 不改变既有构造签名，Spring 运行时会注入，纯单元测试可继续直接构造。 */
+    @Autowired
+    void setTurnTelemetry(AgentTurnTelemetry turnTelemetry) {
+        this.turnTelemetry = turnTelemetry;
+    }
 
     public void run(
             ChatStreamRequest request,
@@ -93,7 +103,12 @@ public class ChatTurnRunner {
             // 这样可以避免某个异常分支遗漏会话占用释放或消息状态落库。
             // MODEL_REQUIRED 的正文若未走完证据门禁，先替换为安全文案，禁止猜测性
             // 查询结果通过异常、截断或取消分支写入历史消息。
-            freshBusinessResultGate.sanitizeForPersistence(execution);
+            if (execution.buffersModelOutput() && !execution.isBufferedOutputResolved()) {
+                observeStage("result.gate",
+                        () -> freshBusinessResultGate.sanitizeForPersistence(execution));
+            } else {
+                freshBusinessResultGate.sanitizeForPersistence(execution);
+            }
             finalizer.finish(execution, control, session);
         }
     }
@@ -112,13 +127,15 @@ public class ChatTurnRunner {
         // 第一步：通过短事务创建本轮 USER/ASSISTANT 消息并占用会话。
         // 仅在任务真正获得线程执行时才创建记录；prepare 返回时开始事务已经提交。
         if (StringUtils.hasText(request.clientRequestId())) {
-            execution.prepared(preparationService.prepare(
-                    request.conversationId(), identity, request.message(),
-                    request.clientRequestId()));
+            execution.prepared(observeStage("turn.prepare", () ->
+                    preparationService.prepare(
+                            request.conversationId(), identity, request.message(),
+                            request.clientRequestId())));
         } else {
             // 仅保留给当前单元测试和旧内部调用；HTTP Bean Validation 不允许为空。
-            execution.prepared(preparationService.prepare(
-                    request.conversationId(), identity, request.message()));
+            execution.prepared(observeStage("turn.prepare", () ->
+                    preparationService.prepare(
+                            request.conversationId(), identity, request.message())));
         }
         if (control.isStopRequested()) {
             return;
@@ -131,6 +148,8 @@ public class ChatTurnRunner {
             ExplicitMemoryCommandResult memory = explicitMemoryCommandService.handle(
                     execution.turn, request.message());
             if (memory.handled()) {
+                execution.intent("EXPLICIT_MEMORY");
+                observeStage("intent.route", () -> { });
                 session.generating();
                 execution.content.append(memory.assistantText());
                 session.delta(memory.assistantText());
@@ -144,6 +163,8 @@ public class ChatTurnRunner {
         }
 
         if (request.action() != null) {
+            execution.intent("ACTION");
+            observeStage("intent.route", () -> { });
             executeAction(request, identity, session, execution);
             return;
         }
@@ -156,6 +177,8 @@ public class ChatTurnRunner {
         BusinessQueryPlan queryPlan = businessQueryPlanner.plan(request.message());
         execution.queryPlan(queryPlan);
         if (queryPlan.mode() == BusinessQueryMode.DIRECT) {
+            execution.intent("DIRECT_BUSINESS");
+            observeStage("intent.route", () -> { });
             executeAction(
                     new ChatStreamRequest(
                             request.conversationId(),
@@ -176,6 +199,8 @@ public class ChatTurnRunner {
                 return;
             }
             if (memoryAnswer.handled()) {
+                execution.intent("MEMORY_RECALL");
+                observeStage("intent.route", () -> { });
                 session.generating();
                 execution.content.append(memoryAnswer.assistantText());
                 session.delta(memoryAnswer.assistantText());
@@ -189,8 +214,14 @@ public class ChatTurnRunner {
 
         // 第四步：基于 MySQL 稳定游标读取短期记忆，执行 Token 预算和上下文裁剪。
         // 该阶段可能命中 Redis，也可能 fail-open 回源 MySQL，但不会绕过会话归属校验。
-        ChatContextSelection selection = contextService.prepare(
-                execution.turn, request.message(), control);
+        execution.intent(queryPlan.mode() == BusinessQueryMode.MODEL_REQUIRED
+                ? (queryPlan.acceptedResultKinds().contains("knowledge-citations")
+                        ? "KNOWLEDGE" : "MODEL_REQUIRED")
+                : "GENERAL");
+        observeStage("intent.route", () -> { });
+
+        ChatContextSelection selection = observeStage("context.load", () ->
+                contextService.prepare(execution.turn, request.message(), control));
         if (control.isStopRequested()) {
             return;
         }
@@ -201,7 +232,8 @@ public class ChatTurnRunner {
 
         // 进入模型调用前预置失败结果；只有模型流正常结束后才会计算最终成功状态。
         execution.error = ChatStreamError.forStatus(MessageStatus.FAILED);
-        consumeModel(request.message(), selection, identity, control, session, execution);
+        observeIoStage("model.stream", () -> consumeModel(
+                request.message(), selection, identity, control, session, execution));
 
         if (!control.isStopRequested()) {
             // 第六步：根据正文和 finishReason 判断 SUCCESS、OUTPUT_LIMIT、
@@ -215,7 +247,8 @@ public class ChatTurnRunner {
                  * 才统一发布卡片与回答。缺失结果时会丢弃模型的“已查询”话术，
                  * 改为固定安全提示，避免历史上下文诱导出假成功。
                  */
-                freshBusinessResultGate.flush(execution, session);
+                observeIoStage("result.gate",
+                        () -> freshBusinessResultGate.flush(execution, session));
             }
         }
     }
@@ -374,5 +407,36 @@ public class ChatTurnRunner {
             current = current.getCause();
         }
         return false;
+    }
+
+    private <T> T observeStage(String stage, Supplier<T> action) {
+        return turnTelemetry == null ? action.get() : turnTelemetry.observeStage(stage, action);
+    }
+
+    private void observeStage(String stage, Runnable action) {
+        if (turnTelemetry == null) {
+            action.run();
+        } else {
+            turnTelemetry.observeStage(stage, action);
+        }
+    }
+
+    private void observeIoStage(String stage, IoRunnable action) throws IOException {
+        try {
+            observeStage(stage, () -> {
+                try {
+                    action.run();
+                } catch (IOException exception) {
+                    throw new UncheckedIOException(exception);
+                }
+            });
+        } catch (UncheckedIOException exception) {
+            throw exception.getCause();
+        }
+    }
+
+    @FunctionalInterface
+    private interface IoRunnable {
+        void run() throws IOException;
     }
 }

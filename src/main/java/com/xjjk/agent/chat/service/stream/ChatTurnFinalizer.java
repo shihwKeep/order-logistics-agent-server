@@ -44,6 +44,30 @@ public class ChatTurnFinalizer {
             ChatStreamControl control,
             ChatEventPublisher session
     ) {
+        String[] finalOutcome = {execution.status.name()};
+        try {
+            if (turnTelemetry == null) {
+                finalOutcome[0] = finishObserved(execution, control, session);
+            } else {
+                finalOutcome[0] = turnTelemetry.observeStage(
+                        "turn.finalize",
+                        () -> finishObserved(execution, control, session));
+            }
+        } finally {
+            if (turnTelemetry != null) {
+                turnTelemetry.completeCurrent(
+                        finalOutcome[0],
+                        execution.intent,
+                        execution.turn == null ? null : execution.turn.conversationId());
+            }
+        }
+    }
+
+    private String finishObserved(
+            ChatTurnExecution execution,
+            ChatStreamControl control,
+            ChatEventPublisher session
+    ) {
         // beginFinalization 原子地冻结首个停止原因，并阻止后续回调反复改变最终状态。
         MessageStatus stopReason = control.beginFinalization();
         // 取消不能打断收尾事务；完成后恢复中断标记。
@@ -78,14 +102,12 @@ public class ChatTurnFinalizer {
             try {
                 // 指标放在最外层 finally，确保准备失败、取消、落库失败等路径都能被观测。
                 if (execution.metrics != null) {
-                    log.info("chat_call_metrics={}",
-                            execution.metrics.snapshot(metricStatus, execution.finishReason));
-                }
-                if (turnTelemetry != null) {
-                    turnTelemetry.completeCurrent(
-                            metricStatus,
-                            "UNKNOWN",
-                            execution.turn == null ? null : execution.turn.conversationId());
+                    var snapshot = execution.metrics.snapshot(
+                            metricStatus, execution.finishReason);
+                    log.info("chat_call_metrics={}", snapshot);
+                    if (turnTelemetry != null) {
+                        turnTelemetry.recordModelMetrics(snapshot);
+                    }
                 }
             } finally {
                 if (restoreInterrupt) {
@@ -93,6 +115,7 @@ public class ChatTurnFinalizer {
                 }
             }
         }
+        return metricStatus;
     }
 
     private PersistenceOutcome persist(ChatTurnExecution execution) {
