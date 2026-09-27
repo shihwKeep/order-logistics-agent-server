@@ -16,7 +16,8 @@ services:
     environment:
       DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT}
       AGENT_METRICS_TARGET: host.docker.internal:8082
-      KNOWLEDGE_METRICS_TARGET: host.docker.internal:8084
+      # Knowledge Service 本地默认端口为 8085；生产环境通过同名环境变量覆盖。
+      KNOWLEDGE_METRICS_TARGET: ${KNOWLEDGE_METRICS_TARGET:-host.docker.internal:8085}
     mem_limit: 768m
     cpus: "1.0"
     ports:
