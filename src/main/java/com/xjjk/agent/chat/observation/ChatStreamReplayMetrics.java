@@ -21,6 +21,7 @@ public final class ChatStreamReplayMetrics {
             "redis", "capacity", "relay", "startup");
     private static final Set<String> CANCEL_RESULTS = Set.of(
             "accepted", "terminal", "failure");
+    private static final Set<String> TERMINAL_TYPES = Set.of("done", "error");
 
     private final MeterRegistry registry;
     private final AtomicInteger activeRelays = new AtomicInteger();
@@ -54,6 +55,16 @@ public final class ChatStreamReplayMetrics {
     public void cancel(String result) {
         registry.counter("agent.chat.stream.cancel",
                 "result", allowed(result, CANCEL_RESULTS)).increment();
+    }
+
+    public void terminal(String type) {
+        registry.counter("agent.chat.stream.terminal",
+                "type", allowed(type, TERMINAL_TYPES)).increment();
+    }
+
+    public void duplicateTerminal(String type) {
+        registry.counter("agent.chat.stream.terminal.duplicate",
+                "type", allowed(type, TERMINAL_TYPES)).increment();
     }
 
     public AutoCloseable relayConnection() {

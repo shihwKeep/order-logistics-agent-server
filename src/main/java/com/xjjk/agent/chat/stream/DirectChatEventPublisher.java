@@ -1,5 +1,7 @@
 package com.xjjk.agent.chat.stream;
 
+import com.xjjk.agent.chat.observation.ChatStreamReplayMetrics;
+
 import com.xjjk.agent.chat.api.dto.ChatStreamEvent;
 import com.xjjk.agent.chat.api.dto.ChatStreamPayloads;
 import com.xjjk.agent.tool.ToolUiResult;
@@ -18,6 +20,7 @@ public class DirectChatEventPublisher implements ChatEventPublisher {
     private long sequence;
     private boolean sessionSent;
     private boolean terminal;
+    private ChatStreamReplayMetrics metrics;
 
     public DirectChatEventPublisher(SseEmitter emitter) {
         this.emitter = Objects.requireNonNull(emitter, "SSE 输出不能为空");
@@ -82,17 +85,37 @@ public class DirectChatEventPublisher implements ChatEventPublisher {
 
     @Override
     public synchronized void done(String messageId) throws IOException {
-        if (terminal) return;
+        if (terminal) {
+            duplicateTerminal("done");
+            return;
+        }
         terminal = true;
+        terminal("done");
         sendLocked("done", new ChatStreamPayloads.Done(messageId));
     }
 
     @Override
     public synchronized void error(ChatStreamError error, String requestId) throws IOException {
-        if (terminal) return;
+        if (terminal) {
+            duplicateTerminal("error");
+            return;
+        }
         terminal = true;
+        terminal("error");
         sendLocked("error", new ChatStreamPayloads.Error(
                 error.code(), error.message(), requestId));
+    }
+
+    public void metrics(ChatStreamReplayMetrics metrics) {
+        this.metrics = metrics;
+    }
+
+    private void terminal(String type) {
+        if (metrics != null) metrics.terminal(type);
+    }
+
+    private void duplicateTerminal(String type) {
+        if (metrics != null) metrics.duplicateTerminal(type);
     }
 
     @Override

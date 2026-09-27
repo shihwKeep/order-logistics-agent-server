@@ -1,6 +1,7 @@
 package com.xjjk.agent.chat.replay;
 
 import com.xjjk.agent.chat.api.dto.ChatStreamPayloads;
+import com.xjjk.agent.chat.observation.ChatStreamReplayMetrics;
 import com.xjjk.agent.chat.stream.ChatEventPublisher;
 import com.xjjk.agent.chat.stream.ChatStreamError;
 import com.xjjk.agent.identity.domain.AgentIdentity;
@@ -25,6 +26,7 @@ public final class ReplayChatEventPublisher implements ChatEventPublisher {
     private final Instant taskExpiresAt;
     private boolean sessionSent;
     private boolean terminal;
+    private ChatStreamReplayMetrics metrics;
 
     public ReplayChatEventPublisher(
             ChatReplayRepository repository,
@@ -130,16 +132,19 @@ public final class ReplayChatEventPublisher implements ChatEventPublisher {
     @Override
     public synchronized void done(String messageId) throws IOException {
         if (terminal) {
+            recordDuplicateTerminal("done");
             return;
         }
         append("done", new ChatStreamPayloads.Done(messageId));
         terminal = true;
+        recordTerminal("done");
     }
 
     @Override
     public synchronized void error(ChatStreamError error, String eventRequestId)
             throws IOException {
         if (terminal) {
+            recordDuplicateTerminal("error");
             return;
         }
         if (!requestId.equals(eventRequestId)) {
@@ -148,12 +153,25 @@ public final class ReplayChatEventPublisher implements ChatEventPublisher {
         append("error", new ChatStreamPayloads.Error(
                 error.code(), error.message(), requestId));
         terminal = true;
+        recordTerminal("error");
     }
 
     /** 生产任务结束不等于删除回放数据；回放数据由 Redis TTL 清理。 */
     @Override
     public void complete() {
         // 无网络资源需要关闭。
+    }
+
+    public void metrics(ChatStreamReplayMetrics metrics) {
+        this.metrics = metrics;
+    }
+
+    private void recordTerminal(String type) {
+        if (metrics != null) metrics.terminal(type);
+    }
+
+    private void recordDuplicateTerminal(String type) {
+        if (metrics != null) metrics.duplicateTerminal(type);
     }
 
     private void appendNonTerminal(String type, Object payload) {

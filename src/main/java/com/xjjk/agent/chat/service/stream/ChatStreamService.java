@@ -150,6 +150,7 @@ public class ChatStreamService {
     ) {
         ReplayChatEventPublisher publisher = new ReplayChatEventPublisher(
                 replayRepository, identity, requestId, expiresAt);
+        publisher.metrics(metrics);
         ChatStreamControl control = new ChatStreamControl(
                 new ChatReplayCancellationProbe(
                         replayRepository, identity, requestId, Duration.ofMillis(250)));
@@ -219,6 +220,7 @@ public class ChatStreamService {
         // ChatSseSession 统一维护事件序号和 session/status/delta/done/error 协议；
         // ChatStreamControl 统一保存客户端断开、超时等停止信号，供工作线程主动结束模型流。
         ChatSseSession session = new ChatSseSession(emitter);
+        session.metrics(metrics);
         ChatStreamControl control = new ChatStreamControl();
         ChatSseHeartbeat.Lease heartbeatLease = heartbeat.start(session, control);
 
