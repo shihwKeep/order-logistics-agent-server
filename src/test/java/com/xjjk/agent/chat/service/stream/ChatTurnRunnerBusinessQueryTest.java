@@ -6,6 +6,7 @@ import com.xjjk.agent.aftersale.tool.AfterSaleToolAvailability;
 import com.xjjk.agent.chat.action.ChatActionDispatcher;
 import com.xjjk.agent.chat.api.dto.ChatActionRequest;
 import com.xjjk.agent.chat.api.dto.ChatStreamRequest;
+import com.xjjk.agent.chat.config.ChatStreamProperties;
 import com.xjjk.agent.chat.domain.ChatTurnContext;
 import com.xjjk.agent.chat.domain.memory.ChatContextSelection;
 import com.xjjk.agent.chat.result.ChatToolResultRecorder;
@@ -20,6 +21,7 @@ import com.xjjk.agent.chat.stream.ChatStreamControl;
 import com.xjjk.agent.customer.service.CustomerOrderQueryService;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.memory.answer.DeterministicUserMemoryAnswerService;
+import com.xjjk.agent.memory.answer.DeterministicUserMemoryAnswerResult;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCommandResult;
 import com.xjjk.agent.memory.service.ExplicitMemoryCommandService;
 import com.xjjk.agent.order.service.OrderQueryGateway;
@@ -35,8 +37,11 @@ import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.time.OffsetDateTime;
+import java.time.Duration;
+import java.io.IOException;
 import java.util.List;
 import java.util.Set;
 
@@ -164,6 +169,102 @@ class ChatTurnRunnerBusinessQueryTest {
                 .isEqualTo(FreshBusinessResultGate.MISSING_RESULT_MESSAGE);
         assertThat(executionCaptor.getValue().resultSnapshot()).isEmpty();
         verify(sessionOne, never()).delta(hallucinated);
+    }
+
+    @Test
+    void retriesTransientModelStreamFailureBeforePublishingText() throws Exception {
+        ChatTurnContext turn = turn("request-5", "user-5", "assistant-5");
+        when(preparationService.prepare(null, IDENTITY, MESSAGE)).thenReturn(turn);
+        when(planner.plan(MESSAGE)).thenReturn(
+                BusinessQueryPlan.modelRequired(Set.of("after-sale-detail")));
+        when(contextService.prepare(eq(turn), eq(MESSAGE), any(ChatStreamControl.class)))
+                .thenReturn(org.mockito.Mockito.mock(ChatContextSelection.class));
+        when(aiChatService.stream(eq(MESSAGE), any(), any()))
+                .thenReturn(
+                        Flux.error(new RuntimeException(
+                                new IOException("connection reset"))),
+                        Flux.just(response("重试后的完整回答")));
+
+        ChatTurnRunner runner = runner();
+        runner.setModelRetryProperties(new ChatStreamProperties.ModelRetry(
+                3, Duration.ZERO, Duration.ZERO, 0.0));
+        runner.run(
+                new ChatStreamRequest(null, MESSAGE, null),
+                IDENTITY,
+                new ChatStreamControl(),
+                sessionOne,
+                "fallback-5");
+
+        verify(aiChatService, times(2)).stream(eq(MESSAGE), any(), any());
+        verify(sessionOne).delta(FreshBusinessResultGate.MISSING_RESULT_MESSAGE);
+    }
+
+    @Test
+    void reportsRetryExhaustedWhenTransientModelFailureCannotRecover() throws Exception {
+        ChatTurnContext turn = turn("request-6", "user-6", "assistant-6");
+        when(preparationService.prepare(null, IDENTITY, MESSAGE)).thenReturn(turn);
+        when(planner.plan(MESSAGE)).thenReturn(
+                BusinessQueryPlan.modelRequired(Set.of("after-sale-detail")));
+        when(contextService.prepare(eq(turn), eq(MESSAGE), any(ChatStreamControl.class)))
+                .thenReturn(org.mockito.Mockito.mock(ChatContextSelection.class));
+        when(aiChatService.stream(eq(MESSAGE), any(), any()))
+                .thenReturn(Flux.error(new RuntimeException(
+                        new IOException("connection reset"))));
+
+        ChatTurnRunner runner = runner();
+        runner.setModelRetryProperties(new ChatStreamProperties.ModelRetry(
+                1, Duration.ZERO, Duration.ZERO, 0.0));
+        ChatStreamControl control = new ChatStreamControl();
+        runner.run(
+                new ChatStreamRequest(null, MESSAGE, null),
+                IDENTITY,
+                control,
+                sessionOne,
+                "fallback-6");
+
+        ArgumentCaptor<ChatTurnExecution> executionCaptor =
+                ArgumentCaptor.forClass(ChatTurnExecution.class);
+        verify(finalizer).finish(executionCaptor.capture(), eq(control), eq(sessionOne));
+        assertThat(executionCaptor.getValue().error.code())
+                .isEqualTo("MODEL_STREAM_RETRY_EXHAUSTED");
+        verify(aiChatService).stream(eq(MESSAGE), any(), any());
+    }
+
+    @Test
+    void doesNotRetryAfterOrdinaryAnswerTextWasSent() throws Exception {
+        ChatTurnContext turn = turn("request-7", "user-7", "assistant-7");
+        when(preparationService.prepare(null, IDENTITY, MESSAGE)).thenReturn(turn);
+        when(planner.plan(MESSAGE)).thenReturn(BusinessQueryPlan.general());
+        when(directMemoryService.answer(eq(IDENTITY), eq(MESSAGE), anyString()))
+                .thenReturn(DeterministicUserMemoryAnswerResult.notHandled());
+        when(contextService.prepare(eq(turn), eq(MESSAGE), any(ChatStreamControl.class)))
+                .thenReturn(org.mockito.Mockito.mock(ChatContextSelection.class));
+        when(aiChatService.stream(eq(MESSAGE), any(), any()))
+                .thenReturn(Flux.concat(
+                        Flux.just(response("已经发送的片段", "stop")),
+                        Mono.delay(Duration.ofMillis(20))
+                                .thenMany(Flux.error(new RuntimeException(
+                                        new IOException("connection reset"))))));
+
+        ChatTurnRunner runner = runner();
+        runner.setModelRetryProperties(new ChatStreamProperties.ModelRetry(
+                3, Duration.ZERO, Duration.ZERO, 0.0));
+        runner.run(
+                new ChatStreamRequest(null, MESSAGE, null),
+                IDENTITY,
+                new ChatStreamControl(),
+                sessionOne,
+                "fallback-7");
+
+        ArgumentCaptor<ChatTurnExecution> ordinaryExecutionCaptor =
+                ArgumentCaptor.forClass(ChatTurnExecution.class);
+        verify(finalizer).finish(
+                ordinaryExecutionCaptor.capture(), any(ChatStreamControl.class), eq(sessionOne));
+        assertThat(ordinaryExecutionCaptor.getValue().queryPlan.mode())
+                .isEqualTo(com.xjjk.agent.chat.routing.BusinessQueryMode.GENERAL);
+        assertThat(ordinaryExecutionCaptor.getValue().isModelTextSent()).isTrue();
+        verify(aiChatService).stream(eq(MESSAGE), any(), any());
+        verify(sessionOne).delta("已经发送的片段");
     }
 
     private ChatTurnRunner runner() {

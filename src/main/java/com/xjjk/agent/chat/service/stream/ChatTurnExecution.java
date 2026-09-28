@@ -27,6 +27,8 @@ final class ChatTurnExecution {
     String requestId;
     /** 模型已经返回的部分正文，先积累再向客户端发送。 */
     final StringBuilder content = new StringBuilder();
+    /** 普通问答是否已经向前端发送正文；发送后不能重试，以免重复渲染。 */
+    private boolean modelTextSent;
     /** 工具已经生成并通过序列化、大小校验的结构化结果。 */
     private final List<PendingMessageResult> results = new ArrayList<>();
     /** 模型实时查询产生、尚未通过本轮结果类型校验的结构化结果。 */
@@ -112,6 +114,22 @@ final class ChatTurnExecution {
     void replaceContent(String value) {
         content.setLength(0);
         content.append(Objects.requireNonNull(value, "替换正文不能为空"));
+    }
+
+    /** 重试模型流前丢弃本次未完成且尚未发布的缓冲正文。 */
+    void truncateContent(int length) {
+        if (length < 0 || length > content.length()) {
+            throw new IllegalArgumentException("正文回滚位置无效");
+        }
+        content.setLength(length);
+    }
+
+    void markModelTextSent() {
+        modelTextSent = true;
+    }
+
+    boolean isModelTextSent() {
+        return modelTextSent;
     }
 
     /** 标记缓冲正文已完成证据校验，统一收尾不得再次覆盖。 */

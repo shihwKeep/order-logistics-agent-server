@@ -28,6 +28,8 @@ public final class AgentTurnTelemetry {
             "SUCCESS", "FAILED", "TIMEOUT", "CANCELLED", "OUTPUT_ERROR",
             "OUTPUT_LIMIT", "EMPTY_RESPONSE", "INCOMPLETE", "REJECTED",
             "PERSISTENCE_FAILED", "STALE_REQUEST", "UNKNOWN");
+    private static final Set<String> MODEL_RETRY_OUTCOMES = Set.of(
+            "SCHEDULED", "EXHAUSTED", "UNKNOWN");
     private static final Set<String> INTENTS = Set.of(
             "EXPLICIT_MEMORY", "ACTION", "DIRECT_BUSINESS", "MEMORY_RECALL",
             "MODEL_REQUIRED", "KNOWLEDGE", "GENERAL", "UNKNOWN");
@@ -171,6 +173,14 @@ public final class AgentTurnTelemetry {
                 "model_family", family,
                 "outcome", boundedUpper(metrics.status(), OUTCOMES, "UNKNOWN"),
                 "finish_reason", finishReason(metrics.finishReason()))
+                .increment();
+    }
+
+    /** 记录模型流重试，不把 requestId 或异常全文放进 Prometheus 标签。 */
+    public void recordModelRetry(String outcome) {
+        meters.counter(
+                "agent.model.stream.retry",
+                "outcome", boundedUpper(outcome, MODEL_RETRY_OUTCOMES, "UNKNOWN"))
                 .increment();
     }
 

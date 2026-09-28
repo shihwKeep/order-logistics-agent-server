@@ -176,6 +176,27 @@ class AgentTurnTelemetryTest {
                 .meters()).isEmpty();
     }
 
+    @Test
+    void recordsModelStreamRetryOutcomeWithLowCardinalityLabels() {
+        SimpleMeterRegistry meters = new SimpleMeterRegistry();
+        AgentTurnTelemetry telemetry = new AgentTurnTelemetry(
+                meters, ObservationRegistry.create());
+
+        telemetry.recordModelRetry("scheduled");
+        telemetry.recordModelRetry("exhausted");
+        telemetry.recordModelRetry("unexpected");
+
+        assertThat(meters.counter(
+                "agent.model.stream.retry", "outcome", "SCHEDULED").count())
+                .isEqualTo(1D);
+        assertThat(meters.counter(
+                "agent.model.stream.retry", "outcome", "EXHAUSTED").count())
+                .isEqualTo(1D);
+        assertThat(meters.counter(
+                "agent.model.stream.retry", "outcome", "UNKNOWN").count())
+                .isEqualTo(1D);
+    }
+
     private AtomicReference<Observation.Context> captureStopped(
             ObservationRegistry registry
     ) {

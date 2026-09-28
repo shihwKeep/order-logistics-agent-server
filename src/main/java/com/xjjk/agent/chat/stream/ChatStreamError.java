@@ -9,6 +9,12 @@ public record ChatStreamError(String code, String message) {
         return new ChatStreamError("CHAT_PREPARATION_FAILED", "聊天准备失败，请稍后重试");
     }
 
+    public static ChatStreamError modelStreamRetryExhausted() {
+        return new ChatStreamError(
+                "MODEL_STREAM_RETRY_EXHAUSTED",
+                "模型服务连接暂时不稳定，自动重试后仍未恢复，请稍后再试");
+    }
+
     /** 将内部结果状态转换为安全的对外错误信息。 */
     public static ChatStreamError forStatus(MessageStatus status) {
         return switch (status) {
