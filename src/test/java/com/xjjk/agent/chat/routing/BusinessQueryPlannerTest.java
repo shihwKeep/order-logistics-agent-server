@@ -70,6 +70,9 @@ class BusinessQueryPlannerTest {
                 .containsExactly("knowledge-citations");
         assertThat(planner.plan("运费怎么算").acceptedResultKinds())
                 .containsExactly("knowledge-citations");
+        assertThat(planner.plan("公司明年春节期间物流异常的特殊赔偿金额是多少？")
+                .acceptedResultKinds())
+                .containsExactly("knowledge-citations");
         assertThat(planner.plan("商品怎么上架").acceptedResultKinds())
                 .containsExactly("knowledge-citations");
         assertThat(planner.plan("介绍一下你自己"))
@@ -84,6 +87,36 @@ class BusinessQueryPlannerTest {
                 "QUERY_ORDER_LOGISTICS", "logistics-timeline");
         assertThat(planner.plan("鱼油还有库存吗").acceptedResultKinds())
                 .containsExactly("product-list");
+    }
+
+    @Test
+    void routesBusinessFactAndEnterpriseRuleToCompositeWorkflow() {
+        BusinessQueryPlan plan = planner.plan(
+                "查询订单 XJTS0120260820000011 的最新物流，并根据物流规则判断是否需要预警");
+
+        assertThat(plan.mode()).isEqualTo(BusinessQueryMode.COMPOSITE);
+        assertThat(plan.acceptedResultKinds())
+                .containsExactlyInAnyOrder("logistics-timeline", "knowledge-citations");
+        assertThat(plan.compositePlan()).isNotNull();
+    }
+
+    @Test
+    void keepsRuleOnlyQuestionOnKnowledgePath() {
+        BusinessQueryPlan plan = planner.plan("物流轨迹超过24小时没有更新应该怎么处理");
+
+        assertThat(plan.mode()).isEqualTo(BusinessQueryMode.MODEL_REQUIRED);
+        assertThat(plan.acceptedResultKinds()).containsExactly("knowledge-citations");
+        assertThat(plan.compositePlan()).isNull();
+    }
+
+    @Test
+    void leavesOrdinaryAnalysisGeneralAndDoesNotInventExternalSource() {
+        BusinessQueryPlan ordinary = planner.plan("请总结客服回答的注意事项");
+        assertThat(ordinary.mode()).isEqualTo(BusinessQueryMode.GENERAL);
+
+        BusinessQueryPlan market = planner.plan(
+                "订单 XJTS0120260820000011 中的商品当前市场价格区间是多少");
+        assertThat(market.requiresExternalSource()).isFalse();
     }
 
     @Test

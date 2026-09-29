@@ -2,6 +2,8 @@ package com.xjjk.agent.chat.routing;
 
 import com.xjjk.agent.chat.api.dto.ChatActionRequest;
 import com.xjjk.agent.chat.config.BusinessQueryEnforcementProperties;
+import com.xjjk.agent.chat.orchestration.CompositeQueryIntent;
+import com.xjjk.agent.chat.orchestration.CompositeQueryPlan;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -67,6 +69,13 @@ public class BusinessQueryPlanner {
             return BusinessQueryPlan.general();
         }
 
+        // 复合问题先进入显式工作流，避免实时查询和知识库规则被模型混在一次工具循环中。
+        CompositeQueryPlan compositePlan = compositePlanFor(
+                message, product, customer, order, logistics, afterSale);
+        if (compositePlan != null) {
+            return BusinessQueryPlan.composite(compositePlan);
+        }
+
         int domains = count(product, customer, logistics, afterSale);
         // 单一物流意图且能提取完整订单号时，直接执行固定物流动作，减少一次模型决策。
         if (domains == 1 && logistics) {
@@ -105,6 +114,44 @@ public class BusinessQueryPlanner {
         return acceptedKinds.isEmpty()
                 ? BusinessQueryPlan.general()
                 : BusinessQueryPlan.modelRequired(acceptedKinds);
+    }
+
+    /** 只为已能安全提取公开业务标识的组合问题创建复合计划。 */
+    private CompositeQueryPlan compositePlanFor(
+            String message,
+            boolean product,
+            boolean customer,
+            boolean order,
+            boolean logistics,
+            boolean afterSale) {
+        if (!containsAny(message, "规则", "政策", "制度", "流程", "规范", "阈值",
+                "判断是否", "是否需要", "如何处理", "怎么处理", "是否符合")) {
+            return null;
+        }
+        String orderCode = find(ORDER_CODE, message);
+        if (logistics && orderCode != null) {
+            return CompositeQueryPlan.of(java.util.List.of(
+                    CompositeQueryIntent.logistics(orderCode),
+                    CompositeQueryIntent.knowledge(message)));
+        }
+        if (order && orderCode != null) {
+            return CompositeQueryPlan.of(java.util.List.of(
+                    CompositeQueryIntent.order(orderCode),
+                    CompositeQueryIntent.knowledge(message)));
+        }
+        String customerCode = find(CUSTOMER_CODE, message);
+        if (customer && order && customerCode != null) {
+            return CompositeQueryPlan.of(java.util.List.of(
+                    CompositeQueryIntent.customerOrders(customerCode),
+                    CompositeQueryIntent.knowledge(message)));
+        }
+        String afterSaleCode = find(AFTER_SALE_CODE, message);
+        if (afterSale && afterSaleCode != null) {
+            return CompositeQueryPlan.of(java.util.List.of(
+                    CompositeQueryIntent.afterSale(afterSaleCode),
+                    CompositeQueryIntent.knowledge(message)));
+        }
+        return null;
     }
 
     /** 根据本轮涉及的业务域生成结构化结果类型白名单。 */
@@ -165,7 +212,9 @@ public class BusinessQueryPlanner {
         boolean asksRuleOrBoundary = containsAny(
                 message, "期限", "多久", "几天", "条件", "情况", "是否可以", "能不能",
                 "可以吗", "怎么办", "怎么", "怎样", "怎么算", "如何", "哪些", "为什么", "要求",
-                "标准", "规则", "规定", "政策", "制度", "流程", "规范", "含义", "意思");
+                "标准", "规则", "规定", "政策", "制度", "流程", "规范", "含义", "意思",
+                // “赔偿金额/赔付标准是多少”属于企业政策问答；没有业务编号时不能误送实时查询。
+                "赔偿", "赔付", "补偿", "金额", "额度");
         // “介绍一下你自己”等普通对话不能仅因问句样式被送入企业知识库。
         return knowledgeDomain && (explicitKnowledgeQuestion || asksRuleOrBoundary);
     }
