@@ -8,7 +8,7 @@ import java.util.Set;
 /** 已经过安全路由的复合查询计划。 */
 public record CompositeQueryPlan(
         List<CompositeQueryIntent> intents,
-        boolean requiresExternalSource) {
+        boolean requiresExternalSource) implements java.io.Serializable {
 
     public CompositeQueryPlan {
         Objects.requireNonNull(intents, "复合意图不能为空");

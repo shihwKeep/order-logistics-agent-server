@@ -6,7 +6,7 @@ import java.util.Objects;
 public record CompositeQueryIntent(
         Source source,
         String value,
-        String resultKind) {
+        String resultKind) implements java.io.Serializable {
 
     public enum Source {
         BUSINESS,
@@ -16,7 +16,10 @@ public record CompositeQueryIntent(
 
     public CompositeQueryIntent {
         source = Objects.requireNonNull(source, "信息源不能为空");
-        value = requireText(value, "查询值不能为空");
+        value = value == null ? "" : value.strip();
+        if (value.codePoints().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException("查询值不能包含控制字符");
+        }
         resultKind = requireText(resultKind, "结果类型不能为空");
     }
 
