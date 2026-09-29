@@ -9,6 +9,7 @@ import com.xjjk.agent.chat.domain.memory.ChatContextSelection;
 import com.xjjk.agent.chat.observation.AgentTurnTelemetry;
 import com.xjjk.agent.chat.service.memory.ChatContextPreparationService;
 import com.xjjk.agent.chat.service.model.AiChatService;
+import com.xjjk.agent.chat.orchestration.CompositeQueryService;
 import com.xjjk.agent.chat.result.ChatToolResultRecorder;
 import com.xjjk.agent.chat.result.PendingMessageResult;
 import com.xjjk.agent.chat.routing.BusinessQueryMode;
@@ -20,6 +21,7 @@ import com.xjjk.agent.chat.stream.ChatStreamControl;
 import com.xjjk.agent.chat.stream.ChatStreamError;
 import com.xjjk.agent.common.exception.BusinessException;
 import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.knowledge.tool.KnowledgeQueryTools;
 import com.xjjk.agent.memory.answer.DeterministicUserMemoryAnswerResult;
 import com.xjjk.agent.memory.answer.DeterministicUserMemoryAnswerService;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCommandResult;
@@ -31,13 +33,16 @@ import com.xjjk.agent.tool.observation.ToolCallMetrics;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import reactor.core.publisher.Flux;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
+import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.function.Supplier;
 
@@ -67,6 +72,8 @@ public class ChatTurnRunner {
     private final DeterministicUserMemoryAnswerService deterministicMemoryAnswerService;
     private AgentTurnTelemetry turnTelemetry;
     private ToolCallMetrics toolCallMetrics;
+    private KnowledgeQueryTools knowledgeQueryTools;
+    private CompositeQueryService compositeQueryService;
     private ChatStreamProperties.ModelRetry modelRetryProperties =
             ChatStreamProperties.ModelRetry.defaults();
 
@@ -80,6 +87,18 @@ public class ChatTurnRunner {
     @Autowired
     void setToolCallMetrics(ToolCallMetrics toolCallMetrics) {
         this.toolCallMetrics = toolCallMetrics;
+    }
+
+    /** 知识库两阶段链路使用的真实检索工具；保持可选 setter 以兼容现有单元测试组装。 */
+    @Autowired
+    void setKnowledgeQueryTools(KnowledgeQueryTools knowledgeQueryTools) {
+        this.knowledgeQueryTools = knowledgeQueryTools;
+    }
+
+    /** 复合查询编排保持可选 setter，兼容现有单元测试的手工组装方式。 */
+    @Autowired
+    void setCompositeQueryService(CompositeQueryService compositeQueryService) {
+        this.compositeQueryService = compositeQueryService;
     }
 
     /** 模型重试不改变既有构造签名，单元测试也可注入零延迟配置。 */
@@ -249,6 +268,17 @@ public class ChatTurnRunner {
                     identity,
                     session,
                     execution);
+            return;
+        }
+
+        /*
+         * 意图三-B：服务端复合查询编排。
+         * 业务事实和企业知识分别由 LangGraph4j 工作流取得并校验，随后只把
+         * 验证上下文交给无工具二阶段模型生成，避免一次模型工具循环混淆来源。
+         */
+        if (queryPlan.mode() == BusinessQueryMode.COMPOSITE) {
+            executeCompositeQuery(
+                    request, identity, control, session, execution, queryPlan);
             return;
         }
 
@@ -433,17 +463,70 @@ public class ChatTurnRunner {
         }
     }
 
-    private void consumeModelAttempt(
-            String message,
-            ChatContextSelection selection,
-            AgentToolRequestContext toolContext,
+    private void executeCompositeQuery(
+            ChatStreamRequest request,
+            AgentIdentity identity,
             ChatStreamControl control,
             ChatEventPublisher session,
-            ChatTurnExecution execution
-    ) throws IOException {
-        try (var responses = aiChatService
-                .stream(message, selection, toolContext)
-                .toStream(1)) {
+            ChatTurnExecution execution,
+            BusinessQueryPlan queryPlan) throws IOException {
+        if (compositeQueryService == null) {
+            throw new IllegalStateException("复合查询服务未注入");
+        }
+        execution.intent("COMPOSITE");
+        observeStage("intent.route", () -> { });
+        if (control.isStopRequested()) {
+            return;
+        }
+        CompositeQueryService.CompositeQueryResult composite = observeStage(
+                "composite.query", () -> compositeQueryService.execute(
+                        queryPlan.compositePlan(), request.message(), identity,
+                        execution.requestId));
+        if (!composite.success()) {
+            execution.replaceContent(composite.safeMessage());
+            execution.resolveBufferedOutput();
+            session.generating();
+            session.delta(composite.safeMessage());
+            execution.metrics.markFirstDeltaSent();
+            execution.status = MessageStatus.SUCCESS;
+            execution.finishReason = "COMPOSITE_INCOMPLETE";
+            execution.error = null;
+            return;
+        }
+
+        ChatContextSelection selection = observeStage("context.load", () ->
+                contextService.prepare(execution.turn, request.message(), control));
+        if (control.isStopRequested()) {
+            return;
+        }
+        for (ToolUiResult result : composite.uiResults()) {
+            publishToolResult(result, session, execution);
+        }
+        session.generating();
+        execution.error = ChatStreamError.forStatus(MessageStatus.FAILED);
+        observeIoStage("model.stream", () -> consumeGroundedComposite(
+                request.message(), selection, composite.verifiedAnswerContext(),
+                control, session, execution));
+        if (!control.isStopRequested()) {
+            execution.status = completedStatus(execution);
+            execution.error = ChatStreamError.forStatus(execution.status);
+            if (execution.status == MessageStatus.SUCCESS) {
+                observeIoStage("result.gate", () ->
+                        freshBusinessResultGate.flush(execution, session));
+            }
+        }
+    }
+
+    private void consumeGroundedComposite(
+            String message,
+            ChatContextSelection selection,
+            String verifiedAnswerContext,
+            ChatStreamControl control,
+            ChatEventPublisher session,
+            ChatTurnExecution execution) throws IOException {
+        Flux<ChatResponse> modelStream = aiChatService.streamGroundedComposite(
+                message, selection, verifiedAnswerContext);
+        try (var responses = modelStream.toStream(1)) {
             var iterator = responses.iterator();
             while (!control.isStopRequested() && iterator.hasNext()) {
                 ChatResponse response = iterator.next();
@@ -453,6 +536,62 @@ public class ChatTurnRunner {
                 acceptResponse(response, session, execution);
             }
         }
+    }
+
+    private void consumeModelAttempt(
+            String message,
+            ChatContextSelection selection,
+            AgentToolRequestContext toolContext,
+            ChatStreamControl control,
+            ChatEventPublisher session,
+            ChatTurnExecution execution
+    ) throws IOException {
+        var modelStream = knowledgePlan(execution)
+                ? streamGroundedKnowledge(message, selection, toolContext, control)
+                : aiChatService.stream(
+                        message, selection, toolContext, execution.queryPlan());
+        try (var responses = modelStream.toStream(1)) {
+            var iterator = responses.iterator();
+            while (!control.isStopRequested() && iterator.hasNext()) {
+                ChatResponse response = iterator.next();
+                if (control.isStopRequested()) {
+                    break;
+                }
+                acceptResponse(response, session, execution);
+            }
+        }
+    }
+
+    /**
+     * 知识库计划先直接执行一次后端检索，再调用无工具模型生成最终回答。
+     * ToolContext 仍携带服务端身份、requestId、结果发布器和单轮 Guard，
+     * 因而不会绕过原有权限校验、引用暂存或下游保护逻辑。
+     */
+    private Flux<ChatResponse> streamGroundedKnowledge(
+            String message,
+            ChatContextSelection selection,
+            AgentToolRequestContext toolContext,
+            ChatStreamControl control) {
+        if (knowledgeQueryTools == null) {
+            throw new IllegalStateException("知识库工具未注入");
+        }
+        if (control.isStopRequested()) {
+            throw new CancellationException("知识检索前请求已停止");
+        }
+        String evidence = knowledgeQueryTools.searchKnowledge(
+                message,
+                new ToolContext(Map.of(
+                        AgentToolRequestContext.CONTEXT_KEY, toolContext)));
+        if (control.isStopRequested()) {
+            throw new CancellationException("知识检索后请求已停止");
+        }
+        return aiChatService.streamGroundedKnowledge(message, selection, evidence);
+    }
+
+    private boolean knowledgePlan(ChatTurnExecution execution) {
+        return execution.queryPlan.mode() == BusinessQueryMode.MODEL_REQUIRED
+                && execution.queryPlan.acceptedResultKinds()
+                .contains("knowledge-citations");
     }
 
     private void awaitRetry(Duration delay) {

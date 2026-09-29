@@ -29,15 +29,25 @@ public class FreshBusinessResultGate {
             "本轮未完成实时业务查询，请补充查询条件或稍后重试。";
     static final String NO_KNOWLEDGE_MESSAGE =
             "知识库中暂未找到相关规定，我不能在没有可靠依据的情况下给出业务结论。";
+    private static final Set<String> KNOWLEDGE_REFUSAL_MARKERS = Set.of(
+            "无法可靠依据确认",
+            "无法提供有效答复",
+            "无法提供有效回答",
+            "没有可靠依据",
+            "暂无可靠依据",
+            "暂未找到可靠依据",
+            "不能在没有可靠依据",
+            "无真实有效的金额依据",
+            "无法确认具体数值");
 
     /**
      * 在模型流正常结束后校验并一次性发布本轮暂存结果。
      *
-     * <p>MODEL_REQUIRED 路径中，模型正文和卡片先缓存在请求对象中。只有至少产生
+     * <p>MODEL_REQUIRED 和 COMPOSITE 路径中，模型正文和卡片先缓存在请求对象中。只有至少产生
      * 一个结果，且所有实际结果类型都在计划白名单内，才允许发送给前端并进入收尾落库。</p>
      */
     void flush(ChatTurnExecution execution, ChatEventPublisher session) throws IOException {
-        if (execution.queryPlan.mode() != BusinessQueryMode.MODEL_REQUIRED) {
+        if (!execution.buffersModelOutput()) {
             return;
         }
         List<StagedToolResult> staged = execution.stagedResultSnapshot();
@@ -48,8 +58,14 @@ public class FreshBusinessResultGate {
                 && execution.queryPlan.acceptedResultKinds().containsAll(actualKinds);
         boolean knowledgeRequired = execution.queryPlan.acceptedResultKinds()
                 .contains("knowledge-citations");
-        boolean grounded = !knowledgeRequired || (!staged.isEmpty()
-                && staged.stream().allMatch(this::isAnswerableKnowledge));
+        boolean grounded = !knowledgeRequired || (staged.stream()
+                .filter(value -> "knowledge-citations".equals(value.uiResult().kind()))
+                .findAny()
+                .map(this::isAnswerableKnowledge)
+                .orElse(false)
+                // 检索候选不等于最终可回答；模型明确拒答时不得把候选引用
+                // 伪装成已核验答案展示给用户。
+                && !containsKnowledgeRefusal(execution.content.toString()));
         if (!accepted || !grounded) {
             // 丢弃模型可能已经生成的“查询成功”话术，替换为固定安全提示。
             recordGateRejected(execution, staged);
@@ -133,6 +149,15 @@ public class FreshBusinessResultGate {
                 && staged.uiResult().data() instanceof KnowledgeRetrievalResult result
                 && result.answerable()
                 && !result.evidences().isEmpty();
+    }
+
+    /** 识别模型明确表示“证据不足/无法作答”的结论，避免引用卡片与正文互相矛盾。 */
+    private boolean containsKnowledgeRefusal(String content) {
+        if (content == null || content.isBlank()) {
+            return false;
+        }
+        String normalized = content.replaceAll("\\s+", "");
+        return KNOWLEDGE_REFUSAL_MARKERS.stream().anyMatch(normalized::contains);
     }
 
     /** 只记录类型集合和结果，不记录工具正文或业务敏感字段。 */

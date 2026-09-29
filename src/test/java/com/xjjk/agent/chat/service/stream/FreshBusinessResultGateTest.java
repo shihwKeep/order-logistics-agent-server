@@ -3,6 +3,8 @@ package com.xjjk.agent.chat.service.stream;
 import com.xjjk.agent.chat.domain.ChatTurnContext;
 import com.xjjk.agent.chat.result.PendingMessageResult;
 import com.xjjk.agent.chat.routing.BusinessQueryPlan;
+import com.xjjk.agent.chat.orchestration.CompositeQueryIntent;
+import com.xjjk.agent.chat.orchestration.CompositeQueryPlan;
 import com.xjjk.agent.chat.stream.ChatSseSession;
 import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
 import com.xjjk.agent.tool.ToolUiResult;
@@ -99,6 +101,56 @@ class FreshBusinessResultGateTest {
     }
 
     @Test
+    void rejectsKnowledgeCitationsWhenModelExplicitlyDeclinesToAnswer() throws Exception {
+        ChatTurnExecution execution = execution(
+                BusinessQueryPlan.modelRequired(Set.of("knowledge-citations")));
+        KnowledgeRetrievalResult answerable = new KnowledgeRetrievalResult(
+                true, List.of(new KnowledgeRetrievalResult.Evidence(
+                        2L, 3L, 4L, "chunk-1", "物流制度", "第七章",
+                        "本文仅为测试数据，不包含具体赔偿金额。", "{}", 0.91D,
+                        Set.of("KEYWORD"))),
+                "hybrid-v1", "NONE", "OK",
+                OffsetDateTime.parse("2026-09-09T12:00:00+08:00"));
+        ToolUiResult ui = new ToolUiResult(
+                "search_knowledge", "knowledge-citations", 1,
+                answerable.queriedAt(), answerable);
+        execution.stageResult(pending(1, "knowledge-citations"), ui);
+        execution.content.append("当前无法可靠依据确认具体数值，无法提供有效答复。");
+
+        gate.flush(execution, session);
+
+        verify(session, never()).result(any());
+        verify(session).delta(FreshBusinessResultGate.NO_KNOWLEDGE_MESSAGE);
+        assertThat(execution.content.toString())
+                .isEqualTo(FreshBusinessResultGate.NO_KNOWLEDGE_MESSAGE);
+        assertThat(execution.resultSnapshot()).isEmpty();
+    }
+
+    @Test
+    void rejectsKnowledgeCitationsWhenModelSaysAmountHasNoReliableBasis() throws Exception {
+        ChatTurnExecution execution = execution(
+                BusinessQueryPlan.modelRequired(Set.of("knowledge-citations")));
+        KnowledgeRetrievalResult answerable = new KnowledgeRetrievalResult(
+                true, List.of(new KnowledgeRetrievalResult.Evidence(
+                        2L, 3L, 4L, "chunk-1", "物流制度", "第七章",
+                        "本文仅为测试数据，不包含具体赔偿金额。", "{}", 0.91D,
+                        Set.of("KEYWORD"))),
+                "hybrid-v1", "NONE", "OK",
+                OffsetDateTime.parse("2026-09-09T12:00:00+08:00"));
+        ToolUiResult ui = new ToolUiResult(
+                "search_knowledge", "knowledge-citations", 1,
+                answerable.queriedAt(), answerable);
+        execution.stageResult(pending(1, "knowledge-citations"), ui);
+        execution.content.append("知识库中**无真实有效的金额依据**，当前无法确认具体数值。");
+
+        gate.flush(execution, session);
+
+        verify(session, never()).result(any());
+        verify(session).delta(FreshBusinessResultGate.NO_KNOWLEDGE_MESSAGE);
+        assertThat(execution.resultSnapshot()).isEmpty();
+    }
+
+    @Test
     void sanitizesUnverifiedBusinessOutputBeforePersistence() {
         ChatTurnExecution execution = execution(
                 BusinessQueryPlan.modelRequired(Set.of("order-list")));
@@ -168,6 +220,33 @@ class FreshBusinessResultGateTest {
                 "agent.tool.result",
                 "kind", "product-list",
                 "outcome", "GATE_REJECTED").count()).isEqualTo(1D);
+    }
+
+    @Test
+    void acceptsCompositeBusinessAndKnowledgeResultsTogether() throws Exception {
+        BusinessQueryPlan plan = BusinessQueryPlan.composite(CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.logistics("XJ202609290001"),
+                CompositeQueryIntent.knowledge("物流规则"))));
+        ChatTurnExecution execution = execution(plan);
+        execution.stageResult(pending(1, "logistics-timeline"), uiResult("logistics-timeline"));
+        KnowledgeRetrievalResult evidence = new KnowledgeRetrievalResult(
+                true, List.of(new KnowledgeRetrievalResult.Evidence(
+                        2L, 3L, 4L, "chunk-1", "物流制度", "第七章",
+                        "干线停滞超过阈值生成预警。", "{}", 0.91D,
+                        Set.of("KEYWORD"))),
+                "hybrid-v1", "NONE", "OK",
+                OffsetDateTime.parse("2026-09-09T12:00:00+08:00"));
+        execution.stageResult(
+                pending(2, "knowledge-citations"),
+                new ToolUiResult("search_knowledge", "knowledge-citations", 1,
+                        evidence.queriedAt(), evidence));
+        execution.content.append("已根据订单事实和企业规则完成分析");
+
+        gate.flush(execution, session);
+
+        verify(session, org.mockito.Mockito.times(2)).result(any(ToolUiResult.class));
+        assertThat(execution.resultSnapshot()).hasSize(2);
+        assertThat(execution.stagedResultSnapshot()).isEmpty();
     }
 
     private ChatTurnExecution execution(BusinessQueryPlan plan) {

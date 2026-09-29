@@ -6,6 +6,7 @@ import com.xjjk.agent.tool.ToolUiResult;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -43,8 +44,12 @@ public class CompositeQueryService {
                 CompositeQueryState state,
                 List<ToolUiResult> results,
                 List<KnowledgeRetrievalResult> knowledge) {
+            List<ToolUiResult> uiResults = new ArrayList<>(results);
+            knowledge.forEach(result -> uiResults.add(new ToolUiResult(
+                    "search_knowledge", "knowledge-citations", 1,
+                    result.queriedAt(), result)));
             Set<String> actual = new LinkedHashSet<>();
-            results.forEach(result -> actual.add(result.kind()));
+            uiResults.forEach(result -> actual.add(result.kind()));
             if (!knowledge.isEmpty()) {
                 actual.add("knowledge-citations");
             }
@@ -54,7 +59,7 @@ public class CompositeQueryService {
             return new CompositeQueryResult(
                     success,
                     state.finalStatus(),
-                    List.copyOf(results),
+                    List.copyOf(uiResults),
                     Set.copyOf(actual),
                     state.answerContext(),
                     success ? "" : safeMessage);

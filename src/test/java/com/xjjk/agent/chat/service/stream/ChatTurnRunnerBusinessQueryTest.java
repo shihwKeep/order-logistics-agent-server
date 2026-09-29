@@ -12,6 +12,9 @@ import com.xjjk.agent.chat.domain.memory.ChatContextSelection;
 import com.xjjk.agent.chat.result.ChatToolResultRecorder;
 import com.xjjk.agent.chat.result.PendingMessageResult;
 import com.xjjk.agent.chat.routing.BusinessQueryPlan;
+import com.xjjk.agent.chat.orchestration.CompositeQueryIntent;
+import com.xjjk.agent.chat.orchestration.CompositeQueryPlan;
+import com.xjjk.agent.chat.orchestration.CompositeQueryService;
 import com.xjjk.agent.chat.routing.BusinessQueryPlanner;
 import com.xjjk.agent.chat.service.memory.ChatContextPreparationService;
 import com.xjjk.agent.chat.service.model.AiChatService;
@@ -26,6 +29,7 @@ import com.xjjk.agent.memory.domain.ExplicitMemoryCommandResult;
 import com.xjjk.agent.memory.service.ExplicitMemoryCommandService;
 import com.xjjk.agent.order.service.OrderQueryGateway;
 import com.xjjk.agent.order.tool.OrderToolAvailability;
+import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
 import com.xjjk.agent.tool.ToolUiResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,6 +47,7 @@ import java.time.OffsetDateTime;
 import java.time.Duration;
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -85,6 +90,8 @@ class ChatTurnRunnerBusinessQueryTest {
     private AfterSaleToolAvailability afterSaleAvailability;
     @Mock
     private BusinessQueryPlanner planner;
+    @Mock
+    private CompositeQueryService compositeQueryService;
     @Mock
     private DeterministicUserMemoryAnswerService directMemoryService;
     @Mock
@@ -130,7 +137,7 @@ class ChatTurnRunnerBusinessQueryTest {
                 BusinessQueryPlan.modelRequired(Set.of("after-sale-detail")));
         when(contextService.prepare(eq(turn), eq(MESSAGE), any(ChatStreamControl.class)))
                 .thenReturn(org.mockito.Mockito.mock(ChatContextSelection.class));
-        when(aiChatService.stream(eq(MESSAGE), any(), any()))
+        when(aiChatService.stream(eq(MESSAGE), any(), any(), any(BusinessQueryPlan.class)))
                 .thenReturn(Flux.just(response(hallucinated)));
 
         ChatTurnRunner runner = runner();
@@ -155,7 +162,7 @@ class ChatTurnRunnerBusinessQueryTest {
                 BusinessQueryPlan.modelRequired(Set.of("order-list")));
         when(contextService.prepare(eq(turn), eq(MESSAGE), any(ChatStreamControl.class)))
                 .thenReturn(org.mockito.Mockito.mock(ChatContextSelection.class));
-        when(aiChatService.stream(eq(MESSAGE), any(), any()))
+        when(aiChatService.stream(eq(MESSAGE), any(), any(), any(BusinessQueryPlan.class)))
                 .thenReturn(Flux.just(response(hallucinated, "length")));
 
         ChatStreamControl control = new ChatStreamControl();
@@ -172,6 +179,57 @@ class ChatTurnRunnerBusinessQueryTest {
     }
 
     @Test
+    void compositeQueryPublishesVerifiedResultsAndStreamsGroundedAnswer() throws Exception {
+        String compositeMessage = "查询订单 XJ202609290001 的物流，并根据物流规则判断是否需要预警";
+        ChatTurnContext turn = turn("request-composite", "user-composite", "assistant-composite");
+        when(preparationService.prepare(null, IDENTITY, compositeMessage)).thenReturn(turn);
+        BusinessQueryPlan plan = BusinessQueryPlan.composite(CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.logistics("XJ202609290001"),
+                CompositeQueryIntent.knowledge(compositeMessage))));
+        when(planner.plan(compositeMessage)).thenReturn(plan);
+        when(contextService.prepare(eq(turn), eq(compositeMessage), any(ChatStreamControl.class)))
+                .thenReturn(org.mockito.Mockito.mock(ChatContextSelection.class));
+
+        OffsetDateTime queriedAt = OffsetDateTime.parse("2026-09-09T13:41:38+08:00");
+        ToolUiResult logistics = new ToolUiResult(
+                "get_order_logistics", "logistics-timeline", 1, queriedAt,
+                Map.of("status", "运输中"));
+        KnowledgeRetrievalResult evidence = new KnowledgeRetrievalResult(
+                true, List.of(new KnowledgeRetrievalResult.Evidence(
+                        2L, 3L, 4L, "chunk-1", "物流制度", "第七章",
+                        "干线停滞超过阈值生成预警。", "{}", 0.91D, Set.of("KEYWORD"))),
+                "hybrid-v1", "NONE", "OK", queriedAt);
+        ToolUiResult knowledge = new ToolUiResult(
+                "search_knowledge", "knowledge-citations", 1, queriedAt, evidence);
+        when(compositeQueryService.execute(
+                eq(plan.compositePlan()), eq(compositeMessage), eq(IDENTITY), anyString()))
+                .thenReturn(new CompositeQueryService.CompositeQueryResult(
+                        true, "SUCCESS", List.of(logistics, knowledge),
+                        Set.of("logistics-timeline", "knowledge-citations"),
+                        "业务事实：运输中\n企业知识依据：干线停滞超过阈值生成预警。", ""));
+        when(resultRecorder.prepare(any(ToolUiResult.class), eq(1)))
+                .thenReturn(pending(1, "logistics-timeline"));
+        when(resultRecorder.prepare(any(ToolUiResult.class), eq(2)))
+                .thenReturn(pending(2, "knowledge-citations"));
+        when(aiChatService.streamGroundedComposite(
+                eq(compositeMessage), any(), anyString()))
+                .thenReturn(Flux.just(response("建议核对当前节点后再决定是否预警")));
+
+        ChatTurnRunner runner = runner();
+        runner.run(new ChatStreamRequest(null, compositeMessage, null), IDENTITY,
+                new ChatStreamControl(), sessionOne, "fallback-composite");
+
+        verify(compositeQueryService).execute(
+                eq(plan.compositePlan()), eq(compositeMessage), eq(IDENTITY), anyString());
+        verify(aiChatService).streamGroundedComposite(
+                eq(compositeMessage), any(), anyString());
+        verify(sessionOne, times(2)).result(any(ToolUiResult.class));
+        verify(sessionOne).delta("建议核对当前节点后再决定是否预警");
+        verify(aiChatService, never()).stream(
+                anyString(), any(), any(), any(BusinessQueryPlan.class));
+    }
+
+    @Test
     void retriesTransientModelStreamFailureBeforePublishingText() throws Exception {
         ChatTurnContext turn = turn("request-5", "user-5", "assistant-5");
         when(preparationService.prepare(null, IDENTITY, MESSAGE)).thenReturn(turn);
@@ -179,7 +237,7 @@ class ChatTurnRunnerBusinessQueryTest {
                 BusinessQueryPlan.modelRequired(Set.of("after-sale-detail")));
         when(contextService.prepare(eq(turn), eq(MESSAGE), any(ChatStreamControl.class)))
                 .thenReturn(org.mockito.Mockito.mock(ChatContextSelection.class));
-        when(aiChatService.stream(eq(MESSAGE), any(), any()))
+        when(aiChatService.stream(eq(MESSAGE), any(), any(), any(BusinessQueryPlan.class)))
                 .thenReturn(
                         Flux.error(new RuntimeException(
                                 new IOException("connection reset"))),
@@ -195,7 +253,8 @@ class ChatTurnRunnerBusinessQueryTest {
                 sessionOne,
                 "fallback-5");
 
-        verify(aiChatService, times(2)).stream(eq(MESSAGE), any(), any());
+        verify(aiChatService, times(2)).stream(
+                eq(MESSAGE), any(), any(), any(BusinessQueryPlan.class));
         verify(sessionOne).delta(FreshBusinessResultGate.MISSING_RESULT_MESSAGE);
     }
 
@@ -207,7 +266,7 @@ class ChatTurnRunnerBusinessQueryTest {
                 BusinessQueryPlan.modelRequired(Set.of("after-sale-detail")));
         when(contextService.prepare(eq(turn), eq(MESSAGE), any(ChatStreamControl.class)))
                 .thenReturn(org.mockito.Mockito.mock(ChatContextSelection.class));
-        when(aiChatService.stream(eq(MESSAGE), any(), any()))
+        when(aiChatService.stream(eq(MESSAGE), any(), any(), any(BusinessQueryPlan.class)))
                 .thenReturn(Flux.error(new RuntimeException(
                         new IOException("connection reset"))));
 
@@ -227,7 +286,8 @@ class ChatTurnRunnerBusinessQueryTest {
         verify(finalizer).finish(executionCaptor.capture(), eq(control), eq(sessionOne));
         assertThat(executionCaptor.getValue().error.code())
                 .isEqualTo("MODEL_STREAM_RETRY_EXHAUSTED");
-        verify(aiChatService).stream(eq(MESSAGE), any(), any());
+        verify(aiChatService).stream(
+                eq(MESSAGE), any(), any(), any(BusinessQueryPlan.class));
     }
 
     @Test
@@ -239,7 +299,7 @@ class ChatTurnRunnerBusinessQueryTest {
                 .thenReturn(DeterministicUserMemoryAnswerResult.notHandled());
         when(contextService.prepare(eq(turn), eq(MESSAGE), any(ChatStreamControl.class)))
                 .thenReturn(org.mockito.Mockito.mock(ChatContextSelection.class));
-        when(aiChatService.stream(eq(MESSAGE), any(), any()))
+        when(aiChatService.stream(eq(MESSAGE), any(), any(), any(BusinessQueryPlan.class)))
                 .thenReturn(Flux.concat(
                         Flux.just(response("已经发送的片段", "stop")),
                         Mono.delay(Duration.ofMillis(20))
@@ -263,7 +323,8 @@ class ChatTurnRunnerBusinessQueryTest {
         assertThat(ordinaryExecutionCaptor.getValue().queryPlan.mode())
                 .isEqualTo(com.xjjk.agent.chat.routing.BusinessQueryMode.GENERAL);
         assertThat(ordinaryExecutionCaptor.getValue().isModelTextSent()).isTrue();
-        verify(aiChatService).stream(eq(MESSAGE), any(), any());
+        verify(aiChatService).stream(
+                eq(MESSAGE), any(), any(), any(BusinessQueryPlan.class));
         verify(sessionOne).delta("已经发送的片段");
     }
 
@@ -278,7 +339,7 @@ class ChatTurnRunnerBusinessQueryTest {
                 orderAvailability,
                 afterSaleGateway,
                 afterSaleAvailability);
-        return new ChatTurnRunner(
+        ChatTurnRunner runner = new ChatTurnRunner(
                 preparationService,
                 contextService,
                 aiChatService,
@@ -289,6 +350,8 @@ class ChatTurnRunnerBusinessQueryTest {
                 new FreshBusinessResultGate(),
                 memoryService,
                 directMemoryService);
+        runner.setCompositeQueryService(compositeQueryService);
+        return runner;
     }
 
     private ChatTurnContext turn(
@@ -327,8 +390,12 @@ class ChatTurnRunnerBusinessQueryTest {
     }
 
     private PendingMessageResult pending(String kind) {
+        return pending(1, kind);
+    }
+
+    private PendingMessageResult pending(int sequence, String kind) {
         return new PendingMessageResult(
-                1,
+                sequence,
                 "get_after_sale_detail",
                 kind,
                 1,
