@@ -14,28 +14,28 @@
 
 - 标题：`SSE重连结果`
 - 类型：Grafana time series
-- 查询：
+- 查询（显示最近 15 分钟累计次数）：
 
   ```promql
-  sum(rate(agent_chat_stream_resume_attempt_total[5m])) by (result)
+  sum(increase(agent_chat_stream_resume_attempt_total[15m])) by (result)
   ```
 
 - 图例：`{{result}}`
-- 单位：`reqps`
+- 单位：`short`
 - 用途：观察 `success`、`failure`、`rejected`、`not_found` 等断点恢复结果。
 
 ### 2. SSE 回放事件
 
 - 标题：`SSE回放事件`
 - 类型：Grafana time series
-- 查询：
+- 查询（显示最近 15 分钟累计次数）：
 
   ```promql
-  sum(rate(agent_chat_stream_replay_events_total[5m])) by (type)
+  sum(increase(agent_chat_stream_replay_events_total[15m])) by (type)
   ```
 
 - 图例：`{{type}}`
-- 单位：`reqps`
+- 单位：`short`
 - 用途：观察恢复期间 `session`、`status`、`delta`、`result`、`done` 等事件是否被回放。
 
 ## 布局与兼容性
@@ -50,4 +50,3 @@
 2. 新增面板包含准确的标题、PromQL、图例和单位。
 3. 执行一次 `AGENT_CHAT_STREAM_TEST_DISCONNECT_AFTER_MS=1000` 测试后，若 SSE 指标已采集，应能看到 `success` 曲线变化；若指标未采集，应明确显示 `No data`。
 4. 原有 Dashboard 面板数量、查询和布局不被意外修改。
-
