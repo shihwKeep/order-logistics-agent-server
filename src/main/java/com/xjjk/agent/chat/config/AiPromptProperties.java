@@ -2,6 +2,7 @@ package com.xjjk.agent.chat.config;
 
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.validation.annotation.Validated;
 
 @Validated
@@ -18,6 +19,10 @@ public record AiPromptProperties(
         String knowledgeAnswerBoundary
 
 ) {
+
+    @ConstructorBinding
+    public AiPromptProperties {
+    }
 
     /** 兼容不关心二阶段提示词的单元测试构造方式。 */
     public AiPromptProperties(String version, String system) {
