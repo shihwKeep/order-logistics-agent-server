@@ -31,7 +31,7 @@ Expected: existing panels use ids 1 through 8 and occupy rows through `y=24`.
 Add a time-series panel with id `9`, title `SSE重连结果`, grid position `{h:8,w:12,x:0,y:32}`, Prometheus target:
 
 ```promql
-sum(increase(agent_chat_stream_resume_attempt_total[15m])) by (result)
+round(sum(increase(agent_chat_stream_resume_attempt_total[15m])) by (result))
 ```
 
 Set legend format to `{{result}}`, unit to `short`, datasource UID to `prometheus`, and keep the existing panel schema style.
@@ -41,7 +41,7 @@ Set legend format to `{{result}}`, unit to `short`, datasource UID to `prometheu
 Add a time-series panel with id `10`, title `SSE回放事件`, grid position `{h:8,w:12,x:12,y:32}`, Prometheus target:
 
 ```promql
-sum(increase(agent_chat_stream_replay_events_total[15m])) by (type)
+round(sum(increase(agent_chat_stream_replay_events_total[15m])) by (type))
 ```
 
 Set legend format to `{{type}}`, unit to `short`, datasource UID to `prometheus`, and keep the existing panel schema style.
@@ -60,8 +60,8 @@ if ($dashboard.title -ne 'Agent Runtime') { throw 'unexpected dashboard title' }
 if ($dashboard.version -ne 5) { throw 'dashboard version was not bumped to 5' }
 $panel9 = $dashboard.panels | Where-Object id -eq 9
 $panel10 = $dashboard.panels | Where-Object id -eq 10
-if ($panel9.targets[0].expr -ne 'sum(increase(agent_chat_stream_resume_attempt_total[15m])) by (result)') { throw 'invalid reconnect query' }
-if ($panel10.targets[0].expr -ne 'sum(increase(agent_chat_stream_replay_events_total[15m])) by (type)') { throw 'invalid replay query' }
+if ($panel9.targets[0].expr -ne 'round(sum(increase(agent_chat_stream_resume_attempt_total[15m])) by (result))') { throw 'invalid reconnect query' }
+if ($panel10.targets[0].expr -ne 'round(sum(increase(agent_chat_stream_replay_events_total[15m])) by (type))') { throw 'invalid replay query' }
 Write-Output 'dashboard validation passed'
 ```
 

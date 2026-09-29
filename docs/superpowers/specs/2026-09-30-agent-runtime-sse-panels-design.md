@@ -17,7 +17,7 @@
 - 查询（显示最近 15 分钟累计次数）：
 
   ```promql
-  sum(increase(agent_chat_stream_resume_attempt_total[15m])) by (result)
+  round(sum(increase(agent_chat_stream_resume_attempt_total[15m])) by (result))
   ```
 
 - 图例：`{{result}}`
@@ -31,7 +31,7 @@
 - 查询（显示最近 15 分钟累计次数）：
 
   ```promql
-  sum(increase(agent_chat_stream_replay_events_total[15m])) by (type)
+  round(sum(increase(agent_chat_stream_replay_events_total[15m])) by (type))
   ```
 
 - 图例：`{{type}}`
