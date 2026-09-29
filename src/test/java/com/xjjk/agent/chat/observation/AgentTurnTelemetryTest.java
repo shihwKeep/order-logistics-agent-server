@@ -128,6 +128,28 @@ class AgentTurnTelemetryTest {
     }
 
     @Test
+    void recordsCompositeIntentAndWorkflowStage() {
+        SimpleMeterRegistry meters = new SimpleMeterRegistry();
+        ObservationRegistry observations = ObservationRegistry.create();
+        AgentTurnTelemetry telemetry = new AgentTurnTelemetry(meters, observations);
+
+        telemetry.run("resumable", "request-composite", "conversation-composite", () -> {
+            telemetry.observeStage("composite.query", () -> "verified");
+            telemetry.completeCurrent("SUCCESS", "COMPOSITE", "conversation-composite");
+        });
+
+        assertThat(meters.counter(
+                "agent.turn.completed",
+                "mode", "resumable",
+                "outcome", "SUCCESS",
+                "intent", "COMPOSITE").count()).isEqualTo(1D);
+        assertThat(meters.timer(
+                "agent.turn.stage.duration",
+                "stage", "composite.query",
+                "outcome", "SUCCESS").count()).isEqualTo(1L);
+    }
+
+    @Test
     void recordsStageFailureAndRethrowsOriginalException() {
         SimpleMeterRegistry meters = new SimpleMeterRegistry();
         AgentTurnTelemetry telemetry = new AgentTurnTelemetry(

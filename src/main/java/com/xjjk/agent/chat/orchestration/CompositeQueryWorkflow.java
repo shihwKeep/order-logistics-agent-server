@@ -6,6 +6,7 @@ import com.xjjk.agent.customer.service.CustomerOrderQueryResult;
 import com.xjjk.agent.customer.service.CustomerOrderQueryService;
 import com.xjjk.agent.customer.service.CustomerOrderResolution;
 import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.chat.observation.CompositeQueryMetrics;
 import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
 import com.xjjk.agent.knowledge.service.KnowledgeQueryGateway;
 import com.xjjk.agent.order.domain.OrderIdentifierType;
@@ -29,6 +30,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import static org.bsc.langgraph4j.StateGraph.END;
 import static org.bsc.langgraph4j.StateGraph.START;
@@ -45,6 +47,7 @@ public class CompositeQueryWorkflow {
     private final ProductSearchGateway productSearchGateway;
     private final AfterSaleQueryGateway afterSaleQueryGateway;
     private final KnowledgeQueryGateway knowledgeQueryGateway;
+    private CompositeQueryMetrics metrics;
 
     public CompositeQueryWorkflow(
             OrderQueryGateway orderGateway,
@@ -76,13 +79,24 @@ public class CompositeQueryWorkflow {
             graphInput.remove(CompositeQueryState.RESULTS);
             graphInput.remove(CompositeQueryState.KNOWLEDGE);
             CompositeQueryState finalState = graph.invoke(graphInput).orElseThrow();
+            if (metrics != null) {
+                metrics.graph(finalState.finalStatus());
+            }
             return CompositeQueryService.CompositeQueryResult.from(
                     finalState, context.results, context.knowledge);
         } catch (Exception exception) {
+            if (metrics != null) {
+                metrics.graph("FAILED");
+            }
             log.warn("composite_query_workflow_failed requestId={}, exceptionType={}",
                     requestId, exception.getClass().getSimpleName());
             return CompositeQueryService.CompositeQueryResult.failed();
         }
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void setMetrics(CompositeQueryMetrics metrics) {
+        this.metrics = metrics;
     }
 
     private CompiledGraph<CompositeQueryState> graph(
@@ -90,13 +104,21 @@ public class CompositeQueryWorkflow {
             String requestId,
             InvocationContext context) throws Exception {
         StateGraph<CompositeQueryState> graph = new StateGraph<>(CompositeQueryState::new)
-                .addNode("input.validate", node_async(state -> validateInput(state, context)))
-                .addNode("business.query", node_async(state -> queryBusiness(
-                        state, context, identity, requestId)))
-                .addNode("knowledge.query", node_async(state -> queryKnowledge(
-                        state, context, identity, requestId)))
-                .addNode("result.validate", node_async(state -> validateResults(state, context)))
-                .addNode("answer.compose", node_async(state -> composeAnswer(state, context)));
+                .addNode("input.validate", node_async(state -> observeNode(
+                        "input.validate", state,
+                        () -> validateInput(state, context))))
+                .addNode("business.query", node_async(state -> observeNode(
+                        "business.query", state,
+                        () -> queryBusiness(state, context, identity, requestId))))
+                .addNode("knowledge.query", node_async(state -> observeNode(
+                        "knowledge.query", state,
+                        () -> queryKnowledge(state, context, identity, requestId))))
+                .addNode("result.validate", node_async(state -> observeNode(
+                        "result.validate", state,
+                        () -> validateResults(state, context))))
+                .addNode("answer.compose", node_async(state -> observeNode(
+                        "answer.compose", state,
+                        () -> composeAnswer(state, context))));
         graph.addEdge(START, "input.validate");
         graph.addConditionalEdges(
                 "input.validate", edge_async(state -> routeAfterValidation(state, context)), Map.of(
@@ -152,9 +174,16 @@ public class CompositeQueryWorkflow {
         for (CompositeQueryIntent intent : context.plan.intents()) {
             if (intent.source() != CompositeQueryIntent.Source.BUSINESS) continue;
             try {
-                context.results.add(queryBusinessIntent(intent, identity, requestId));
+                ToolUiResult result = queryBusinessIntent(intent, identity, requestId);
+                context.results.add(result);
+                if (metrics != null) {
+                    metrics.result(result.kind(), "SUCCESS");
+                }
             } catch (RuntimeException exception) {
                 context.failures.add(intent.resultKind());
+                if (metrics != null) {
+                    metrics.result(intent.resultKind(), "FAILURE");
+                }
                 log.warn("composite_business_node_failed requestId={}, kind={}, exceptionType={}",
                         requestId, intent.resultKind(), exception.getClass().getSimpleName());
             }
@@ -216,8 +245,14 @@ public class CompositeQueryWorkflow {
             try {
                 context.knowledge.add(knowledgeQueryGateway.retrieve(
                         intent.value(), List.of(), identity, requestId));
+                if (metrics != null) {
+                    metrics.result("knowledge-citations", "SUCCESS");
+                }
             } catch (RuntimeException exception) {
                 context.failures.add("knowledge-citations");
+                if (metrics != null) {
+                    metrics.result("knowledge-citations", "FAILURE");
+                }
                 log.warn("composite_knowledge_node_failed requestId={}, exceptionType={}",
                         requestId, exception.getClass().getSimpleName());
             }
@@ -281,6 +316,15 @@ public class CompositeQueryWorkflow {
             return afterSale.afterSaleCode() + "，" + afterSale.statusText();
         }
         return "已取得结构化结果";
+    }
+
+    private Map<String, Object> observeNode(
+            String node,
+            CompositeQueryState state,
+            Supplier<Map<String, Object>> action) {
+        return metrics == null
+                ? action.get()
+                : metrics.node(node, state.requestId(), action);
     }
 
     private static final class InvocationContext {

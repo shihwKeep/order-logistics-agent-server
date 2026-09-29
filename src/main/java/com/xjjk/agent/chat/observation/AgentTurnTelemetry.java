@@ -32,10 +32,10 @@ public final class AgentTurnTelemetry {
             "SCHEDULED", "EXHAUSTED", "UNKNOWN");
     private static final Set<String> INTENTS = Set.of(
             "EXPLICIT_MEMORY", "ACTION", "DIRECT_BUSINESS", "MEMORY_RECALL",
-            "MODEL_REQUIRED", "KNOWLEDGE", "GENERAL", "UNKNOWN");
+            "MODEL_REQUIRED", "COMPOSITE", "KNOWLEDGE", "GENERAL", "UNKNOWN");
     private static final Set<String> STAGES = Set.of(
             "turn.prepare", "context.load", "intent.route", "model.stream",
-            "result.gate", "turn.finalize");
+            "composite.query", "result.gate", "turn.finalize");
     private static final int MAX_TRACE_IDENTIFIER_LENGTH = 128;
 
     private final MeterRegistry meters;
