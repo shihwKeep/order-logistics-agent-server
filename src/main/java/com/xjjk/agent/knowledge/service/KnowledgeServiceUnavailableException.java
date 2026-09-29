@@ -5,4 +5,8 @@ public final class KnowledgeServiceUnavailableException extends RuntimeException
     public KnowledgeServiceUnavailableException() {
         super("知识检索服务暂时不可用");
     }
+
+    public KnowledgeServiceUnavailableException(Throwable cause) {
+        super("知识检索服务暂时不可用", cause);
+    }
 }
