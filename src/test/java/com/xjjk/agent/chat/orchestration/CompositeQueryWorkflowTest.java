@@ -1,11 +1,14 @@
 package com.xjjk.agent.chat.orchestration;
 
 import com.xjjk.agent.customer.service.CustomerOrderQueryService;
+import com.xjjk.agent.customer.service.CustomerOrderQueryResult;
+import com.xjjk.agent.customer.service.CustomerOrderResolution;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
 import com.xjjk.agent.knowledge.service.KnowledgeQueryGateway;
 import com.xjjk.agent.order.domain.OrderIdentifierType;
 import com.xjjk.agent.order.domain.OrderLogisticsResult;
+import com.xjjk.agent.order.domain.OrderSearchResult;
 import com.xjjk.agent.order.service.OrderQueryGateway;
 import com.xjjk.agent.product.service.ProductSearchGateway;
 import com.xjjk.agent.aftersale.service.AfterSaleQueryGateway;
@@ -88,5 +91,39 @@ class CompositeQueryWorkflowTest {
 
         assertThat(result.success()).isFalse();
         assertThat(result.status()).isEqualTo("WAITING_INPUT");
+    }
+
+    @Test
+    void executesCustomerOrdersAndKnowledgeWithoutSendingCustomerCodeToOrderSearch() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-09-30T04:00:00+08:00");
+        OrderSearchResult orders = new OrderSearchResult(
+                OrderIdentifierType.CUSTOMER, 2, false, now, List.of());
+        when(customerOrderQueryService.query(
+                "C24101816040001", IDENTITY, "request-customer"))
+                .thenReturn(new CustomerOrderQueryResult(
+                        CustomerOrderResolution.FOUND,
+                        "C24101816040001", "张*", orders));
+        when(knowledgeQueryGateway.retrieve(eq("售后规则"), any(), eq(IDENTITY),
+                eq("request-customer"))).thenReturn(new KnowledgeRetrievalResult(
+                        true, List.of(new KnowledgeRetrievalResult.Evidence(
+                        1L, 2L, 3L, "chunk-1", "售后规则", "规则",
+                        "规则正文", "{}", 0.9, Set.of("kb"))),
+                        "v1", "NONE", "SUCCESS", now));
+
+        CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.customerOrders("C24101816040001"),
+                CompositeQueryIntent.knowledge("售后规则")));
+        CompositeQueryService.CompositeQueryResult result = new CompositeQueryService(
+                new CompositeQueryWorkflow(orderGateway, customerOrderQueryService,
+                        productSearchGateway, afterSaleQueryGateway, knowledgeQueryGateway))
+                .execute(plan, "客户订单是否符合售后规则", IDENTITY, "request-customer");
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.actualResultKinds())
+                .containsExactlyInAnyOrder("order-list", "knowledge-citations");
+        verify(customerOrderQueryService).query(
+                "C24101816040001", IDENTITY, "request-customer");
+        verify(orderGateway, org.mockito.Mockito.never()).search(
+                any(), any(), any(), any());
     }
 }

@@ -4,7 +4,6 @@ import com.xjjk.agent.aftersale.domain.AfterSaleDetailResult;
 import com.xjjk.agent.aftersale.service.AfterSaleQueryGateway;
 import com.xjjk.agent.customer.service.CustomerOrderQueryResult;
 import com.xjjk.agent.customer.service.CustomerOrderQueryService;
-import com.xjjk.agent.customer.service.CustomerOrderResolution;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.chat.observation.CompositeQueryMetrics;
 import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
@@ -207,6 +206,14 @@ public class CompositeQueryWorkflow {
                         result.queriedAt(), result);
             }
             case "order-list" -> {
+                if (intent.value().toUpperCase(java.util.Locale.ROOT).startsWith("C")) {
+                    CustomerOrderQueryResult result = customerOrderQueryService.query(
+                            intent.value(), identity, requestId);
+                    OffsetDateTime queriedAt = result.orders() == null
+                            ? now : result.orders().queriedAt();
+                    yield new ToolUiResult("list_customer_orders", "order-list", 1,
+                            queriedAt, result);
+                }
                 OrderSearchResult result = orderGateway.search(
                         intent.value(), OrderIdentifierType.AUTO, identity, requestId);
                 yield new ToolUiResult("search_orders", "order-list", 1,
@@ -308,6 +315,11 @@ public class CompositeQueryWorkflow {
         }
         if (data instanceof OrderSearchResult orders) {
             return "订单数量=" + orders.total();
+        }
+        if (data instanceof CustomerOrderQueryResult customerOrders) {
+            return customerOrders.orders() == null
+                    ? "客户订单查询状态=" + customerOrders.resolution()
+                    : "客户订单数量=" + customerOrders.orders().total();
         }
         if (data instanceof ProductSearchResult products) {
             return "商品数量=" + products.total();
