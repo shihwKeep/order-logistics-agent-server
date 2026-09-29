@@ -591,7 +591,10 @@ public class ChatTurnRunner {
     private boolean knowledgePlan(ChatTurnExecution execution) {
         return execution.queryPlan.mode() == BusinessQueryMode.MODEL_REQUIRED
                 && execution.queryPlan.acceptedResultKinds()
-                .contains("knowledge-citations");
+                .contains("knowledge-citations")
+                // Spring 运行时由 setter 注入真实知识工具；手工组装的旧调用方
+                // 没有该依赖时保留原有模型路径，避免把可选能力变成启动前置条件。
+                && knowledgeQueryTools != null;
     }
 
     private void awaitRetry(Duration delay) {
