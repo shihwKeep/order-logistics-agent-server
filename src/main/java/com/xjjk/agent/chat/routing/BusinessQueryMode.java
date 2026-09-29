@@ -9,5 +9,8 @@ public enum BusinessQueryMode {
     DIRECT,
 
     /** 需要模型选择工具或补全参数，但回答前必须验证本轮确实产生了业务结果。 */
-    MODEL_REQUIRED
+    MODEL_REQUIRED,
+
+    /** 同一问题需要两个或以上受控信息源，并由显式工作流编排。 */
+    COMPOSITE
 }

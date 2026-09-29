@@ -3,6 +3,7 @@ package com.xjjk.agent.chat.routing;
 import com.xjjk.agent.chat.api.dto.ChatActionRequest;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -30,5 +31,30 @@ class BusinessQueryPlanTest {
 
         assertThatIllegalArgumentException()
                 .isThrownBy(() -> BusinessQueryPlan.modelRequired(Set.of()));
+    }
+
+    @Test
+    void createsCompositePlanWithMultipleRequiredSources() {
+        var composite = com.xjjk.agent.chat.orchestration.CompositeQueryPlan.of(List.of(
+                com.xjjk.agent.chat.orchestration.CompositeQueryIntent.order(
+                        "XJ202609290001"),
+                com.xjjk.agent.chat.orchestration.CompositeQueryIntent.knowledge(
+                        "物流规则")));
+
+        BusinessQueryPlan plan = BusinessQueryPlan.composite(composite);
+
+        assertThat(plan.mode()).isEqualTo(BusinessQueryMode.COMPOSITE);
+        assertThat(plan.directAction()).isNull();
+        assertThat(plan.compositePlan()).isEqualTo(composite);
+        assertThat(plan.acceptedResultKinds())
+                .containsExactlyInAnyOrder("order-list", "knowledge-citations");
+    }
+
+    @Test
+    void rejectsCompositePlanWithOneSourceOrDirectAction() {
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> com.xjjk.agent.chat.orchestration.CompositeQueryPlan.of(
+                        List.of(com.xjjk.agent.chat.orchestration.CompositeQueryIntent.knowledge(
+                                "物流规则"))));
     }
 }
