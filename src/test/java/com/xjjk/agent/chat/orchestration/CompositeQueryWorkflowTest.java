@@ -9,6 +9,8 @@ import com.xjjk.agent.knowledge.service.KnowledgeQueryGateway;
 import com.xjjk.agent.order.domain.OrderIdentifierType;
 import com.xjjk.agent.order.domain.OrderLogisticsResult;
 import com.xjjk.agent.order.domain.OrderSearchResult;
+import com.xjjk.agent.order.domain.ShipmentTimeline;
+import com.xjjk.agent.order.domain.TrackNode;
 import com.xjjk.agent.order.service.OrderQueryGateway;
 import com.xjjk.agent.order.service.OrderServiceUnavailableException;
 import com.xjjk.agent.product.service.ProductSearchGateway;
@@ -53,7 +55,11 @@ class CompositeQueryWorkflowTest {
                 .thenReturn(new OrderLogisticsResult(
                         new OrderLogisticsResult.OrderSummary(
                                 "XJ202609290001", 20, "运输中"),
-                        now, false, List.of()));
+                        now, false, List.of(new ShipmentTimeline(
+                                "SF1001", "顺丰", "SUCCESS", "在途",
+                                "到达南京转运场",
+                                List.of(new TrackNode(
+                                        "2026-09-29 15:58:06", "南京市南京转运场", "到达南京转运场"))))));
         when(knowledgeQueryGateway.retrieve(eq("查询物流规则"), any(), eq(IDENTITY),
                 eq("request-1"))).thenReturn(new KnowledgeRetrievalResult(
                         true, List.of(new KnowledgeRetrievalResult.Evidence(
@@ -73,6 +79,8 @@ class CompositeQueryWorkflowTest {
         assertThat(result.actualResultKinds())
                 .containsExactlyInAnyOrder("logistics-timeline", "knowledge-citations");
         assertThat(result.verifiedAnswerContext()).contains("物流规则");
+        assertThat(result.verifiedAnswerContext())
+                .contains("最新轨迹时间=2026-09-29 15:58:06", "到达南京转运场");
         verify(orderGateway).logistics("XJ202609290001", OrderIdentifierType.ORDER_CODE,
                 IDENTITY, "request-1");
         verify(knowledgeQueryGateway).retrieve("查询物流规则", List.of(), IDENTITY, "request-1");

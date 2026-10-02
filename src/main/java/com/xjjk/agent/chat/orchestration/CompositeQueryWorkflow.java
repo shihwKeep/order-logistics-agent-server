@@ -316,7 +316,26 @@ public class CompositeQueryWorkflow {
 
     private String safeResultText(Object data) {
         if (data instanceof OrderLogisticsResult logistics) {
-            return logistics.order().orderCode() + "，" + logistics.order().statusText();
+            StringBuilder summary = new StringBuilder()
+                    .append(logistics.order().orderCode())
+                    .append("，订单状态=")
+                    .append(logistics.order().statusText());
+            if (logistics.shipments().isEmpty()) {
+                return summary.append("，未查询到运单轨迹").toString();
+            }
+            for (var shipment : logistics.shipments()) {
+                summary.append("；运单号=")
+                        .append(shipment.logisticsCode())
+                        .append("，运单状态=")
+                        .append(shipment.resultStatus())
+                        .append("，最新状态=")
+                        .append(shipment.latestStatusText())
+                        .append("，最新轨迹时间=")
+                        .append(latestTraceTime(shipment))
+                        .append("，最新轨迹=")
+                        .append(shipment.latestTrace());
+            }
+            return summary.toString();
         }
         if (data instanceof OrderSearchResult orders) {
             return "订单数量=" + orders.total();
@@ -333,6 +352,15 @@ public class CompositeQueryWorkflow {
             return afterSale.afterSaleCode() + "，" + afterSale.statusText();
         }
         return "已取得结构化结果";
+    }
+
+    /** 物流服务按最新优先返回轨迹，取首个有效时间供复合回答使用。 */
+    private String latestTraceTime(com.xjjk.agent.order.domain.ShipmentTimeline shipment) {
+        return shipment.traces().stream()
+                .map(com.xjjk.agent.order.domain.TrackNode::time)
+                .filter(time -> time != null && !time.isBlank())
+                .findFirst()
+                .orElse("未提供");
     }
 
     private Map<String, Object> observeNode(
