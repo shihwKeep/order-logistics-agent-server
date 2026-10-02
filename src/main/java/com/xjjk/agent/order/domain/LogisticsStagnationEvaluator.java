@@ -29,7 +29,20 @@ public final class LogisticsStagnationEvaluator {
     }
 
     public LogisticsStagnationAssessment evaluate(ShipmentTimeline shipment) {
+        return evaluate(shipment, null);
+    }
+
+    /**
+     * Evaluate a shipment, falling back to the order-level status when the
+     * shipment status is only a transport result marker such as "已更新".
+     */
+    public LogisticsStagnationAssessment evaluate(
+            ShipmentTimeline shipment,
+            String orderStatus) {
         Stage stage = Stage.from(shipment == null ? null : shipment.latestStatusText());
+        if (stage == Stage.UNKNOWN) {
+            stage = Stage.from(orderStatus);
+        }
         String latestTraceTime = latestTraceTime(shipment == null ? List.of() : shipment.traces());
         String evaluatedAt = ZonedDateTime.now(clock).toOffsetDateTime().toString();
         if (stage == Stage.UNKNOWN) {

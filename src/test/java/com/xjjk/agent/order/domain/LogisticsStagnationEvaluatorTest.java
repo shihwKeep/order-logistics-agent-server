@@ -64,6 +64,18 @@ class LogisticsStagnationEvaluatorTest {
         assertThat(assessment.reason()).contains("环节");
     }
 
+    @Test
+    void fallsBackToOrderStatusWhenShipmentStatusIsOnlyUpdateMarker() {
+        ShipmentTimeline shipment = shipment("已更新", "2026-08-20 15:58:06");
+
+        LogisticsStagnationAssessment assessment = evaluator.evaluate(shipment, "在途");
+
+        assertThat(assessment.status())
+                .isEqualTo(LogisticsStagnationAssessment.Status.EXCEEDED);
+        assertThat(assessment.stage()).isEqualTo("干线");
+        assertThat(assessment.thresholdHours()).isEqualTo(24);
+    }
+
     private ShipmentTimeline shipment(String status, String time) {
         return new ShipmentTimeline(
                 "DPK365068298955", "德邦", "SUCCESS", status,

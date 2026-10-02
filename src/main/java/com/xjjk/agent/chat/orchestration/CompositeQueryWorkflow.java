@@ -343,7 +343,8 @@ public class CompositeQueryWorkflow {
                 return summary.append("，未查询到运单轨迹").toString();
             }
             for (var shipment : logistics.shipments()) {
-                LogisticsStagnationAssessment assessment = stagnationEvaluator.evaluate(shipment);
+                LogisticsStagnationAssessment assessment = stagnationEvaluator.evaluate(
+                        shipment, logistics.order().statusText());
                 summary.append("；运单号=")
                         .append(shipment.logisticsCode())
                         .append("，运单状态=")
