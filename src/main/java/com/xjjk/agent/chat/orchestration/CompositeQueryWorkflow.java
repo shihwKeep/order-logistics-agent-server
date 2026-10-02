@@ -11,6 +11,8 @@ import com.xjjk.agent.knowledge.service.KnowledgeQueryGateway;
 import com.xjjk.agent.order.domain.OrderIdentifierType;
 import com.xjjk.agent.order.domain.OrderLogisticsResult;
 import com.xjjk.agent.order.domain.OrderSearchResult;
+import com.xjjk.agent.order.domain.LogisticsStagnationAssessment;
+import com.xjjk.agent.order.domain.LogisticsStagnationEvaluator;
 import com.xjjk.agent.order.service.OrderQueryGateway;
 import com.xjjk.agent.product.domain.ProductSearchQuery;
 import com.xjjk.agent.product.domain.ProductSearchResult;
@@ -22,6 +24,7 @@ import org.bsc.langgraph4j.StateGraph;
 import org.bsc.langgraph4j.action.AsyncNodeAction;
 import org.springframework.stereotype.Component;
 
+import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -46,19 +49,35 @@ public class CompositeQueryWorkflow {
     private final ProductSearchGateway productSearchGateway;
     private final AfterSaleQueryGateway afterSaleQueryGateway;
     private final KnowledgeQueryGateway knowledgeQueryGateway;
+    private final Clock clock;
+    private final LogisticsStagnationEvaluator stagnationEvaluator;
     private CompositeQueryMetrics metrics;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public CompositeQueryWorkflow(
             OrderQueryGateway orderGateway,
             CustomerOrderQueryService customerOrderQueryService,
             ProductSearchGateway productSearchGateway,
             AfterSaleQueryGateway afterSaleQueryGateway,
             KnowledgeQueryGateway knowledgeQueryGateway) {
+        this(orderGateway, customerOrderQueryService, productSearchGateway,
+                afterSaleQueryGateway, knowledgeQueryGateway, Clock.systemDefaultZone());
+    }
+
+    CompositeQueryWorkflow(
+            OrderQueryGateway orderGateway,
+            CustomerOrderQueryService customerOrderQueryService,
+            ProductSearchGateway productSearchGateway,
+            AfterSaleQueryGateway afterSaleQueryGateway,
+            KnowledgeQueryGateway knowledgeQueryGateway,
+            Clock clock) {
         this.orderGateway = orderGateway;
         this.customerOrderQueryService = customerOrderQueryService;
         this.productSearchGateway = productSearchGateway;
         this.afterSaleQueryGateway = afterSaleQueryGateway;
         this.knowledgeQueryGateway = knowledgeQueryGateway;
+        this.clock = clock;
+        this.stagnationEvaluator = new LogisticsStagnationEvaluator(clock);
     }
 
     CompositeQueryService.CompositeQueryResult execute(
@@ -202,7 +221,7 @@ public class CompositeQueryWorkflow {
             CompositeQueryIntent intent,
             AgentIdentity identity,
             String requestId) {
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now(clock);
         return switch (intent.resultKind()) {
             case "logistics-timeline" -> {
                 OrderLogisticsResult result = orderGateway.logistics(
@@ -324,6 +343,7 @@ public class CompositeQueryWorkflow {
                 return summary.append("，未查询到运单轨迹").toString();
             }
             for (var shipment : logistics.shipments()) {
+                LogisticsStagnationAssessment assessment = stagnationEvaluator.evaluate(shipment);
                 summary.append("；运单号=")
                         .append(shipment.logisticsCode())
                         .append("，运单状态=")
@@ -333,7 +353,19 @@ public class CompositeQueryWorkflow {
                         .append("，最新轨迹时间=")
                         .append(latestTraceTime(shipment))
                         .append("，最新轨迹=")
-                        .append(shipment.latestTrace());
+                        .append(shipment.latestTrace())
+                        .append("，停滞评估状态=")
+                        .append(assessment.status())
+                        .append("，适用环节=")
+                        .append(assessment.stage())
+                        .append("，适用阈值小时=")
+                        .append(assessment.thresholdHours())
+                        .append("，距最新轨迹小时=")
+                        .append(assessment.elapsedHours())
+                        .append("，评估时间=")
+                        .append(assessment.evaluatedAt())
+                        .append("，评估依据=")
+                        .append(assessment.reason());
             }
             return summary.toString();
         }

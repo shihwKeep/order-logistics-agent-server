@@ -306,6 +306,9 @@ public class AiChatService {
                 + "不要编造外部市场信息，不要要求用户执行内部工具，也不要输出工具名称或工具调用步骤。\n"
                 + "物流业务事实已给出最新轨迹时间时，不得声称时间缺失，必须直接使用该时间判断时效；"
                 + "不得把‘在途’自动表述为‘正常运输中’，应以返回的状态和轨迹事实为准。\n"
+                + "上下文中的‘服务端确定性停滞评估’是后端按当前时间计算出的结果；"
+                + "必须直接采用其中的评估状态、适用阈值和距最新轨迹时长，不得自行重新计算或改写。"
+                + "评估状态为EXCEEDED表示已达到阈值，WITHIN_THRESHOLD表示未达到，UNKNOWN表示无法判定。\n"
                 + "<verified-composite-context>\n"
                 + verifiedContext
                 + "\n</verified-composite-context>";

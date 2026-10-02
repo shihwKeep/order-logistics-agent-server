@@ -21,6 +21,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.OffsetDateTime;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Set;
 
@@ -72,7 +75,9 @@ class CompositeQueryWorkflowTest {
                 CompositeQueryIntent.knowledge("查询物流规则")));
         CompositeQueryService.CompositeQueryResult result = new CompositeQueryService(
                 new CompositeQueryWorkflow(orderGateway, customerOrderQueryService,
-                        productSearchGateway, afterSaleQueryGateway, knowledgeQueryGateway))
+                        productSearchGateway, afterSaleQueryGateway, knowledgeQueryGateway,
+                        Clock.fixed(Instant.parse("2026-10-03T04:00:00Z"),
+                                ZoneId.of("Asia/Shanghai"))))
                 .execute(plan, "查询订单物流并根据规则分析", IDENTITY, "request-1");
 
         assertThat(result.success()).isTrue();
@@ -80,7 +85,8 @@ class CompositeQueryWorkflowTest {
                 .containsExactlyInAnyOrder("logistics-timeline", "knowledge-citations");
         assertThat(result.verifiedAnswerContext()).contains("物流规则");
         assertThat(result.verifiedAnswerContext())
-                .contains("最新轨迹时间=2026-09-29 15:58:06", "到达南京转运场");
+                .contains("最新轨迹时间=2026-09-29 15:58:06", "到达南京转运场",
+                        "停滞评估状态=EXCEEDED", "适用阈值小时=24");
         verify(orderGateway).logistics("XJ202609290001", OrderIdentifierType.ORDER_CODE,
                 IDENTITY, "request-1");
         verify(knowledgeQueryGateway).retrieve("查询物流规则", List.of(), IDENTITY, "request-1");
