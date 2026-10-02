@@ -10,6 +10,7 @@ import com.xjjk.agent.order.domain.OrderIdentifierType;
 import com.xjjk.agent.order.domain.OrderLogisticsResult;
 import com.xjjk.agent.order.domain.OrderSearchResult;
 import com.xjjk.agent.order.service.OrderQueryGateway;
+import com.xjjk.agent.order.service.OrderServiceUnavailableException;
 import com.xjjk.agent.product.service.ProductSearchGateway;
 import com.xjjk.agent.aftersale.service.AfterSaleQueryGateway;
 import org.junit.jupiter.api.Test;
@@ -91,6 +92,28 @@ class CompositeQueryWorkflowTest {
 
         assertThat(result.success()).isFalse();
         assertThat(result.status()).isEqualTo("WAITING_INPUT");
+    }
+
+    @Test
+    void distinguishesBusinessQueryFailureFromMissingIdentifier() {
+        when(orderGateway.logistics(eq("XJ202609290001"), eq(OrderIdentifierType.ORDER_CODE),
+                eq(IDENTITY), eq("request-failed")))
+                .thenThrow(new OrderServiceUnavailableException("订单服务调用失败"));
+
+        CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.logistics("XJ202609290001"),
+                CompositeQueryIntent.knowledge("物流规则")));
+        CompositeQueryService.CompositeQueryResult result = new CompositeQueryService(
+                new CompositeQueryWorkflow(orderGateway, customerOrderQueryService,
+                        productSearchGateway, afterSaleQueryGateway, knowledgeQueryGateway))
+                .execute(plan, "查询订单物流并根据规则分析", IDENTITY, "request-failed");
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.status()).isEqualTo("FAILED");
+        assertThat(result.safeMessage())
+                .isEqualTo(CompositeQueryService.BUSINESS_QUERY_FAILED_MESSAGE);
+        verify(knowledgeQueryGateway, org.mockito.Mockito.never())
+                .retrieve(any(), any(), any(), any());
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.xjjk.agent.chat.observation;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.core.instrument.observation.DefaultMeterObservationHandler;
 import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.Test;
 
@@ -40,5 +41,25 @@ class CompositeQueryMetricsTest {
         assertThat(meters.find("agent.composite.graph")
                 .tagKeys("requestId", "conversationId", "orderCode")
                 .meters()).isEmpty();
+    }
+
+    @Test
+    void keepsObservationAndTimerMetersCompatibleWhenNodeFails() {
+        SimpleMeterRegistry meters = new SimpleMeterRegistry();
+        ObservationRegistry observations = ObservationRegistry.create();
+        observations.observationConfig()
+                .observationHandler(new DefaultMeterObservationHandler(meters));
+        CompositeQueryMetrics metrics = new CompositeQueryMetrics(meters, observations);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                metrics.node("business.query", "request-failed", () -> {
+                    throw new IllegalStateException("downstream unavailable");
+                })).isInstanceOf(IllegalStateException.class);
+
+        assertThat(meters.timer(
+                "agent.composite.node",
+                "graph", "composite-v1",
+                "node", "business.query",
+                "outcome", "ERROR").count()).isEqualTo(1L);
     }
 }

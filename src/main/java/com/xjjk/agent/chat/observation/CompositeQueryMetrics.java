@@ -17,6 +17,8 @@ import java.util.function.Supplier;
 public final class CompositeQueryMetrics {
 
     public static final String GRAPH = "composite-v1";
+    /** Observation 名称与手工 Timer 指标分开，避免 Micrometer 自动 error 标签冲突。 */
+    private static final String OBSERVATION_NAME = "agent.composite.node.observation";
     private static final Set<String> NODES = Set.of(
             "input.validate", "business.query", "knowledge.query",
             "result.validate", "answer.compose");
@@ -57,7 +59,7 @@ public final class CompositeQueryMetrics {
         Objects.requireNonNull(action, "节点任务不能为空");
         String boundedNode = bounded(node, NODES, "unknown");
         Observation observation = Observation.createNotStarted(
-                        "agent.composite.node", observations)
+                        OBSERVATION_NAME, observations)
                 .contextualName("composite " + boundedNode)
                 .lowCardinalityKeyValue("graph", GRAPH)
                 .lowCardinalityKeyValue("node", boundedNode)

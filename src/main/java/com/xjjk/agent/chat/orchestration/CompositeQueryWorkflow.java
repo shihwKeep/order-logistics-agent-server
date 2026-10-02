@@ -187,10 +187,15 @@ public class CompositeQueryWorkflow {
                         requestId, intent.resultKind(), exception.getClass().getSimpleName());
             }
         }
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put(CompositeQueryState.RESULT_COUNT, context.results.size());
+        values.put(CompositeQueryState.FAILURES, List.copyOf(context.failures));
+        // 业务节点失败后会直接结束图，必须把终态写入状态，避免外层拿到 PENDING。
+        if (!context.failures.isEmpty()) {
+            values.put(CompositeQueryState.FINAL_STATUS, "FAILED");
+        }
         return CompositeQueryState.update(state, "business.query",
-                context.failures.isEmpty() ? "SUCCESS" : "FAILED",
-                Map.of(CompositeQueryState.RESULT_COUNT, context.results.size(),
-                        CompositeQueryState.FAILURES, List.copyOf(context.failures)));
+                context.failures.isEmpty() ? "SUCCESS" : "FAILED", values);
     }
 
     private ToolUiResult queryBusinessIntent(
