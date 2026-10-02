@@ -260,21 +260,12 @@ public class AiChatService {
         Assert.hasText(verifiedContext, "复合查询验证上下文不能为空");
 
         return Flux.defer(() -> {
-            RequestChatMemory memory = new RequestChatMemory(selection);
-            MessageChatMemoryAdvisor memoryAdvisor =
-                    MessageChatMemoryAdvisor.builder(memory).build();
             return chatClient
                     .prompt()
                     .system(selection.effectiveSystemPrompt())
                     .user(groundedCompositePrompt(message, verifiedContext))
                     // 复合查询已由服务端完成工具编排；二阶段严禁再次调用工具。
                     .toolCallbacks(List.of())
-                    .advisors(spec -> spec
-                            .advisors(memoryAdvisor)
-                            .param(
-                                    ChatMemory.CONVERSATION_ID,
-                                    selection.source().conversationId()
-                            ))
                     .stream()
                     .chatResponse();
         });
@@ -309,6 +300,7 @@ public class AiChatService {
                 + "上下文中的‘服务端确定性停滞评估’是后端按当前时间计算出的结果；"
                 + "必须直接采用其中的评估状态、适用阈值和距最新轨迹时长，不得自行重新计算或改写。"
                 + "评估状态为EXCEEDED表示已达到阈值，WITHIN_THRESHOLD表示未达到，UNKNOWN表示无法判定。\n"
+                + "回答只保留当前订单的状态、阈值判断、客服下一步和无法确认项，控制在5到8句、最多400个汉字，禁止复述历史对话或完整证据原文。\n"
                 + "<verified-composite-context>\n"
                 + verifiedContext
                 + "\n</verified-composite-context>";
