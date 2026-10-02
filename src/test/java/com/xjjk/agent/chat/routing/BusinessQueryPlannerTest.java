@@ -101,6 +101,17 @@ class BusinessQueryPlannerTest {
     }
 
     @Test
+    void keepsRealtimeLogisticsQuestionWithPlaceholderOutOfKnowledgePath() {
+        BusinessQueryPlan plan = planner.plan(
+                "请查询订单【完整订单号】当前物流状态，并根据物流停滞规则判断客服应该如何处理");
+
+        assertThat(plan.mode()).isEqualTo(BusinessQueryMode.CLARIFICATION);
+        assertThat(plan.clarificationMessage()).contains("完整订单号");
+        assertThat(plan.acceptedResultKinds()).isEmpty();
+        assertThat(plan.compositePlan()).isNull();
+    }
+
+    @Test
     void keepsRuleOnlyQuestionOnKnowledgePath() {
         BusinessQueryPlan plan = planner.plan("物流轨迹超过24小时没有更新应该怎么处理");
 

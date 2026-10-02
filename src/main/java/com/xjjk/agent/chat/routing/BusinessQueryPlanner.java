@@ -43,16 +43,6 @@ public class BusinessQueryPlanner {
             return BusinessQueryPlan.general();
         }
         String message = rawMessage.strip();
-        if (isKnowledgeQuestion(message)) {
-            // “订单状态有哪些”是在问租户业务知识，不代表要求读取某一笔实时订单。
-            // 进入缓冲路径后，只有本轮知识检索返回可靠证据才允许模型正文流出。
-            return BusinessQueryPlan.modelRequired(Set.of("knowledge-citations"));
-        }
-        // 业务实时查询总开关不关闭知识回答的证据门禁。
-        if (!properties.enabled()) {
-            return BusinessQueryPlan.general();
-        }
-
         // 关键词只用于判断涉及哪些业务域，不直接作为下游查询参数。
         boolean product = containsAny(message, "商品", "SKU", "sku", "库存", "上下架");
         boolean customer = message.contains("客户");
@@ -64,6 +54,25 @@ public class BusinessQueryPlanner {
         boolean currentFactQuestion = containsAny(
                 message, "当前", "现在", "还有", "多少", "有没有", "信息",
                 "详情", "状态", "最近", "本月", "今天", "进度", "吗");
+
+        // 真实实时查询优先于知识规则识别。缺少完整编号时不能降级成“纯知识问题”，
+        // 否则“查询订单【完整订单号】物流并按规则判断”会直接返回规则答案，
+        // 而不是要求坐席补充真实订单号。
+        if (properties.enabled() && isRealtimeQueryMissingIdentifier(
+                message, product, customer, order, logistics, afterSale)) {
+            return BusinessQueryPlan.clarification(
+                    missingIdentifierMessage(product, customer, order, logistics, afterSale));
+        }
+
+        if (isKnowledgeQuestion(message)) {
+            // “订单状态有哪些”是在问租户业务知识，不代表要求读取某一笔实时订单。
+            // 进入缓冲路径后，只有本轮知识检索返回可靠证据才允许模型正文流出。
+            return BusinessQueryPlan.modelRequired(Set.of("knowledge-citations"));
+        }
+        // 业务实时查询总开关不关闭知识回答的证据门禁。
+        if (!properties.enabled()) {
+            return BusinessQueryPlan.general();
+        }
         if ((!explicitQuery && !currentFactQuestion)
                 || !(product || customer || order || logistics || afterSale)) {
             return BusinessQueryPlan.general();
@@ -217,6 +226,53 @@ public class BusinessQueryPlanner {
                 "赔偿", "赔付", "补偿", "金额", "额度");
         // “介绍一下你自己”等普通对话不能仅因问句样式被送入企业知识库。
         return knowledgeDomain && (explicitKnowledgeQuestion || asksRuleOrBoundary);
+    }
+
+    /** 判断是否明确要求读取实时业务数据，但消息中没有可用的完整业务编号。 */
+    private boolean isRealtimeQueryMissingIdentifier(
+            String message,
+            boolean product,
+            boolean customer,
+            boolean order,
+            boolean logistics,
+            boolean afterSale) {
+        boolean realtimeLanguage = containsAny(
+                message, "查询", "查看", "查下", "查一下", "帮我查", "帮忙查",
+                "实时", "当前物流", "最新物流", "物流状态");
+        boolean knowledgeCompanion = containsAny(
+                message, "规则", "政策", "制度", "流程", "规范", "阈值",
+                "判断是否", "是否需要", "如何处理", "怎么处理", "是否符合", "并根据");
+        if (!realtimeLanguage || !knowledgeCompanion
+                || !(product || customer || order || logistics || afterSale)) {
+            return false;
+        }
+        return find(ORDER_CODE, message) == null
+                && find(CUSTOMER_CODE, message) == null
+                && find(AFTER_SALE_CODE, message) == null;
+    }
+
+    private String missingIdentifierMessage(
+            boolean product,
+            boolean customer,
+            boolean order,
+            boolean logistics,
+            boolean afterSale) {
+        if (logistics) {
+            return "请提供完整订单号或运单号后，我才能查询当前物流状态并结合规则判断。";
+        }
+        if (afterSale) {
+            return "请提供完整售后工单号或原订单号后，我才能查询售后信息。";
+        }
+        if (order) {
+            return "请提供完整订单号后，我才能查询订单信息。";
+        }
+        if (customer) {
+            return "请提供完整客户编号或客户姓名后，我才能查询客户信息。";
+        }
+        if (product) {
+            return "请提供商品名称、SKU 或条码后，我才能查询商品信息。";
+        }
+        return "请补充完整的业务编号后再查询。";
     }
 
     /** 从当前用户消息中提取第一个符合严格边界的完整业务编号。 */

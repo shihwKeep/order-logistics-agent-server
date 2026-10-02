@@ -31,8 +31,8 @@ public final class AgentTurnTelemetry {
     private static final Set<String> MODEL_RETRY_OUTCOMES = Set.of(
             "SCHEDULED", "EXHAUSTED", "UNKNOWN");
     private static final Set<String> INTENTS = Set.of(
-            "EXPLICIT_MEMORY", "ACTION", "DIRECT_BUSINESS", "MEMORY_RECALL",
-            "MODEL_REQUIRED", "COMPOSITE", "KNOWLEDGE", "GENERAL", "UNKNOWN");
+        "EXPLICIT_MEMORY", "ACTION", "DIRECT_BUSINESS", "MEMORY_RECALL",
+            "MODEL_REQUIRED", "COMPOSITE", "CLARIFICATION", "KNOWLEDGE", "GENERAL", "UNKNOWN");
     private static final Set<String> STAGES = Set.of(
             "turn.prepare", "context.load", "intent.route", "model.stream",
             "composite.query", "result.gate", "turn.finalize");

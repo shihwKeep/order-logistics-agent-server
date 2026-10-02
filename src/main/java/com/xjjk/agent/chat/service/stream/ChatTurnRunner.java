@@ -272,7 +272,25 @@ public class ChatTurnRunner {
         }
 
         /*
-         * 意图三-B：服务端复合查询编排。
+         * 意图三-B：缺少必要业务标识时直接澄清。
+         * 这类消息不能降级为知识库问题，否则“查询订单【完整订单号】物流并按规则判断”
+         * 会先检索规则并输出泛化结论，掩盖实时查询条件缺失。
+         */
+        if (queryPlan.mode() == BusinessQueryMode.CLARIFICATION) {
+            execution.intent("CLARIFICATION");
+            observeStage("intent.route", () -> { });
+            session.generating();
+            execution.content.append(queryPlan.clarificationMessage());
+            session.delta(queryPlan.clarificationMessage());
+            execution.metrics.markFirstDeltaSent();
+            execution.finishReason = "CLARIFICATION_REQUIRED";
+            execution.status = MessageStatus.SUCCESS;
+            execution.error = null;
+            return;
+        }
+
+        /*
+         * 意图三-C：服务端复合查询编排。
          * 业务事实和企业知识分别由 LangGraph4j 工作流取得并校验，随后只把
          * 验证上下文交给无工具二阶段模型生成，避免一次模型工具循环混淆来源。
          */

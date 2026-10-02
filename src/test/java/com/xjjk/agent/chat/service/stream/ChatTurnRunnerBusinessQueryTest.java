@@ -154,6 +154,24 @@ class ChatTurnRunnerBusinessQueryTest {
     }
 
     @Test
+    void missingCompositeIdentifierIsClarifiedWithoutCallingModelOrKnowledge()
+            throws Exception {
+        String message = "请查询订单【完整订单号】当前物流状态，并根据物流停滞规则判断客服应该如何处理";
+        ChatTurnContext turn = turn("request-clarification", "user-clarification",
+                "assistant-clarification");
+        when(preparationService.prepare(null, IDENTITY, message)).thenReturn(turn);
+        BusinessQueryPlan plan = BusinessQueryPlan.clarification(
+                "请提供完整订单号或运单号后，我才能查询当前物流状态并结合规则判断。");
+        when(planner.plan(message)).thenReturn(plan);
+
+        runner().run(new ChatStreamRequest(null, message, null), IDENTITY,
+                new ChatStreamControl(), sessionOne, "fallback-clarification");
+
+        verify(sessionOne).delta(plan.clarificationMessage());
+        verifyNoInteractions(contextService, aiChatService, compositeQueryService);
+    }
+
+    @Test
     void outputLimitCannotPersistUnverifiedBufferedClaim() throws Exception {
         String hallucinated = "订单已经发货";
         ChatTurnContext turn = turn("request-4", "user-4", "assistant-4");

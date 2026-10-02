@@ -5,6 +5,9 @@ public enum BusinessQueryMode {
     /** 普通对话，不要求本轮产生新的业务结构化结果。 */
     GENERAL,
 
+    /** 已识别实时业务意图，但缺少必要公开标识，只返回确定性澄清问题。 */
+    CLARIFICATION,
+
     /** 参数可由高置信规则唯一提取，绕过模型直接执行后端白名单动作。 */
     DIRECT,
 

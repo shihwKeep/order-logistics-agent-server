@@ -150,6 +150,23 @@ class AgentTurnTelemetryTest {
     }
 
     @Test
+    void preservesClarificationIntentAsLowCardinalityLabel() {
+        SimpleMeterRegistry meters = new SimpleMeterRegistry();
+        AgentTurnTelemetry telemetry = new AgentTurnTelemetry(
+                meters, ObservationRegistry.create());
+
+        telemetry.run("resumable", "request-clarification", "conversation-clarification", () ->
+                telemetry.completeCurrent(
+                        "SUCCESS", "CLARIFICATION", "conversation-clarification"));
+
+        assertThat(meters.counter(
+                "agent.turn.completed",
+                "mode", "resumable",
+                "outcome", "SUCCESS",
+                "intent", "CLARIFICATION").count()).isEqualTo(1D);
+    }
+
+    @Test
     void recordsStageFailureAndRethrowsOriginalException() {
         SimpleMeterRegistry meters = new SimpleMeterRegistry();
         AgentTurnTelemetry telemetry = new AgentTurnTelemetry(
