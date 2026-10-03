@@ -222,7 +222,7 @@ class ChatTurnRunnerBusinessQueryTest {
         when(compositeQueryService.execute(
                 eq(plan.compositePlan()), eq(compositeMessage), eq(IDENTITY), anyString()))
                 .thenReturn(new CompositeQueryService.CompositeQueryResult(
-                        true, "SUCCESS", List.of(logistics, knowledge),
+                        true, "SUCCESS", List.of(logistics, knowledge, logistics),
                         Set.of("logistics-timeline", "knowledge-citations"),
                         "业务事实：运输中\n企业知识依据：干线停滞超过阈值生成预警。", ""));
         when(resultRecorder.prepare(any(ToolUiResult.class), eq(1)))

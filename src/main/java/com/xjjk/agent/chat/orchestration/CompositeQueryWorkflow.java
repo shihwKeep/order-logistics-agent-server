@@ -41,6 +41,7 @@ import java.util.Set;
 import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 
 import static org.bsc.langgraph4j.StateGraph.END;
@@ -69,6 +70,7 @@ public class CompositeQueryWorkflow {
     private final Clock clock;
     private final LogisticsStagnationEvaluator stagnationEvaluator;
     private final BaseCheckpointSaver checkpointSaver;
+    private final Executor parallelExecutor;
     private CompositeQueryMetrics metrics;
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -80,11 +82,12 @@ public class CompositeQueryWorkflow {
             AfterSaleQueryGateway afterSaleQueryGateway,
             KnowledgeQueryGateway knowledgeQueryGateway,
             CompositeQueryCheckpointStore checkpointStore,
-            CompositeQueryCheckpointProperties checkpointProperties) {
+            CompositeQueryCheckpointProperties checkpointProperties,
+            CompositeQueryParallelExecutor parallelExecutor) {
         this(orderGateway, customerOrderQueryService, productSearchGateway,
                 customerQueryGateway,
                 afterSaleQueryGateway, knowledgeQueryGateway, Clock.systemDefaultZone(),
-                checkpointStore, checkpointProperties, true);
+                checkpointStore, checkpointProperties, parallelExecutor.executor(), true);
     }
 
     public CompositeQueryWorkflow(
@@ -95,7 +98,7 @@ public class CompositeQueryWorkflow {
             KnowledgeQueryGateway knowledgeQueryGateway) {
         this(orderGateway, customerOrderQueryService, productSearchGateway,
                 null, afterSaleQueryGateway, knowledgeQueryGateway,
-                Clock.systemDefaultZone(), null, null, true);
+                Clock.systemDefaultZone(), null, null, PARALLEL_EXECUTOR, true);
     }
 
     CompositeQueryWorkflow(
@@ -107,7 +110,7 @@ public class CompositeQueryWorkflow {
             Clock clock) {
         this(orderGateway, customerOrderQueryService, productSearchGateway,
                 null, afterSaleQueryGateway, knowledgeQueryGateway,
-                clock, null, null, true);
+                clock, null, null, PARALLEL_EXECUTOR, true);
     }
 
     CompositeQueryWorkflow(
@@ -121,7 +124,7 @@ public class CompositeQueryWorkflow {
             CompositeQueryCheckpointProperties checkpointProperties) {
         this(orderGateway, customerOrderQueryService, productSearchGateway,
                 null, afterSaleQueryGateway, knowledgeQueryGateway, clock,
-                checkpointStore, checkpointProperties, true);
+                checkpointStore, checkpointProperties, PARALLEL_EXECUTOR, true);
     }
 
     CompositeQueryWorkflow(
@@ -136,7 +139,7 @@ public class CompositeQueryWorkflow {
             CompositeQueryCheckpointProperties checkpointProperties) {
         this(orderGateway, customerOrderQueryService, productSearchGateway,
                 customerQueryGateway, afterSaleQueryGateway, knowledgeQueryGateway,
-                clock, checkpointStore, checkpointProperties, true);
+                clock, checkpointStore, checkpointProperties, PARALLEL_EXECUTOR, true);
     }
 
     private CompositeQueryWorkflow(
@@ -149,6 +152,7 @@ public class CompositeQueryWorkflow {
             Clock clock,
             CompositeQueryCheckpointStore checkpointStore,
             CompositeQueryCheckpointProperties checkpointProperties,
+            Executor parallelExecutor,
             boolean ignored) {
         this.orderGateway = orderGateway;
         this.customerOrderQueryService = customerOrderQueryService;
@@ -158,6 +162,7 @@ public class CompositeQueryWorkflow {
         this.knowledgeQueryGateway = knowledgeQueryGateway;
         this.clock = clock;
         this.stagnationEvaluator = new LogisticsStagnationEvaluator(clock);
+        this.parallelExecutor = parallelExecutor;
         this.checkpointSaver = checkpointStore != null && checkpointProperties != null
                 && checkpointProperties.enabled()
                 ? new LangGraph4jRedisCheckpointSaver(
@@ -183,12 +188,20 @@ public class CompositeQueryWorkflow {
             graphInput.remove(CompositeQueryState.KNOWLEDGE);
             RunnableConfig runnableConfig = RunnableConfig.builder()
                     .threadId(requestId)
-                    .addParallelNodeExecutor("input.validate", PARALLEL_EXECUTOR)
-                    .addParallelNodeExecutor("branch.dispatch", PARALLEL_EXECUTOR)
+                    .addParallelNodeExecutor("input.validate", parallelExecutor)
+                    .addParallelNodeExecutor("branch.dispatch", parallelExecutor)
                     .build();
             if (checkpointSaver != null) {
-                checkpointSaver.get(runnableConfig).ifPresent(checkpoint ->
-                        graphInput.putAll(checkpoint.getState()));
+                try {
+                    var checkpoint = checkpointSaver.get(runnableConfig);
+                    if (metrics != null) {
+                        metrics.checkpoint("load", checkpoint.isPresent() ? "RESTORED" : "MISS");
+                    }
+                    checkpoint.ifPresent(value -> graphInput.putAll(value.getState()));
+                } catch (RuntimeException exception) {
+                    if (metrics != null) metrics.checkpoint("load", "ERROR");
+                    throw exception;
+                }
             }
             CompositeQueryState finalState = graph.invoke(graphInput, runnableConfig).orElseThrow();
             if (metrics != null) {
@@ -305,6 +318,7 @@ public class CompositeQueryWorkflow {
                         "", 0));
                 if (metrics != null) {
                     metrics.result(result.kind(), "SUCCESS");
+                    metrics.branch(branch, "SUCCESS");
                 }
             } catch (RuntimeException exception) {
                 context.failures.add(intent.resultKind());
@@ -313,6 +327,7 @@ public class CompositeQueryWorkflow {
                         exception.getClass().getSimpleName(), 0));
                 if (metrics != null) {
                     metrics.result(intent.resultKind(), "FAILURE");
+                    metrics.branch(branchName(intent), "FAILED");
                 }
                 log.warn("composite_business_node_failed requestId={}, kind={}, exceptionType={}",
                         requestId, intent.resultKind(), exception.getClass().getSimpleName());
@@ -413,6 +428,7 @@ public class CompositeQueryWorkflow {
                         "证据数=" + retrieval.evidences().size(), "", 0));
                 if (metrics != null) {
                     metrics.result("knowledge-citations", "SUCCESS");
+                    metrics.branch(branch, "SUCCESS");
                 }
             } catch (RuntimeException exception) {
                 context.failures.add("knowledge-citations");
@@ -421,6 +437,7 @@ public class CompositeQueryWorkflow {
                         exception.getClass().getSimpleName(), 0));
                 if (metrics != null) {
                     metrics.result("knowledge-citations", "FAILURE");
+                    metrics.branch(branchName(intent), "FAILED");
                 }
                 log.warn("composite_knowledge_node_failed requestId={}, exceptionType={}",
                         requestId, exception.getClass().getSimpleName());
@@ -461,6 +478,7 @@ public class CompositeQueryWorkflow {
                 .allMatch(actual::contains);
         if (analysisRequested && baseFactsReady && knowledgeOk) {
             actual.add("general-analysis");
+            if (metrics != null) metrics.result("general-analysis", "SUCCESS");
         }
         boolean complete = actual.containsAll(context.plan.requiredResultKinds())
                 && knowledgeOk;
@@ -501,6 +519,9 @@ public class CompositeQueryWorkflow {
         if (context.plan.intents().stream()
                 .anyMatch(intent -> "general-analysis".equals(intent.resultKind()))) {
             answer.append("综合分析：以上结论仅基于本次已核验的业务事实与企业知识，未引入外部市场数据；请按企业规则和实际授权范围处理。\n");
+        }
+        if (context.plan.requiresExternalSource()) {
+            answer.append("外部数据边界：当前未接入外部市场数据，无法确认普遍价格区间或据此给出市场定价结论。\n");
         }
         return CompositeQueryState.update(state, "answer.compose", "SUCCESS",
                 Map.of(CompositeQueryState.ANSWER_CONTEXT, answer.toString()));

@@ -20,11 +20,16 @@
 
 ## 关键 Prometheus 指标
 
-复合图固定使用 `graph="composite-v1"`，不会把订单号、客户号、会话号、提示词或异常全文作为指标标签：
+复合图第二版固定使用 `graph="composite-v2"`，不会把订单号、客户号、会话号、提示词或异常全文作为指标标签；旧版 `composite-v1` 只保留用于兼容读取：
 
 - `agent_composite_graph_total{graph,outcome}`：一次复合图执行的最终状态。
-- `agent_composite_node_seconds{graph,node,outcome}`：`input.validate`、`business.query`、`knowledge.query`、`result.validate`、`answer.compose` 各节点耗时。
+- `agent_composite_node_seconds{graph,node,outcome}`：`input.validate`、`branch.dispatch`、`business.query`、`knowledge.query`、`result.validate`、`answer.compose` 各节点耗时。
 - `agent_composite_result_total{kind,outcome}`：业务事实或知识引用的取得/失败结果。
+- `agent_composite_branch_total{graph,branch,outcome}`：固定业务/知识/综合分析分支的完成、失败或跳过。
+- `agent_composite_checkpoint_total{graph,operation,outcome}`：checkpoint 的加载、恢复、缺失或异常。
+- `agent_composite_retry_total{graph,node,outcome}`：编排节点重试调度和耗尽情况。
+
+checkpoint 使用 `agent:composite:checkpoint:v2:{requestId}` 前缀和 10 分钟 TTL，与 SSE 回放使用不同 key 前缀；生产环境可由 Nacos 覆盖。并行分支使用有界线程池，默认核心 4、最大 8、队列 32。
 
 Trace 中可以通过 `request.id` 关联节点 Observation 与 `agent.turn` 根 Span；指标只保留低基数标签。
 

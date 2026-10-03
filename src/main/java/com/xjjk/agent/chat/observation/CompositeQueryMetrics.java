@@ -16,21 +16,34 @@ import java.util.function.Supplier;
 @Component
 public final class CompositeQueryMetrics {
 
-    public static final String GRAPH = "composite-v1";
+    public static final String GRAPH = "composite-v2";
     /** Observation 名称与手工 Timer 指标分开，避免 Micrometer 自动 error 标签冲突。 */
     private static final String OBSERVATION_NAME = "agent.composite.node.observation";
     private static final Set<String> NODES = Set.of(
-            "input.validate", "business.query", "knowledge.query",
+            "input.validate", "branch.dispatch", "business.query", "knowledge.query",
             "result.validate", "answer.compose");
     private static final Set<String> GRAPH_OUTCOMES = Set.of(
-            "SUCCESS", "FAILED", "WAITING_INPUT", "NO_RELIABLE_KNOWLEDGE");
+            "SUCCESS", "FAILED", "WAITING_INPUT", "NO_RELIABLE_KNOWLEDGE",
+            "PARTIAL_SUCCESS", "EXPIRED", "UNAVAILABLE");
     private static final Set<String> NODE_OUTCOMES = Set.of(
             "SUCCESS", "FAILED", "SKIPPED", "ERROR");
     private static final Set<String> RESULT_KINDS = Set.of(
             "order-list", "logistics-timeline", "after-sale-detail",
-            "customer-list", "product-list", "knowledge-citations");
+            "customer-list", "product-list", "knowledge-citations",
+            "general-analysis", "external-data-unavailable");
     private static final Set<String> RESULT_OUTCOMES = Set.of(
-            "SUCCESS", "FAILURE", "GATE_REJECTED", "MISSING");
+            "SUCCESS", "FAILURE", "GATE_REJECTED", "MISSING", "SKIPPED");
+    private static final Set<String> BRANCHES = Set.of(
+            "business:order-list", "business:logistics-timeline",
+            "business:customer-list", "business:product-list",
+            "business:after-sale-detail", "knowledge:knowledge-citations",
+            "general:general-analysis", "general:external-data-unavailable");
+    private static final Set<String> CHECKPOINT_OPERATIONS = Set.of(
+            "load", "save", "release");
+    private static final Set<String> CHECKPOINT_OUTCOMES = Set.of(
+            "RESTORED", "MISS", "SUCCESS", "ERROR", "EXPIRED", "UNAVAILABLE");
+    private static final Set<String> RETRY_OUTCOMES = Set.of(
+            "SCHEDULED", "SUCCESS", "EXHAUSTED", "SKIPPED");
 
     private final MeterRegistry meters;
     private final ObservationRegistry observations;
@@ -52,6 +65,30 @@ public final class CompositeQueryMetrics {
         meters.counter("agent.composite.result",
                 "kind", bounded(kind, RESULT_KINDS, "unknown"),
                 "outcome", bounded(outcome, RESULT_OUTCOMES, "FAILURE"))
+                .increment();
+    }
+
+    public void branch(String branch, String outcome) {
+        meters.counter("agent.composite.branch",
+                "graph", GRAPH,
+                "branch", bounded(branch, BRANCHES, "unknown"),
+                "outcome", bounded(outcome, GRAPH_OUTCOMES, "FAILED"))
+                .increment();
+    }
+
+    public void checkpoint(String operation, String outcome) {
+        meters.counter("agent.composite.checkpoint",
+                "graph", GRAPH,
+                "operation", bounded(operation, CHECKPOINT_OPERATIONS, "load"),
+                "outcome", bounded(outcome, CHECKPOINT_OUTCOMES, "ERROR"))
+                .increment();
+    }
+
+    public void retry(String node, String outcome) {
+        meters.counter("agent.composite.retry",
+                "graph", GRAPH,
+                "node", bounded(node, NODES, "unknown"),
+                "outcome", bounded(outcome, RETRY_OUTCOMES, "EXHAUSTED"))
                 .increment();
     }
 

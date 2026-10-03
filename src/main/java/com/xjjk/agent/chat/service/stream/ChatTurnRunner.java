@@ -42,7 +42,9 @@ import reactor.core.publisher.Flux;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.function.Supplier;
 
@@ -517,8 +519,13 @@ public class ChatTurnRunner {
         if (control.isStopRequested()) {
             return;
         }
+        Set<String> publishedCompositeResults = new HashSet<>();
         for (ToolUiResult result : composite.uiResults()) {
-            publishToolResult(result, session, execution);
+            String fingerprint = result == null
+                    ? "null" : result.toolName() + "|" + result.kind() + "|" + result.data();
+            if (publishedCompositeResults.add(fingerprint)) {
+                publishToolResult(result, session, execution);
+            }
         }
         session.generating();
         execution.error = ChatStreamError.forStatus(MessageStatus.FAILED);

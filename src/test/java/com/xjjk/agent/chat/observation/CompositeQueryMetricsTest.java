@@ -20,15 +20,18 @@ class CompositeQueryMetricsTest {
         metrics.graph("SUCCESS");
         metrics.result("knowledge-citations", "SUCCESS");
         metrics.result("not-allowed", "not-allowed");
+        metrics.branch("business:logistics-timeline", "SUCCESS");
+        metrics.checkpoint("load", "RESTORED");
+        metrics.retry("business.query", "SCHEDULED");
 
         assertThat(meters.timer(
                 "agent.composite.node",
-                "graph", "composite-v1",
+                "graph", "composite-v2",
                 "node", "knowledge.query",
                 "outcome", "SUCCESS").count()).isEqualTo(1L);
         assertThat(meters.counter(
                 "agent.composite.graph",
-                "graph", "composite-v1",
+                "graph", "composite-v2",
                 "outcome", "SUCCESS").count()).isEqualTo(1D);
         assertThat(meters.counter(
                 "agent.composite.result",
@@ -38,6 +41,14 @@ class CompositeQueryMetricsTest {
                 "agent.composite.result",
                 "kind", "unknown",
                 "outcome", "FAILURE").count()).isEqualTo(1D);
+        assertThat(meters.counter("agent.composite.branch",
+                "graph", "composite-v2",
+                "branch", "business:logistics-timeline",
+                "outcome", "SUCCESS").count()).isEqualTo(1D);
+        assertThat(meters.counter("agent.composite.checkpoint",
+                "graph", "composite-v2",
+                "operation", "load",
+                "outcome", "RESTORED").count()).isEqualTo(1D);
         assertThat(meters.find("agent.composite.graph")
                 .tagKeys("requestId", "conversationId", "orderCode")
                 .meters()).isEmpty();
@@ -58,7 +69,7 @@ class CompositeQueryMetricsTest {
 
         assertThat(meters.timer(
                 "agent.composite.node",
-                "graph", "composite-v1",
+                "graph", "composite-v2",
                 "node", "business.query",
                 "outcome", "ERROR").count()).isEqualTo(1L);
     }
