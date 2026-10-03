@@ -370,8 +370,8 @@ public class AiChatService {
             business = business.substring(0, knowledgeBoundary);
         }
         String status = firstNonBlank(
-                businessField(business, "最新状态="),
-                businessField(business, "订单状态="));
+                businessField(business, "订单状态="),
+                businessField(business, "最新状态="));
         String traceTime = businessField(business, "最新轨迹时间=");
         String assessment = businessField(business, "停滞评估状态=");
         String stage = businessField(business, "适用环节=");
