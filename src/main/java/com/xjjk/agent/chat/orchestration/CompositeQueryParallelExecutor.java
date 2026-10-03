@@ -1,6 +1,7 @@
 package com.xjjk.agent.chat.orchestration;
 
 import org.springframework.stereotype.Component;
+import jakarta.annotation.PreDestroy;
 
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Executor;
@@ -28,5 +29,10 @@ public final class CompositeQueryParallelExecutor {
 
     public Executor executor() {
         return executor;
+    }
+
+    @PreDestroy
+    void shutdown() {
+        executor.shutdown();
     }
 }
