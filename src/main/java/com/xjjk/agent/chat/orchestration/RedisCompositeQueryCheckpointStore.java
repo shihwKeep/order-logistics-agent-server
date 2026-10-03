@@ -2,12 +2,14 @@ package com.xjjk.agent.chat.orchestration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.stereotype.Component;
 
 import java.util.Optional;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
 /** 使用独立 key 前缀保存复合查询 checkpoint，不与 SSE 回放共用 key。 */
+@Component
 public final class RedisCompositeQueryCheckpointStore
         implements CompositeQueryCheckpointStore {
 

@@ -124,10 +124,38 @@ public final class CompositeQueryState extends AgentState {
         return this.<String>value(FINAL_STATUS).orElse("PENDING");
     }
 
-    @SuppressWarnings("unchecked")
     public List<CompositeQueryBranchSnapshot> branchSnapshots() {
-        return this.<List<CompositeQueryBranchSnapshot>>value(BRANCH_SNAPSHOTS)
-                .orElseGet(List::of);
+        Object raw = value(BRANCH_SNAPSHOTS).orElse(List.of());
+        if (!(raw instanceof List<?> list)) return List.of();
+        List<CompositeQueryBranchSnapshot> snapshots = new ArrayList<>();
+        for (Object item : list) {
+            if (item instanceof CompositeQueryBranchSnapshot snapshot) {
+                snapshots.add(snapshot);
+            } else if (item instanceof Map<?, ?> map) {
+                snapshots.add(new CompositeQueryBranchSnapshot(
+                        mapText(map, "branchName"),
+                        mapText(map, "resultKind"),
+                        mapText(map, "status"),
+                        mapText(map, "safeSummary"),
+                        mapText(map, "failureSummary"),
+                        number(map.get("retryCount"))));
+            }
+        }
+        return List.copyOf(snapshots);
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<String> completedBranches() {
+        return this.<List<String>>value(COMPLETED_BRANCHES).orElseGet(List::of);
+    }
+
+    private static int number(Object value) {
+        return value instanceof Number number ? number.intValue() : 0;
+    }
+
+    private static String mapText(Map<?, ?> map, String key) {
+        Object value = map.get(key);
+        return value == null ? "" : String.valueOf(value);
     }
 
     public Map<String, Object> toSafeLogData() {

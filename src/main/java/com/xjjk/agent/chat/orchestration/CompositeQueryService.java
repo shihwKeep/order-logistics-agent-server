@@ -50,8 +50,24 @@ public class CompositeQueryService {
             knowledge.forEach(result -> uiResults.add(new ToolUiResult(
                     "search_knowledge", "knowledge-citations", 1,
                     result.queriedAt(), result)));
+            if (uiResults.isEmpty() && !state.branchSnapshots().isEmpty()) {
+                state.branchSnapshots().stream()
+                        .filter(snapshot -> "SUCCESS".equals(snapshot.status()))
+                        .forEach(snapshot -> uiResults.add(new ToolUiResult(
+                                "composite-checkpoint", snapshot.resultKind(), 1,
+                                java.time.OffsetDateTime.now(),
+                                java.util.Map.of("summary", snapshot.safeSummary()))));
+            }
             Set<String> actual = new LinkedHashSet<>();
             uiResults.forEach(result -> actual.add(result.kind()));
+            state.branchSnapshots().stream()
+                    .filter(snapshot -> "SUCCESS".equals(snapshot.status()))
+                    .map(CompositeQueryBranchSnapshot::resultKind)
+                    .forEach(actual::add);
+            if (state.requiredResultKinds().contains("general-analysis")
+                    && "SUCCESS".equals(state.finalStatus())) {
+                actual.add("general-analysis");
+            }
             if (!knowledge.isEmpty()) {
                 actual.add("knowledge-citations");
             }

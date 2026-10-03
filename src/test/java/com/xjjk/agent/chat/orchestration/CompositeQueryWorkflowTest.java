@@ -3,6 +3,9 @@ package com.xjjk.agent.chat.orchestration;
 import com.xjjk.agent.customer.service.CustomerOrderQueryService;
 import com.xjjk.agent.customer.service.CustomerOrderQueryResult;
 import com.xjjk.agent.customer.service.CustomerOrderResolution;
+import com.xjjk.agent.customer.service.CustomerQueryGateway;
+import com.xjjk.agent.customer.domain.CustomerMatchType;
+import com.xjjk.agent.customer.domain.CustomerSearchResult;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
 import com.xjjk.agent.knowledge.service.KnowledgeQueryGateway;
@@ -26,12 +29,17 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doAnswer;
 
 @ExtendWith(MockitoExtension.class)
 class CompositeQueryWorkflowTest {
@@ -44,11 +52,16 @@ class CompositeQueryWorkflowTest {
     @Mock
     private CustomerOrderQueryService customerOrderQueryService;
     @Mock
+    private CustomerQueryGateway customerQueryGateway;
+    @Mock
     private ProductSearchGateway productSearchGateway;
     @Mock
     private AfterSaleQueryGateway afterSaleQueryGateway;
     @Mock
     private KnowledgeQueryGateway knowledgeQueryGateway;
+
+    @Mock
+    private CompositeQueryCheckpointStore checkpointStore;
 
     @Test
     void executesBusinessAndKnowledgeNodesAndBuildsVerifiedContext() {
@@ -93,6 +106,66 @@ class CompositeQueryWorkflowTest {
     }
 
     @Test
+    void completesInternalAnalysisOnlyAfterBusinessAndKnowledgeFactsAreReady() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-09-30T04:00:00+08:00");
+        when(orderGateway.logistics(eq("XJ202609290001"), eq(OrderIdentifierType.ORDER_CODE),
+                eq(IDENTITY), eq("request-analysis")))
+                .thenReturn(new OrderLogisticsResult(
+                        new OrderLogisticsResult.OrderSummary(
+                                "XJ202609290001", 20, "运输中"),
+                        now, false, List.of()));
+        when(knowledgeQueryGateway.retrieve(eq("查询物流规则"), any(), eq(IDENTITY),
+                eq("request-analysis"))).thenReturn(new KnowledgeRetrievalResult(
+                true, List.of(new KnowledgeRetrievalResult.Evidence(
+                1L, 2L, 3L, "chunk-1", "物流规则", "规则",
+                "规则正文", "{}", 0.9, Set.of("kb"))),
+                "v1", "NONE", "SUCCESS", now));
+
+        CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.logistics("XJ202609290001"),
+                CompositeQueryIntent.knowledge("查询物流规则"),
+                CompositeQueryIntent.general("内部分析")));
+        CompositeQueryService.CompositeQueryResult result = new CompositeQueryService(
+                new CompositeQueryWorkflow(orderGateway, customerOrderQueryService,
+                        productSearchGateway, afterSaleQueryGateway, knowledgeQueryGateway))
+                .execute(plan, "查询物流并结合规则分析", IDENTITY, "request-analysis");
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.actualResultKinds()).contains("general-analysis");
+        assertThat(result.verifiedAnswerContext()).contains("综合分析");
+    }
+
+    @Test
+    void supportsCustomerLookupAsACompositeBusinessBranch() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-09-30T04:00:00+08:00");
+        when(customerQueryGateway.search("C24101816040001", CustomerMatchType.AUTO,
+                IDENTITY, "request-customer-lookup"))
+                .thenReturn(new CustomerSearchResult(
+                        CustomerMatchType.CUSTOMER_CODE, 1, false, now, List.of()));
+        when(knowledgeQueryGateway.retrieve(eq("客户规则"), any(), eq(IDENTITY),
+                eq("request-customer-lookup"))).thenReturn(new KnowledgeRetrievalResult(
+                true, List.of(new KnowledgeRetrievalResult.Evidence(
+                1L, 2L, 3L, "chunk-1", "客户规则", "规则",
+                "规则正文", "{}", 0.9, Set.of("kb"))),
+                "v1", "NONE", "SUCCESS", now));
+
+        CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.customer("C24101816040001"),
+                CompositeQueryIntent.knowledge("客户规则")));
+        CompositeQueryService.CompositeQueryResult result = new CompositeQueryService(
+                new CompositeQueryWorkflow(orderGateway, customerOrderQueryService,
+                        customerQueryGateway, productSearchGateway, afterSaleQueryGateway,
+                        knowledgeQueryGateway,
+                        Clock.systemDefaultZone(), null, null))
+                .execute(plan, "查询客户并结合客户规则", IDENTITY, "request-customer-lookup");
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.actualResultKinds()).contains("customer-list", "knowledge-citations");
+        verify(customerQueryGateway).search("C24101816040001", CustomerMatchType.AUTO,
+                IDENTITY, "request-customer-lookup");
+    }
+
+    @Test
     void missingIdentifierStopsBeforeCallingAnyGateway() {
         CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
                 new CompositeQueryIntent(
@@ -113,6 +186,12 @@ class CompositeQueryWorkflowTest {
         when(orderGateway.logistics(eq("XJ202609290001"), eq(OrderIdentifierType.ORDER_CODE),
                 eq(IDENTITY), eq("request-failed")))
                 .thenThrow(new OrderServiceUnavailableException("订单服务调用失败"));
+        when(knowledgeQueryGateway.retrieve(eq("物流规则"), any(), eq(IDENTITY),
+                eq("request-failed"))).thenReturn(new KnowledgeRetrievalResult(
+                true, List.of(new KnowledgeRetrievalResult.Evidence(
+                1L, 2L, 3L, "chunk-1", "物流规则", "规则",
+                "规则正文", "{}", 0.9, Set.of("kb"))),
+                "v1", "NONE", "SUCCESS", OffsetDateTime.now()));
 
         CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
                 CompositeQueryIntent.logistics("XJ202609290001"),
@@ -126,8 +205,7 @@ class CompositeQueryWorkflowTest {
         assertThat(result.status()).isEqualTo("FAILED");
         assertThat(result.safeMessage())
                 .isEqualTo(CompositeQueryService.BUSINESS_QUERY_FAILED_MESSAGE);
-        verify(knowledgeQueryGateway, org.mockito.Mockito.never())
-                .retrieve(any(), any(), any(), any());
+        verify(knowledgeQueryGateway).retrieve("物流规则", List.of(), IDENTITY, "request-failed");
     }
 
     @Test
@@ -162,5 +240,93 @@ class CompositeQueryWorkflowTest {
                 "C24101816040001", IDENTITY, "request-customer");
         verify(orderGateway, org.mockito.Mockito.never()).search(
                 any(), any(), any(), any());
+    }
+
+    @Test
+    void executesIndependentBusinessAndKnowledgeBranchesInParallel() throws Exception {
+        OffsetDateTime now = OffsetDateTime.parse("2026-09-30T04:00:00+08:00");
+        CountDownLatch businessStarted = new CountDownLatch(1);
+        CountDownLatch knowledgeStarted = new CountDownLatch(1);
+        when(orderGateway.logistics(eq("XJ202609290001"), eq(OrderIdentifierType.ORDER_CODE),
+                eq(IDENTITY), eq("request-parallel"))).thenAnswer(invocation -> {
+            businessStarted.countDown();
+            if (!knowledgeStarted.await(500, TimeUnit.MILLISECONDS)) {
+                throw new AssertionError("knowledge branch did not start in parallel");
+            }
+            return new OrderLogisticsResult(
+                    new OrderLogisticsResult.OrderSummary(
+                            "XJ202609290001", 20, "运输中"),
+                    now, false, List.of());
+        });
+        when(knowledgeQueryGateway.retrieve(eq("查询物流规则"), any(), eq(IDENTITY),
+                eq("request-parallel"))).thenAnswer(invocation -> {
+            knowledgeStarted.countDown();
+            if (!businessStarted.await(500, TimeUnit.MILLISECONDS)) {
+                throw new AssertionError("business branch did not start in parallel");
+            }
+            return new KnowledgeRetrievalResult(
+                    true, List.of(new KnowledgeRetrievalResult.Evidence(
+                    1L, 2L, 3L, "chunk-1", "物流规则", "规则",
+                    "规则正文", "{}", 0.9, Set.of("kb"))),
+                    "v1", "NONE", "SUCCESS", now);
+        });
+
+        CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.logistics("XJ202609290001"),
+                CompositeQueryIntent.knowledge("查询物流规则")));
+
+        CompositeQueryService.CompositeQueryResult result = new CompositeQueryService(
+                new CompositeQueryWorkflow(orderGateway, customerOrderQueryService,
+                        productSearchGateway, afterSaleQueryGateway, knowledgeQueryGateway))
+                .execute(plan, "查询订单物流并根据规则分析", IDENTITY, "request-parallel");
+
+        assertThat(result.success()).isTrue();
+    }
+
+    @Test
+    void resumesFromCheckpointWithoutRepeatingCompletedBusinessBranch() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-09-30T04:00:00+08:00");
+        when(orderGateway.logistics(eq("XJ202609290001"), eq(OrderIdentifierType.ORDER_CODE),
+                eq(IDENTITY), eq("request-resume")))
+                .thenReturn(new OrderLogisticsResult(
+                        new OrderLogisticsResult.OrderSummary(
+                                "XJ202609290001", 20, "运输中"),
+                        now, false, List.of()));
+        when(knowledgeQueryGateway.retrieve(eq("查询物流规则"), any(), eq(IDENTITY),
+                eq("request-resume"))).thenReturn(new KnowledgeRetrievalResult(
+                true, List.of(new KnowledgeRetrievalResult.Evidence(
+                1L, 2L, 3L, "chunk-1", "物流规则", "规则",
+                "规则正文", "{}", 0.9, Set.of("kb"))),
+                "v1", "NONE", "SUCCESS", now));
+        AtomicReference<CompositeQueryCheckpoint> saved = new AtomicReference<>();
+        when(checkpointStore.load("request-resume"))
+                .thenAnswer(invocation -> java.util.Optional.ofNullable(saved.get()));
+        doAnswer(invocation -> {
+            saved.set(invocation.getArgument(0));
+            return null;
+        }).when(checkpointStore).save(any(CompositeQueryCheckpoint.class));
+
+        CompositeQueryWorkflow workflow = new CompositeQueryWorkflow(
+                orderGateway, customerOrderQueryService, productSearchGateway,
+                afterSaleQueryGateway, knowledgeQueryGateway,
+                Clock.fixed(Instant.parse("2026-10-03T04:00:00Z"), ZoneId.of("Asia/Shanghai")),
+                checkpointStore,
+                new CompositeQueryCheckpointProperties(
+                        true, "agent:composite:checkpoint:v2", "v2", Duration.ofMinutes(10)));
+        CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.logistics("XJ202609290001"),
+                CompositeQueryIntent.knowledge("查询物流规则")));
+
+        assertThat(new CompositeQueryService(workflow)
+                .execute(plan, "查询物流", IDENTITY, "request-resume").success()).isTrue();
+        assertThat(saved).isNotNull();
+        assertThat(saved.get().stateJson()).containsKey(CompositeQueryState.COMPLETED_BRANCHES);
+        assertThat(saved.get().completedNodes()).isNotEmpty();
+        CompositeQueryService.CompositeQueryResult resumed = new CompositeQueryService(workflow)
+                .execute(plan, "查询物流", IDENTITY, "request-resume");
+        assertThat(resumed.success()).isTrue();
+
+        verify(orderGateway).logistics("XJ202609290001", OrderIdentifierType.ORDER_CODE,
+                IDENTITY, "request-resume");
     }
 }

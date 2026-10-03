@@ -4,6 +4,9 @@ import com.xjjk.agent.aftersale.domain.AfterSaleDetailResult;
 import com.xjjk.agent.aftersale.service.AfterSaleQueryGateway;
 import com.xjjk.agent.customer.service.CustomerOrderQueryResult;
 import com.xjjk.agent.customer.service.CustomerOrderQueryService;
+import com.xjjk.agent.customer.service.CustomerQueryGateway;
+import com.xjjk.agent.customer.domain.CustomerMatchType;
+import com.xjjk.agent.customer.domain.CustomerSearchResult;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.chat.observation.CompositeQueryMetrics;
 import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
@@ -20,8 +23,11 @@ import com.xjjk.agent.product.service.ProductSearchGateway;
 import com.xjjk.agent.tool.ToolUiResult;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.CompiledGraph;
+import org.bsc.langgraph4j.CompileConfig;
+import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.StateGraph;
 import org.bsc.langgraph4j.action.AsyncNodeAction;
+import org.bsc.langgraph4j.checkpoint.BaseCheckpointSaver;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
@@ -32,6 +38,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Collections;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 
 import static org.bsc.langgraph4j.StateGraph.END;
@@ -44,16 +53,40 @@ import static org.bsc.langgraph4j.action.AsyncEdgeAction.edge_async;
 @Component
 public class CompositeQueryWorkflow {
 
+    private static final ExecutorService PARALLEL_EXECUTOR =
+            Executors.newFixedThreadPool(4, runnable -> {
+                Thread thread = new Thread(runnable, "composite-query");
+                thread.setDaemon(true);
+                return thread;
+            });
+
     private final OrderQueryGateway orderGateway;
     private final CustomerOrderQueryService customerOrderQueryService;
+    private final CustomerQueryGateway customerQueryGateway;
     private final ProductSearchGateway productSearchGateway;
     private final AfterSaleQueryGateway afterSaleQueryGateway;
     private final KnowledgeQueryGateway knowledgeQueryGateway;
     private final Clock clock;
     private final LogisticsStagnationEvaluator stagnationEvaluator;
+    private final BaseCheckpointSaver checkpointSaver;
     private CompositeQueryMetrics metrics;
 
     @org.springframework.beans.factory.annotation.Autowired
+    public CompositeQueryWorkflow(
+            OrderQueryGateway orderGateway,
+            CustomerOrderQueryService customerOrderQueryService,
+            CustomerQueryGateway customerQueryGateway,
+            ProductSearchGateway productSearchGateway,
+            AfterSaleQueryGateway afterSaleQueryGateway,
+            KnowledgeQueryGateway knowledgeQueryGateway,
+            CompositeQueryCheckpointStore checkpointStore,
+            CompositeQueryCheckpointProperties checkpointProperties) {
+        this(orderGateway, customerOrderQueryService, productSearchGateway,
+                customerQueryGateway,
+                afterSaleQueryGateway, knowledgeQueryGateway, Clock.systemDefaultZone(),
+                checkpointStore, checkpointProperties, true);
+    }
+
     public CompositeQueryWorkflow(
             OrderQueryGateway orderGateway,
             CustomerOrderQueryService customerOrderQueryService,
@@ -61,7 +94,8 @@ public class CompositeQueryWorkflow {
             AfterSaleQueryGateway afterSaleQueryGateway,
             KnowledgeQueryGateway knowledgeQueryGateway) {
         this(orderGateway, customerOrderQueryService, productSearchGateway,
-                afterSaleQueryGateway, knowledgeQueryGateway, Clock.systemDefaultZone());
+                null, afterSaleQueryGateway, knowledgeQueryGateway,
+                Clock.systemDefaultZone(), null, null, true);
     }
 
     CompositeQueryWorkflow(
@@ -71,13 +105,64 @@ public class CompositeQueryWorkflow {
             AfterSaleQueryGateway afterSaleQueryGateway,
             KnowledgeQueryGateway knowledgeQueryGateway,
             Clock clock) {
+        this(orderGateway, customerOrderQueryService, productSearchGateway,
+                null, afterSaleQueryGateway, knowledgeQueryGateway,
+                clock, null, null, true);
+    }
+
+    CompositeQueryWorkflow(
+            OrderQueryGateway orderGateway,
+            CustomerOrderQueryService customerOrderQueryService,
+            ProductSearchGateway productSearchGateway,
+            AfterSaleQueryGateway afterSaleQueryGateway,
+            KnowledgeQueryGateway knowledgeQueryGateway,
+            Clock clock,
+            CompositeQueryCheckpointStore checkpointStore,
+            CompositeQueryCheckpointProperties checkpointProperties) {
+        this(orderGateway, customerOrderQueryService, productSearchGateway,
+                null, afterSaleQueryGateway, knowledgeQueryGateway, clock,
+                checkpointStore, checkpointProperties, true);
+    }
+
+    CompositeQueryWorkflow(
+            OrderQueryGateway orderGateway,
+            CustomerOrderQueryService customerOrderQueryService,
+            CustomerQueryGateway customerQueryGateway,
+            ProductSearchGateway productSearchGateway,
+            AfterSaleQueryGateway afterSaleQueryGateway,
+            KnowledgeQueryGateway knowledgeQueryGateway,
+            Clock clock,
+            CompositeQueryCheckpointStore checkpointStore,
+            CompositeQueryCheckpointProperties checkpointProperties) {
+        this(orderGateway, customerOrderQueryService, productSearchGateway,
+                customerQueryGateway, afterSaleQueryGateway, knowledgeQueryGateway,
+                clock, checkpointStore, checkpointProperties, true);
+    }
+
+    private CompositeQueryWorkflow(
+            OrderQueryGateway orderGateway,
+            CustomerOrderQueryService customerOrderQueryService,
+            ProductSearchGateway productSearchGateway,
+            CustomerQueryGateway customerQueryGateway,
+            AfterSaleQueryGateway afterSaleQueryGateway,
+            KnowledgeQueryGateway knowledgeQueryGateway,
+            Clock clock,
+            CompositeQueryCheckpointStore checkpointStore,
+            CompositeQueryCheckpointProperties checkpointProperties,
+            boolean ignored) {
         this.orderGateway = orderGateway;
         this.customerOrderQueryService = customerOrderQueryService;
+        this.customerQueryGateway = customerQueryGateway;
         this.productSearchGateway = productSearchGateway;
         this.afterSaleQueryGateway = afterSaleQueryGateway;
         this.knowledgeQueryGateway = knowledgeQueryGateway;
         this.clock = clock;
         this.stagnationEvaluator = new LogisticsStagnationEvaluator(clock);
+        this.checkpointSaver = checkpointStore != null && checkpointProperties != null
+                && checkpointProperties.enabled()
+                ? new LangGraph4jRedisCheckpointSaver(
+                checkpointStore, checkpointProperties.graphVersion(), clock)
+                : null;
     }
 
     CompositeQueryService.CompositeQueryResult execute(
@@ -96,7 +181,16 @@ public class CompositeQueryWorkflow {
             graphInput.remove(CompositeQueryState.PLAN);
             graphInput.remove(CompositeQueryState.RESULTS);
             graphInput.remove(CompositeQueryState.KNOWLEDGE);
-            CompositeQueryState finalState = graph.invoke(graphInput).orElseThrow();
+            RunnableConfig runnableConfig = RunnableConfig.builder()
+                    .threadId(requestId)
+                    .addParallelNodeExecutor("input.validate", PARALLEL_EXECUTOR)
+                    .addParallelNodeExecutor("branch.dispatch", PARALLEL_EXECUTOR)
+                    .build();
+            if (checkpointSaver != null) {
+                checkpointSaver.get(runnableConfig).ifPresent(checkpoint ->
+                        graphInput.putAll(checkpoint.getState()));
+            }
+            CompositeQueryState finalState = graph.invoke(graphInput, runnableConfig).orElseThrow();
             if (metrics != null) {
                 metrics.graph(finalState.finalStatus());
             }
@@ -125,6 +219,9 @@ public class CompositeQueryWorkflow {
                 .addNode("input.validate", node_async(state -> observeNode(
                         "input.validate", state,
                         () -> validateInput(state, context))))
+                .addNode("branch.dispatch", node_async(state -> observeNode(
+                        "branch.dispatch", state,
+                        () -> CompositeQueryState.update(state, "branch.dispatch", "SUCCESS", Map.of()))))
                 .addNode("business.query", node_async(state -> observeNode(
                         "business.query", state,
                         () -> queryBusiness(state, context, identity, requestId))))
@@ -139,21 +236,25 @@ public class CompositeQueryWorkflow {
                         () -> composeAnswer(state, context))));
         graph.addEdge(START, "input.validate");
         graph.addConditionalEdges(
-                "input.validate", edge_async(state -> routeAfterValidation(state, context)), Map.of(
+                "input.validate", edge_async(state -> state.missingInputs().isEmpty()
+                        ? "RUN" : "WAITING_INPUT"), Map.of(
                         "WAITING_INPUT", END,
-                        "BUSINESS", "business.query",
-                        "KNOWLEDGE", "knowledge.query",
-                        "BOTH", "business.query",
-                        "VALIDATE", "result.validate"));
-        graph.addConditionalEdges(
-                "business.query", edge_async(state -> routeAfterBusiness(state, context)), Map.of(
-                        "KNOWLEDGE", "knowledge.query",
-                        "VALIDATE", "result.validate",
-                        "FAILED", END));
+                        "RUN", "branch.dispatch"));
+        // 同一入口同时启动业务与知识分支；未请求的分支在节点内部立即 no-op。
+        graph.addEdge("branch.dispatch", "business.query");
+        graph.addEdge("branch.dispatch", "knowledge.query");
+        graph.addEdge("business.query", "result.validate");
         graph.addEdge("knowledge.query", "result.validate");
         graph.addEdge("result.validate", "answer.compose");
         graph.addEdge("answer.compose", END);
-        return graph.compile();
+        if (checkpointSaver == null) {
+            return graph.compile();
+        }
+        return graph.compile(CompileConfig.builder()
+                .graphId("composite-query-v2")
+                .checkpointSaver(checkpointSaver)
+                .releaseThread(false)
+                .build());
     }
 
     private Map<String, Object> validateInput(
@@ -189,16 +290,27 @@ public class CompositeQueryWorkflow {
             InvocationContext context,
             AgentIdentity identity,
             String requestId) {
+        restoreCheckpointContext(state, context);
         for (CompositeQueryIntent intent : context.plan.intents()) {
             if (intent.source() != CompositeQueryIntent.Source.BUSINESS) continue;
+            if (state.completedBranches().contains(branchName(intent))
+                    || context.completedBranches.contains(branchName(intent))) continue;
             try {
                 ToolUiResult result = queryBusinessIntent(intent, identity, requestId);
                 context.results.add(result);
+                String branch = branchName(intent);
+                context.completedBranches.add(branch);
+                context.branchSnapshots.add(new CompositeQueryBranchSnapshot(
+                        branch, result.kind(), "SUCCESS", safeResultText(result.data()),
+                        "", 0));
                 if (metrics != null) {
                     metrics.result(result.kind(), "SUCCESS");
                 }
             } catch (RuntimeException exception) {
                 context.failures.add(intent.resultKind());
+                context.branchSnapshots.add(new CompositeQueryBranchSnapshot(
+                        branchName(intent), intent.resultKind(), "FAILED", "",
+                        exception.getClass().getSimpleName(), 0));
                 if (metrics != null) {
                     metrics.result(intent.resultKind(), "FAILURE");
                 }
@@ -209,6 +321,8 @@ public class CompositeQueryWorkflow {
         Map<String, Object> values = new LinkedHashMap<>();
         values.put(CompositeQueryState.RESULT_COUNT, context.results.size());
         values.put(CompositeQueryState.FAILURES, List.copyOf(context.failures));
+        values.put(CompositeQueryState.BRANCH_SNAPSHOTS, List.copyOf(context.branchSnapshots));
+        values.put(CompositeQueryState.COMPLETED_BRANCHES, List.copyOf(context.completedBranches));
         // 业务节点失败后会直接结束图，必须把终态写入状态，避免外层拿到 PENDING。
         if (!context.failures.isEmpty()) {
             values.put(CompositeQueryState.FINAL_STATUS, "FAILED");
@@ -243,6 +357,15 @@ public class CompositeQueryWorkflow {
                 yield new ToolUiResult("search_orders", "order-list", 1,
                         result.queriedAt(), result);
             }
+            case "customer-list" -> {
+                if (customerQueryGateway == null) {
+                    throw new IllegalStateException("客户查询服务未配置");
+                }
+                CustomerSearchResult result = customerQueryGateway.search(
+                        intent.value(), CustomerMatchType.AUTO, identity, requestId);
+                yield new ToolUiResult("search_customers", "customer-list", 1,
+                        result.queriedAt(), result);
+            }
             case "product-list" -> {
                 ProductSearchResult result = productSearchGateway.search(
                         ProductSearchQuery.of(intent.value(), 1, 10));
@@ -271,16 +394,31 @@ public class CompositeQueryWorkflow {
             InvocationContext context,
             AgentIdentity identity,
             String requestId) {
+        restoreCheckpointContext(state, context);
         for (CompositeQueryIntent intent : context.plan.intents()) {
             if (intent.source() != CompositeQueryIntent.Source.KNOWLEDGE) continue;
+            if (state.completedBranches().contains(branchName(intent))
+                    || context.completedBranches.contains(branchName(intent))) continue;
             try {
-                context.knowledge.add(knowledgeQueryGateway.retrieve(
-                        intent.value(), List.of(), identity, requestId));
+                KnowledgeRetrievalResult retrieval = knowledgeQueryGateway.retrieve(
+                        intent.value(), List.of(), identity, requestId);
+                if (retrieval == null) {
+                    throw new IllegalStateException("知识库未返回可靠结果");
+                }
+                context.knowledge.add(retrieval);
+                String branch = branchName(intent);
+                context.completedBranches.add(branch);
+                context.branchSnapshots.add(new CompositeQueryBranchSnapshot(
+                        branch, "knowledge-citations", "SUCCESS",
+                        "证据数=" + retrieval.evidences().size(), "", 0));
                 if (metrics != null) {
                     metrics.result("knowledge-citations", "SUCCESS");
                 }
             } catch (RuntimeException exception) {
                 context.failures.add("knowledge-citations");
+                context.branchSnapshots.add(new CompositeQueryBranchSnapshot(
+                        branchName(intent), "knowledge-citations", "FAILED", "",
+                        exception.getClass().getSimpleName(), 0));
                 if (metrics != null) {
                     metrics.result("knowledge-citations", "FAILURE");
                 }
@@ -291,29 +429,52 @@ public class CompositeQueryWorkflow {
         return CompositeQueryState.update(state, "knowledge.query",
                 context.failures.isEmpty() ? "SUCCESS" : "FAILED",
                 Map.of(CompositeQueryState.KNOWLEDGE_COUNT, context.knowledge.size(),
-                        CompositeQueryState.FAILURES, List.copyOf(context.failures)));
+                        CompositeQueryState.FAILURES, List.copyOf(context.failures),
+                        CompositeQueryState.BRANCH_SNAPSHOTS, List.copyOf(context.branchSnapshots),
+                        CompositeQueryState.COMPLETED_BRANCHES, List.copyOf(context.completedBranches)));
     }
 
     private Map<String, Object> validateResults(
             CompositeQueryState state, InvocationContext context) {
         Set<String> actual = new LinkedHashSet<>();
         context.results.forEach(result -> actual.add(result.kind()));
+        state.branchSnapshots().stream()
+                .filter(snapshot -> "SUCCESS".equals(snapshot.status()))
+                .map(CompositeQueryBranchSnapshot::resultKind)
+                .forEach(actual::add);
         boolean knowledgeRequested = context.plan.hasSource(CompositeQueryIntent.Source.KNOWLEDGE);
         boolean knowledgeOk = !knowledgeRequested
                 || (context.failures.stream().noneMatch("knowledge-citations"::equals)
-                && !context.knowledge.isEmpty()
+                && ((!context.knowledge.isEmpty()
                 && context.knowledge.stream().allMatch(
-                result -> result.answerable() && !result.evidences().isEmpty()));
+                result -> result.answerable() && !result.evidences().isEmpty()))
+                || state.branchSnapshots().stream().anyMatch(snapshot ->
+                "knowledge-citations".equals(snapshot.resultKind())
+                        && "SUCCESS".equals(snapshot.status()))));
         if (knowledgeOk && !context.knowledge.isEmpty()) {
             actual.add("knowledge-citations");
         }
+        boolean analysisRequested = context.plan.intents().stream()
+                .anyMatch(intent -> "general-analysis".equals(intent.resultKind()));
+        boolean baseFactsReady = context.plan.requiredResultKinds().stream()
+                .filter(kind -> !"general-analysis".equals(kind))
+                .allMatch(actual::contains);
+        if (analysisRequested && baseFactsReady && knowledgeOk) {
+            actual.add("general-analysis");
+        }
         boolean complete = actual.containsAll(context.plan.requiredResultKinds())
                 && knowledgeOk;
-        String status = complete ? "SUCCESS"
+        String status = !context.failures.isEmpty() ? "FAILED"
+                : complete ? "SUCCESS"
                 : !knowledgeOk && knowledgeRequested
                 ? "NO_RELIABLE_KNOWLEDGE" : "MISSING_RESULT";
         return CompositeQueryState.update(state, "result.validate", status,
-                Map.of(CompositeQueryState.FINAL_STATUS, status));
+                Map.of(CompositeQueryState.FINAL_STATUS, status,
+                        CompositeQueryState.FAILURES, List.copyOf(context.failures),
+                        CompositeQueryState.BRANCH_SNAPSHOTS,
+                        List.copyOf(context.branchSnapshots),
+                        CompositeQueryState.COMPLETED_BRANCHES,
+                        List.copyOf(context.completedBranches)));
     }
 
     private Map<String, Object> composeAnswer(
@@ -329,8 +490,34 @@ public class CompositeQueryWorkflow {
         context.knowledge.forEach(result -> result.evidences().forEach(evidence ->
                 answer.append("《").append(evidence.documentTitle()).append("》")
                         .append("：").append(evidence.content()).append("\n")));
+        if (context.results.isEmpty() && context.knowledge.isEmpty()) {
+            List<CompositeQueryBranchSnapshot> snapshots = state.branchSnapshots().isEmpty()
+                    ? List.copyOf(context.branchSnapshots) : state.branchSnapshots();
+            snapshots.stream()
+                    .filter(snapshot -> "SUCCESS".equals(snapshot.status()))
+                    .forEach(snapshot -> answer.append(snapshot.resultKind())
+                            .append("：").append(snapshot.safeSummary()).append("\n"));
+        }
+        if (context.plan.intents().stream()
+                .anyMatch(intent -> "general-analysis".equals(intent.resultKind()))) {
+            answer.append("综合分析：以上结论仅基于本次已核验的业务事实与企业知识，未引入外部市场数据；请按企业规则和实际授权范围处理。\n");
+        }
         return CompositeQueryState.update(state, "answer.compose", "SUCCESS",
                 Map.of(CompositeQueryState.ANSWER_CONTEXT, answer.toString()));
+    }
+
+    private String branchName(CompositeQueryIntent intent) {
+        return intent.source().name().toLowerCase(java.util.Locale.ROOT)
+                + ":" + intent.resultKind();
+    }
+
+    private void restoreCheckpointContext(
+            CompositeQueryState state, InvocationContext context) {
+        if (context.branchSnapshots.isEmpty()) {
+            context.branchSnapshots.addAll(state.branchSnapshots());
+        }
+        context.completedBranches.addAll(state.completedBranches());
+        context.failures.addAll(state.failures());
     }
 
     private String safeResultText(Object data) {
@@ -407,9 +594,14 @@ public class CompositeQueryWorkflow {
 
     private static final class InvocationContext {
         private final CompositeQueryPlan plan;
-        private final List<ToolUiResult> results = new ArrayList<>();
-        private final List<KnowledgeRetrievalResult> knowledge = new ArrayList<>();
-        private final List<String> failures = new ArrayList<>();
+        private final List<ToolUiResult> results = Collections.synchronizedList(new ArrayList<>());
+        private final List<KnowledgeRetrievalResult> knowledge =
+                Collections.synchronizedList(new ArrayList<>());
+        private final List<String> failures = Collections.synchronizedList(new ArrayList<>());
+        private final Set<String> completedBranches =
+                Collections.synchronizedSet(new LinkedHashSet<>());
+        private final List<CompositeQueryBranchSnapshot> branchSnapshots =
+                Collections.synchronizedList(new ArrayList<>());
 
         private InvocationContext(CompositeQueryPlan plan) {
             this.plan = plan;
