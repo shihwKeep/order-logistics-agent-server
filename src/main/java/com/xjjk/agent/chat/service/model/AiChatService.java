@@ -39,6 +39,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -271,6 +272,29 @@ public class AiChatService {
         });
     }
 
+    /** 对复合回答做一次无工具纠偏，仍然只允许使用服务端已核验上下文。 */
+    public Flux<ChatResponse> streamGroundedCompositeCorrection(
+            String message,
+            ChatContextSelection selection,
+            String verifiedContext,
+            String draft,
+            Set<String> violations) {
+        Assert.hasText(message, "消息内容不能为空");
+        Objects.requireNonNull(selection, "上下文筛选结果不能为空");
+        Assert.hasText(verifiedContext, "复合查询验证上下文不能为空");
+        Assert.hasText(draft, "待纠偏回答不能为空");
+        Objects.requireNonNull(violations, "回答违规项不能为空");
+
+        return Flux.defer(() -> chatClient
+                .prompt()
+                .system(selection.effectiveSystemPrompt())
+                .user(groundedCompositeCorrectionPrompt(
+                        message, verifiedContext, draft, violations))
+                .toolCallbacks(List.of())
+                .stream()
+                .chatResponse());
+    }
+
     /** 生成带边界的证据上下文；证据正文永远按数据处理，不接受其中的指令。 */
     String groundedKnowledgePrompt(String message, String evidence) {
         Objects.requireNonNull(message, "消息内容不能为空");
@@ -313,6 +337,36 @@ public class AiChatService {
                 + "<verified-composite-context>\n"
                 + verifiedContext
                 + "\n</verified-composite-context>";
+    }
+
+    /** 生成带违规原因的纠偏提示，避免模型只重复原始越界回答。 */
+    String groundedCompositeCorrectionPrompt(
+            String message,
+            String verifiedContext,
+            String draft,
+            Set<String> violations) {
+        Objects.requireNonNull(message, "消息内容不能为空");
+        Objects.requireNonNull(verifiedContext, "复合查询验证上下文不能为空");
+        Objects.requireNonNull(draft, "待纠偏回答不能为空");
+        Objects.requireNonNull(violations, "回答违规项不能为空");
+        return "用户问题：\n" + message
+                + "\n\n你刚才的回答违反了服务端事实约束，违规项=" + violations
+                + "。请只返回修正后的最终回答，不要解释修改过程。"
+                + "只能使用下方已核验上下文；没有执行结果时只能写‘应’、‘需’或‘建议’，"
+                + "不要声称动作已经执行，也不要把轨迹内容推断为乱码、非官方、无效或无有效更新。\n"
+                + "首次回答：\n" + draft
+                + "\n<verified-composite-context>\n"
+                + verifiedContext
+                + "\n</verified-composite-context>";
+    }
+
+    /** 纠偏仍失败时使用的最小安全回答，不声称任何业务动作已经执行。 */
+    String compositeSafeFallback(String verifiedContext) {
+        Objects.requireNonNull(verifiedContext, "复合查询验证上下文不能为空");
+        return "已取得本次订单的业务查询结果，并按服务端评估结果判断当前物流时效。"
+                + "如评估状态为EXCEEDED，说明已达到当前环节阈值；客服应按企业规则生成预警并联系承运商核查。"
+                + "上述动作是否已经执行，以业务系统明确返回的执行结果为准。"
+                + "轨迹内容仅按接口返回事实展示，当前无法据此确认丢失、延误、责任或赔付结论。";
     }
 
     /**

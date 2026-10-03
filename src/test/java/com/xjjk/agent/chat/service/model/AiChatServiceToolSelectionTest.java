@@ -232,6 +232,27 @@ class AiChatServiceToolSelectionTest {
                 .contains("最多400个汉字");
     }
 
+    @Test
+    void buildsGroundedCompositeCorrectionPromptWithViolationReasons() {
+        AiChatService service = service(
+                capability(false, "OFF", Set.of()),
+                capability(false, "OFF", Set.of()));
+
+        String prompt = service.groundedCompositeCorrectionPrompt(
+                "订单 XJ202609290001 的物流是否需要预警？",
+                "评估状态=EXCEEDED，适用阈值小时=24",
+                "系统已生成预警，正在核实中。",
+                Set.of("UNVERIFIED_EXECUTION"));
+
+        assertThat(prompt)
+                .contains("订单 XJ202609290001 的物流是否需要预警？")
+                .contains("评估状态=EXCEEDED，适用阈值小时=24")
+                .contains("系统已生成预警，正在核实中。")
+                .contains("UNVERIFIED_EXECUTION")
+                .contains("只返回修正后的最终回答")
+                .contains("不要声称动作已经执行");
+    }
+
     private AiChatService service(
             OrderToolAvailability.Capability order,
             OrderToolAvailability.Capability logistics) {
