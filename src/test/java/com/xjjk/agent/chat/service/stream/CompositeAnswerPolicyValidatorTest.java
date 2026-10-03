@@ -39,4 +39,13 @@ class CompositeAnswerPolicyValidatorTest {
                 "评估状态=EXCEEDED，执行结果=已生成预警"))
                 .isEmpty();
     }
+
+    @Test
+    void knowledgeRuleTextDoesNotAuthorizeAnExecutionClaim() {
+        assertThat(validator.validate(
+                "系统已生成预警。",
+                "业务事实：评估状态=EXCEEDED\n"
+                        + "企业知识依据：规则要求系统已生成预警"))
+                .containsExactly("UNVERIFIED_EXECUTION");
+    }
 }

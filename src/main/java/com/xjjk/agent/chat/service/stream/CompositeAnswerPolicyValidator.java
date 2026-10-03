@@ -28,7 +28,7 @@ public final class CompositeAnswerPolicyValidator {
         if (!StringUtils.hasText(answer)) {
             return List.of("EMPTY_ANSWER");
         }
-        String context = verifiedContext == null ? "" : verifiedContext;
+        String context = businessFactContext(verifiedContext);
         List<String> violations = new ArrayList<>();
         if (containsUnverifiedMarker(answer, context, EXECUTION_MARKERS)) {
             violations.add("UNVERIFIED_EXECUTION");
@@ -37,6 +37,16 @@ public final class CompositeAnswerPolicyValidator {
             violations.add("TRACE_VALIDITY_INFERENCE");
         }
         return List.copyOf(violations);
+    }
+
+    private String businessFactContext(String verifiedContext) {
+        if (verifiedContext == null) {
+            return "";
+        }
+        int knowledgeBoundary = verifiedContext.indexOf("企业知识依据");
+        return knowledgeBoundary < 0
+                ? verifiedContext
+                : verifiedContext.substring(0, knowledgeBoundary);
     }
 
     private boolean containsUnverifiedMarker(
