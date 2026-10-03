@@ -37,6 +37,12 @@ public record CompositeQueryPlan(
         return Set.copyOf(kinds);
     }
 
+    public Set<String> resultKinds() {
+        Set<String> kinds = new LinkedHashSet<>();
+        intents.forEach(intent -> kinds.add(intent.resultKind()));
+        return Set.copyOf(kinds);
+    }
+
     public String planHash() {
         return Integer.toHexString(intents.toString().hashCode())
                 + (requiresExternalSource ? ":external" : ":internal");

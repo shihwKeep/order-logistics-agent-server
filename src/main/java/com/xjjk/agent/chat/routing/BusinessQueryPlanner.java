@@ -8,6 +8,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashSet;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -64,6 +66,13 @@ public class BusinessQueryPlanner {
                     missingIdentifierMessage(product, customer, order, logistics, afterSale));
         }
 
+        // 复合问题必须先于规则-only 识别，避免“查询商品并按企业规则分析”被误送到纯知识路径。
+        CompositeQueryPlan compositePlan = compositePlanFor(
+                message, product, customer, order, logistics, afterSale);
+        if (compositePlan != null) {
+            return BusinessQueryPlan.composite(compositePlan);
+        }
+
         if (isKnowledgeQuestion(message)) {
             // “订单状态有哪些”是在问租户业务知识，不代表要求读取某一笔实时订单。
             // 进入缓冲路径后，只有本轮知识检索返回可靠证据才允许模型正文流出。
@@ -79,12 +88,6 @@ public class BusinessQueryPlanner {
         }
 
         // 复合问题先进入显式工作流，避免实时查询和知识库规则被模型混在一次工具循环中。
-        CompositeQueryPlan compositePlan = compositePlanFor(
-                message, product, customer, order, logistics, afterSale);
-        if (compositePlan != null) {
-            return BusinessQueryPlan.composite(compositePlan);
-        }
-
         int domains = count(product, customer, logistics, afterSale);
         // 单一物流意图且能提取完整订单号时，直接执行固定物流动作，减少一次模型决策。
         if (domains == 1 && logistics) {
@@ -133,32 +136,53 @@ public class BusinessQueryPlanner {
             boolean order,
             boolean logistics,
             boolean afterSale) {
-        if (!containsAny(message, "规则", "政策", "制度", "流程", "规范", "阈值",
-                "判断是否", "是否需要", "如何处理", "怎么处理", "是否符合")) {
+        boolean knowledgeRequested = containsAny(message, "规则", "政策", "制度", "流程", "规范", "阈值",
+                "判断是否", "是否需要", "如何处理", "怎么处理", "是否符合", "定价");
+        boolean analysisRequested = containsAny(message, "分析", "是否合理",
+                "比较", "建议", "如何定价");
+        boolean externalRequested = containsAny(message, "市场价格", "竞品价格", "网页",
+                "外部行情", "市场行情", "市面价格", "普遍价格");
+        boolean explicitCombination = containsAny(message, "结合", "同时", "一起", "比较");
+        if (!knowledgeRequested && !analysisRequested && !externalRequested
+                && (!explicitCombination
+                || count(product, customer, order, logistics, afterSale) < 2)) {
             return null;
         }
+
+        List<CompositeQueryIntent> intents = new ArrayList<>();
         String orderCode = find(ORDER_CODE, message);
         if (logistics && orderCode != null) {
-            return CompositeQueryPlan.of(java.util.List.of(
-                    CompositeQueryIntent.logistics(orderCode),
-                    CompositeQueryIntent.knowledge(message)));
-        }
-        if (order && orderCode != null) {
-            return CompositeQueryPlan.of(java.util.List.of(
-                    CompositeQueryIntent.order(orderCode),
-                    CompositeQueryIntent.knowledge(message)));
+            intents.add(CompositeQueryIntent.logistics(orderCode));
+        } else if (order && orderCode != null) {
+            intents.add(CompositeQueryIntent.order(orderCode));
         }
         String customerCode = find(CUSTOMER_CODE, message);
         if (customer && order && customerCode != null) {
-            return CompositeQueryPlan.of(java.util.List.of(
-                    CompositeQueryIntent.customerOrders(customerCode),
-                    CompositeQueryIntent.knowledge(message)));
+            intents.removeIf(intent -> "order-list".equals(intent.resultKind()));
+            intents.add(CompositeQueryIntent.customerOrders(customerCode));
+        } else if (customer && customerCode != null) {
+            intents.add(CompositeQueryIntent.customer(customerCode));
         }
         String afterSaleCode = find(AFTER_SALE_CODE, message);
         if (afterSale && afterSaleCode != null) {
-            return CompositeQueryPlan.of(java.util.List.of(
-                    CompositeQueryIntent.afterSale(afterSaleCode),
-                    CompositeQueryIntent.knowledge(message)));
+            intents.add(CompositeQueryIntent.afterSale(afterSaleCode));
+        }
+        String productIdentifier = extractProductIdentifier(message);
+        if (product && productIdentifier != null) {
+            intents.add(CompositeQueryIntent.product(productIdentifier));
+        }
+        if (knowledgeRequested) {
+            intents.add(CompositeQueryIntent.knowledge(message));
+        }
+        if (analysisRequested && intents.stream()
+                .anyMatch(intent -> intent.source() != CompositeQueryIntent.Source.GENERAL)) {
+            intents.add(CompositeQueryIntent.general(message));
+        }
+        if (externalRequested) {
+            intents.add(CompositeQueryIntent.externalUnavailable(message));
+        }
+        if (intents.size() >= 2) {
+            return CompositeQueryPlan.withExternalSource(intents, externalRequested);
         }
         return null;
     }
@@ -246,6 +270,9 @@ public class BusinessQueryPlanner {
                 || !(product || customer || order || logistics || afterSale)) {
             return false;
         }
+        if (product && extractProductIdentifier(message) != null) {
+            return false;
+        }
         return find(ORDER_CODE, message) == null
                 && find(CUSTOMER_CODE, message) == null
                 && find(AFTER_SALE_CODE, message) == null;
@@ -279,6 +306,31 @@ public class BusinessQueryPlanner {
     private String find(Pattern pattern, String message) {
         Matcher matcher = pattern.matcher(message);
         return matcher.find() ? matcher.group(1).toUpperCase(Locale.ROOT) : null;
+    }
+
+    private String extractProductIdentifier(String message) {
+        Matcher code = Pattern.compile(
+                "(?i)(?:SKU|SPU|条码)\\s*[:：]?\\s*([A-Za-z0-9_-]{2,64})")
+                .matcher(message);
+        if (code.find()) {
+            return code.group(1);
+        }
+        int marker = message.indexOf("商品");
+        if (marker < 0) {
+            return null;
+        }
+        String before = message.substring(0, marker)
+                .replaceAll("查询|查看|查下|查一下|帮我查|帮忙查|请", "")
+                .replaceAll("[\\s，。！？、:：]", "")
+                .trim();
+        if (before.length() >= 2) {
+            return before;
+        }
+        String after = message.substring(marker + 2)
+                .split("并|根据|按照|，|。|,", 2)[0]
+                .replaceAll("[\\s:：]", "")
+                .trim();
+        return after.length() >= 2 ? after : null;
     }
 
     private boolean containsAny(String value, String... candidates) {

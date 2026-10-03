@@ -48,6 +48,10 @@ public record CompositeQueryIntent(
         return new CompositeQueryIntent(Source.BUSINESS, customerCode, "order-list");
     }
 
+    public static CompositeQueryIntent customer(String customerCode) {
+        return new CompositeQueryIntent(Source.BUSINESS, customerCode, "customer-list");
+    }
+
     public static CompositeQueryIntent afterSale(String afterSaleCode) {
         return new CompositeQueryIntent(
                 Source.BUSINESS, afterSaleCode, "after-sale-detail");

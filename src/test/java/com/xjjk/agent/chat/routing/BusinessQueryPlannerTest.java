@@ -127,7 +127,43 @@ class BusinessQueryPlannerTest {
 
         BusinessQueryPlan market = planner.plan(
                 "订单 XJTS0120260820000011 中的商品当前市场价格区间是多少");
-        assertThat(market.requiresExternalSource()).isFalse();
+        assertThat(market.requiresExternalSource()).isTrue();
+    }
+
+    @Test
+    void productAndPolicyUsesCompositePlan() {
+        BusinessQueryPlan plan = planner.plan(
+                "查询鱼油商品，并根据企业定价规则判断成交价是否合理");
+
+        assertThat(plan.mode()).isEqualTo(BusinessQueryMode.COMPOSITE);
+        assertThat(plan.acceptedResultKinds())
+                .contains("product-list", "knowledge-citations", "general-analysis");
+    }
+
+    @Test
+    void customerAndAfterSalePolicyUsesCompositePlan() {
+        BusinessQueryPlan plan = planner.plan(
+                "查询客户 C24101816040001 的订单，并结合售后规则分析是否符合退货条件");
+
+        assertThat(plan.mode()).isEqualTo(BusinessQueryMode.COMPOSITE);
+        assertThat(plan.acceptedResultKinds())
+                .contains("order-list", "knowledge-citations", "general-analysis");
+    }
+
+    @Test
+    void orderProductAndMarketPriceCreatesUnsupportedExternalMarker() {
+        BusinessQueryPlan plan = planner.plan(
+                "查询订单 XJTS0120260820000011 的商品，并分析当前市场价格区间");
+
+        assertThat(plan.mode()).isEqualTo(BusinessQueryMode.COMPOSITE);
+        assertThat(plan.requiresExternalSource()).isTrue();
+        assertThat(plan.acceptedResultKinds()).contains("external-data-unavailable");
+    }
+
+    @Test
+    void missingOrderIdentifierStillClarifiesBeforeCompositeRouting() {
+        assertThat(planner.plan("查询订单物流并根据规则判断").mode())
+                .isEqualTo(BusinessQueryMode.CLARIFICATION);
     }
 
     @Test

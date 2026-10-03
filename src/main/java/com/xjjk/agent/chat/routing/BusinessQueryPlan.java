@@ -108,7 +108,7 @@ public record BusinessQueryPlan(
         return new BusinessQueryPlan(
                 BusinessQueryMode.COMPOSITE,
                 null,
-                compositePlan.requiredResultKinds(),
+                compositePlan.resultKinds(),
                 compositePlan,
                 null);
     }
