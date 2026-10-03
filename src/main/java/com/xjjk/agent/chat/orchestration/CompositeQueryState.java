@@ -25,6 +25,13 @@ public final class CompositeQueryState extends AgentState {
     static final String FINAL_STATUS = "finalStatus";
     static final String RESULT_COUNT = "resultCount";
     static final String KNOWLEDGE_COUNT = "knowledgeCount";
+    static final String BRANCH_SNAPSHOTS = "branchSnapshots";
+    static final String COMPLETED_BRANCHES = "completedBranches";
+    static final String PENDING_BRANCHES = "pendingBranches";
+    static final String RETRY_COUNTS = "retryCounts";
+    static final String PLAN_HASH = "planHash";
+    static final String CHECKPOINT_VERSION = "checkpointVersion";
+    static final String NEXT_NODE = "nextNode";
 
     public CompositeQueryState(Map<String, Object> data) {
         super(data);
@@ -51,6 +58,13 @@ public final class CompositeQueryState extends AgentState {
         data.put(FINAL_STATUS, "PENDING");
         data.put(RESULT_COUNT, 0);
         data.put(KNOWLEDGE_COUNT, 0);
+        data.put(BRANCH_SNAPSHOTS, List.of());
+        data.put(COMPLETED_BRANCHES, List.of());
+        data.put(PENDING_BRANCHES, List.of());
+        data.put(RETRY_COUNTS, Map.of());
+        data.put(PLAN_HASH, plan.planHash());
+        data.put(CHECKPOINT_VERSION, "v2");
+        data.put(NEXT_NODE, "input.validate");
         return new CompositeQueryState(data);
     }
 
@@ -110,6 +124,12 @@ public final class CompositeQueryState extends AgentState {
         return this.<String>value(FINAL_STATUS).orElse("PENDING");
     }
 
+    @SuppressWarnings("unchecked")
+    public List<CompositeQueryBranchSnapshot> branchSnapshots() {
+        return this.<List<CompositeQueryBranchSnapshot>>value(BRANCH_SNAPSHOTS)
+                .orElseGet(List::of);
+    }
+
     public Map<String, Object> toSafeLogData() {
         Map<String, Object> safe = new LinkedHashMap<>();
         safe.put(REQUEST_ID, requestId());
@@ -119,7 +139,26 @@ public final class CompositeQueryState extends AgentState {
         safe.put(NODE_STATUSES, nodeStatuses());
         safe.put(FAILURES, failures());
         safe.put(FINAL_STATUS, finalStatus());
+        safe.put(COMPLETED_BRANCHES, this.<List<String>>value(COMPLETED_BRANCHES)
+                .orElseGet(List::of));
+        safe.put(PENDING_BRANCHES, this.<List<String>>value(PENDING_BRANCHES)
+                .orElseGet(List::of));
         return safe;
+    }
+
+    static CompositeQueryState withBranchSnapshot(
+            CompositeQueryState state, CompositeQueryBranchSnapshot snapshot) {
+        List<CompositeQueryBranchSnapshot> snapshots = new ArrayList<>(state.branchSnapshots());
+        snapshots.removeIf(value -> value.branchName().equals(snapshot.branchName()));
+        snapshots.add(snapshot);
+        List<String> completed = snapshots.stream()
+                .filter(value -> "SUCCESS".equals(value.status()))
+                .map(CompositeQueryBranchSnapshot::branchName)
+                .toList();
+        Map<String, Object> data = new LinkedHashMap<>(state.data());
+        data.put(BRANCH_SNAPSHOTS, List.copyOf(snapshots));
+        data.put(COMPLETED_BRANCHES, completed);
+        return new CompositeQueryState(data);
     }
 
     static Map<String, Object> update(

@@ -25,10 +25,21 @@ public record CompositeQueryPlan(
         return new CompositeQueryPlan(intents, false);
     }
 
+    public static CompositeQueryPlan withExternalSource(
+            List<CompositeQueryIntent> intents, boolean requiresExternalSource) {
+        return new CompositeQueryPlan(intents, requiresExternalSource);
+    }
+
     public Set<String> requiredResultKinds() {
         Set<String> kinds = new LinkedHashSet<>();
-        intents.forEach(intent -> kinds.add(intent.resultKind()));
+        intents.stream().filter(CompositeQueryIntent::required)
+                .forEach(intent -> kinds.add(intent.resultKind()));
         return Set.copyOf(kinds);
+    }
+
+    public String planHash() {
+        return Integer.toHexString(intents.toString().hashCode())
+                + (requiresExternalSource ? ":external" : ":internal");
     }
 
     public boolean hasSource(CompositeQueryIntent.Source source) {

@@ -28,4 +28,41 @@ class CompositeQueryStateTest {
         assertThat(state.finalStatus()).isEqualTo("PENDING");
         assertThat(state.toSafeLogData()).doesNotContainKey("identity");
     }
+
+    @Test
+    void intentDefaultsToRequiredWithoutDependency() {
+        CompositeQueryIntent intent = CompositeQueryIntent.logistics("XJ202609290001");
+
+        assertThat(intent.required()).isTrue();
+        assertThat(intent.dependsOnResultKind()).isNull();
+    }
+
+    @Test
+    void planExcludesOptionalExternalMarkerFromRequiredKinds() {
+        CompositeQueryPlan plan = CompositeQueryPlan.withExternalSource(
+                List.of(CompositeQueryIntent.order("XJ202609290001"),
+                        CompositeQueryIntent.general("是否合理")), true);
+
+        assertThat(plan.requiresExternalSource()).isTrue();
+        assertThat(plan.requiredResultKinds())
+                .containsExactlyInAnyOrder("order-list", "general-analysis");
+    }
+
+    @Test
+    void stateStoresOnlySafeBranchSnapshots() {
+        CompositeQueryState state = CompositeQueryState.initial(
+                "request-1", "conversation-1", "查询物流", IDENTITY,
+                CompositeQueryPlan.of(List.of(
+                        CompositeQueryIntent.logistics("XJ202609290001"),
+                        CompositeQueryIntent.knowledge("物流规则"))));
+
+        CompositeQueryState updated = CompositeQueryState.withBranchSnapshot(
+                state, new CompositeQueryBranchSnapshot(
+                        "logistics.query", "logistics-timeline", "SUCCESS",
+                        "verified summary", null, 1));
+
+        assertThat(updated.branchSnapshots()).hasSize(1);
+        assertThat(updated.toSafeLogData()).doesNotContainKey("data");
+        assertThat(updated.toSafeLogData()).doesNotContainKey("identity");
+    }
 }

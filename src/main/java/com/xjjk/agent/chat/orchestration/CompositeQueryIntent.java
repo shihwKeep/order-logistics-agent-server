@@ -6,12 +6,18 @@ import java.util.Objects;
 public record CompositeQueryIntent(
         Source source,
         String value,
-        String resultKind) implements java.io.Serializable {
+        String resultKind,
+        boolean required,
+        String dependsOnResultKind) implements java.io.Serializable {
 
     public enum Source {
         BUSINESS,
         KNOWLEDGE,
         GENERAL
+    }
+
+    public CompositeQueryIntent(Source source, String value, String resultKind) {
+        this(source, value, resultKind, true, null);
     }
 
     public CompositeQueryIntent {
@@ -21,6 +27,8 @@ public record CompositeQueryIntent(
             throw new IllegalArgumentException("查询值不能包含控制字符");
         }
         resultKind = requireText(resultKind, "结果类型不能为空");
+        dependsOnResultKind = dependsOnResultKind == null || dependsOnResultKind.isBlank()
+                ? null : requireText(dependsOnResultKind, "依赖结果类型不能为空");
     }
 
     public static CompositeQueryIntent order(String orderCode) {
@@ -52,6 +60,11 @@ public record CompositeQueryIntent(
 
     public static CompositeQueryIntent general(String analysisRequest) {
         return new CompositeQueryIntent(Source.GENERAL, analysisRequest, "general-analysis");
+    }
+
+    public static CompositeQueryIntent externalUnavailable(String request) {
+        return new CompositeQueryIntent(
+                Source.GENERAL, request, "external-data-unavailable", false, null);
     }
 
     private static String requireText(String value, String message) {
