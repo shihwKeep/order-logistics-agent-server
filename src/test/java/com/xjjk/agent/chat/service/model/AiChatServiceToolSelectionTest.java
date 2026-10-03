@@ -254,6 +254,25 @@ class AiChatServiceToolSelectionTest {
                 .contains("删除用户未询问且业务事实未提供的高价值、冷链等特殊条件");
     }
 
+    @Test
+    void rendersSpecificSafeFallbackFromVerifiedLogisticsFacts() {
+        AiChatService service = service(
+                capability(false, "OFF", Set.of()),
+                capability(false, "OFF", Set.of()));
+
+        String fallback = service.compositeSafeFallback(
+                "业务事实：订单状态=在途；最新状态=在途；最新轨迹时间=2026-08-20 15:58:06；"
+                        + "停滞评估状态=EXCEEDED；适用环节=干线；适用阈值小时=24；距最新轨迹小时=1066\n"
+                        + "企业知识依据：干线停滞超过阈值应联系承运商");
+
+        assertThat(fallback)
+                .contains("当前物流状态为‘在途’")
+                .contains("最新轨迹时间为2026-08-20 15:58:06")
+                .contains("干线环节已超过24小时停滞阈值")
+                .doesNotContain("如评估状态为")
+                .doesNotContain("真实性");
+    }
+
     private AiChatService service(
             OrderToolAvailability.Capability order,
             OrderToolAvailability.Capability logistics) {

@@ -364,10 +364,62 @@ public class AiChatService {
     /** 纠偏仍失败时使用的最小安全回答，不声称任何业务动作已经执行。 */
     public String compositeSafeFallback(String verifiedContext) {
         Objects.requireNonNull(verifiedContext, "复合查询验证上下文不能为空");
-        return "已取得本次订单的业务查询结果，并按服务端评估结果判断当前物流时效。"
-                + "如评估状态为EXCEEDED，说明已达到当前环节阈值；客服应按企业规则生成预警并联系承运商核查。"
-                + "上述动作是否已经执行，以业务系统明确返回的执行结果为准。"
-                + "轨迹内容仅按接口返回事实展示，当前无法据此确认丢失、延误、责任或赔付结论。";
+        String business = verifiedContext;
+        int knowledgeBoundary = business.indexOf("企业知识依据");
+        if (knowledgeBoundary >= 0) {
+            business = business.substring(0, knowledgeBoundary);
+        }
+        String status = firstNonBlank(
+                businessField(business, "最新状态="),
+                businessField(business, "订单状态="));
+        String traceTime = businessField(business, "最新轨迹时间=");
+        String assessment = businessField(business, "停滞评估状态=");
+        String stage = businessField(business, "适用环节=");
+        String threshold = businessField(business, "适用阈值小时=");
+
+        StringBuilder answer = new StringBuilder();
+        if (!status.isBlank()) {
+            answer.append("当前物流状态为‘").append(status).append("’。");
+        }
+        if (!traceTime.isBlank()) {
+            answer.append("最新轨迹时间为").append(traceTime).append("。");
+        }
+        if ("EXCEEDED".equalsIgnoreCase(assessment)) {
+            answer.append(stage.isBlank() ? "当前环节" : stage + "环节")
+                    .append("已超过")
+                    .append(threshold.isBlank() ? "当前" : threshold)
+                    .append(threshold.isBlank() ? "停滞阈值" : "小时停滞阈值")
+                    .append("。");
+        } else if ("WITHIN_THRESHOLD".equalsIgnoreCase(assessment)) {
+            answer.append("当前尚未达到")
+                    .append(stage.isBlank() ? "当前环节" : stage + "环节")
+                    .append("停滞阈值。");
+        } else if ("UNKNOWN".equalsIgnoreCase(assessment)) {
+            answer.append("当前无法确认是否达到适用环节的停滞阈值。");
+        }
+        answer.append("客服应按企业规则处理；上述动作是否已经执行，以业务系统明确返回的执行结果为准。")
+                .append("当前只能依据接口返回事实，无法确认丢失、延误、责任或赔付结论。");
+        return answer.toString();
+    }
+
+    private String businessField(String business, String key) {
+        int start = business.indexOf(key);
+        if (start < 0) {
+            return "";
+        }
+        start += key.length();
+        int end = business.length();
+        for (String delimiter : List.of("；", ";", "，", ",", "\n", "。")) {
+            int candidate = business.indexOf(delimiter, start);
+            if (candidate >= 0 && candidate < end) {
+                end = candidate;
+            }
+        }
+        return business.substring(start, end).trim();
+    }
+
+    private String firstNonBlank(String first, String second) {
+        return !first.isBlank() ? first : second;
     }
 
     /**
