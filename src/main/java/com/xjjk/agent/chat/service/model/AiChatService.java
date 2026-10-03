@@ -361,7 +361,7 @@ public class AiChatService {
     }
 
     /** 纠偏仍失败时使用的最小安全回答，不声称任何业务动作已经执行。 */
-    String compositeSafeFallback(String verifiedContext) {
+    public String compositeSafeFallback(String verifiedContext) {
         Objects.requireNonNull(verifiedContext, "复合查询验证上下文不能为空");
         return "已取得本次订单的业务查询结果，并按服务端评估结果判断当前物流时效。"
                 + "如评估状态为EXCEEDED，说明已达到当前环节阈值；客服应按企业规则生成预警并联系承运商核查。"

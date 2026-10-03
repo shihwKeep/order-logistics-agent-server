@@ -248,6 +248,55 @@ class ChatTurnRunnerBusinessQueryTest {
     }
 
     @Test
+    void compositeAnswerIsCorrectedBeforePublicationWhenItClaimsUnverifiedExecution()
+            throws Exception {
+        String compositeMessage = "查询订单 XJ202609290001 的物流，并根据物流规则判断是否需要预警";
+        stubCompositeQuery(compositeMessage);
+        when(aiChatService.streamGroundedComposite(
+                eq(compositeMessage), any(), anyString()))
+                .thenReturn(Flux.just(response("系统已生成预警。")));
+        when(aiChatService.streamGroundedCompositeCorrection(
+                eq(compositeMessage), any(), anyString(), eq("系统已生成预警。"), any()))
+                .thenReturn(Flux.just(response("客服应生成预警并联系承运商核查。")));
+
+        runner().run(new ChatStreamRequest(null, compositeMessage, null), IDENTITY,
+                new ChatStreamControl(), sessionOne, "fallback-composite-corrected");
+
+        verify(aiChatService).streamGroundedComposite(
+                eq(compositeMessage), any(), anyString());
+        verify(aiChatService).streamGroundedCompositeCorrection(
+                eq(compositeMessage), any(), anyString(), eq("系统已生成预警。"), any());
+        verify(sessionOne).delta("客服应生成预警并联系承运商核查。");
+        verify(sessionOne, never()).delta("系统已生成预警。");
+    }
+
+    @Test
+    void compositeAnswerFallsBackWhenCorrectionStillViolatesPolicy() throws Exception {
+        String compositeMessage = "查询订单 XJ202609290001 的物流，并根据物流规则判断是否需要预警";
+        stubCompositeQuery(compositeMessage);
+        when(aiChatService.streamGroundedComposite(
+                eq(compositeMessage), any(), anyString()))
+                .thenReturn(Flux.just(response("距最新轨迹已超24小时无有效更新。")));
+        when(aiChatService.streamGroundedCompositeCorrection(
+                eq(compositeMessage), any(), anyString(),
+                eq("距最新轨迹已超24小时无有效更新。"), any()))
+                .thenReturn(Flux.just(response("正在核实中。")));
+        when(aiChatService.compositeSafeFallback(anyString()))
+                .thenReturn("已达到当前环节阈值，客服应按规则处理；动作执行结果以业务系统返回为准。");
+
+        runner().run(new ChatStreamRequest(null, compositeMessage, null), IDENTITY,
+                new ChatStreamControl(), sessionOne, "fallback-composite-fallback");
+
+        verify(aiChatService).streamGroundedCompositeCorrection(
+                eq(compositeMessage), any(), anyString(),
+                eq("距最新轨迹已超24小时无有效更新。"), any());
+        verify(sessionOne).delta(
+                "已达到当前环节阈值，客服应按规则处理；动作执行结果以业务系统返回为准。");
+        verify(sessionOne, never()).delta("距最新轨迹已超24小时无有效更新。");
+        verify(sessionOne, never()).delta("正在核实中。");
+    }
+
+    @Test
     void retriesTransientModelStreamFailureBeforePublishingText() throws Exception {
         ChatTurnContext turn = turn("request-5", "user-5", "assistant-5");
         when(preparationService.prepare(null, IDENTITY, MESSAGE)).thenReturn(turn);
@@ -370,6 +419,39 @@ class ChatTurnRunnerBusinessQueryTest {
                 directMemoryService);
         runner.setCompositeQueryService(compositeQueryService);
         return runner;
+    }
+
+    private void stubCompositeQuery(String compositeMessage) {
+        ChatTurnContext turn = turn(
+                "request-composite-policy", "user-composite-policy", "assistant-composite-policy");
+        when(preparationService.prepare(null, IDENTITY, compositeMessage)).thenReturn(turn);
+        BusinessQueryPlan plan = BusinessQueryPlan.composite(CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.logistics("XJ202609290001"),
+                CompositeQueryIntent.knowledge(compositeMessage))));
+        when(planner.plan(compositeMessage)).thenReturn(plan);
+        when(contextService.prepare(eq(turn), eq(compositeMessage), any(ChatStreamControl.class)))
+                .thenReturn(org.mockito.Mockito.mock(ChatContextSelection.class));
+        OffsetDateTime queriedAt = OffsetDateTime.parse("2026-09-09T13:41:38+08:00");
+        ToolUiResult logistics = new ToolUiResult(
+                "get_order_logistics", "logistics-timeline", 1, queriedAt,
+                Map.of("status", "运输中"));
+        KnowledgeRetrievalResult evidence = new KnowledgeRetrievalResult(
+                true, List.of(new KnowledgeRetrievalResult.Evidence(
+                        2L, 3L, 4L, "chunk-1", "物流制度", "第七章",
+                        "干线停滞超过阈值生成预警。", "{}", 0.91D, Set.of("KEYWORD"))),
+                "hybrid-v1", "NONE", "OK", queriedAt);
+        ToolUiResult knowledge = new ToolUiResult(
+                "search_knowledge", "knowledge-citations", 1, queriedAt, evidence);
+        when(compositeQueryService.execute(
+                eq(plan.compositePlan()), eq(compositeMessage), eq(IDENTITY), anyString()))
+                .thenReturn(new CompositeQueryService.CompositeQueryResult(
+                        true, "SUCCESS", List.of(logistics, knowledge),
+                        Set.of("logistics-timeline", "knowledge-citations"),
+                        "业务事实：运输中\n企业知识依据：干线停滞超过阈值生成预警。", ""));
+        when(resultRecorder.prepare(any(ToolUiResult.class), eq(1)))
+                .thenReturn(pending(1, "logistics-timeline"));
+        when(resultRecorder.prepare(any(ToolUiResult.class), eq(2)))
+                .thenReturn(pending(2, "knowledge-citations"));
     }
 
     private ChatTurnContext turn(

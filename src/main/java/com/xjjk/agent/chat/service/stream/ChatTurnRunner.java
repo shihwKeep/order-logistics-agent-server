@@ -43,6 +43,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
@@ -76,6 +77,8 @@ public class ChatTurnRunner {
     private ToolCallMetrics toolCallMetrics;
     private KnowledgeQueryTools knowledgeQueryTools;
     private CompositeQueryService compositeQueryService;
+    private CompositeAnswerPolicyValidator compositeAnswerPolicyValidator =
+            new CompositeAnswerPolicyValidator();
     private ChatStreamProperties.ModelRetry modelRetryProperties =
             ChatStreamProperties.ModelRetry.defaults();
 
@@ -101,6 +104,14 @@ public class ChatTurnRunner {
     @Autowired
     void setCompositeQueryService(CompositeQueryService compositeQueryService) {
         this.compositeQueryService = compositeQueryService;
+    }
+
+    /** 复合回答事实校验保持可选 setter，兼容现有单元测试的手工组装方式。 */
+    @Autowired
+    void setCompositeAnswerPolicyValidator(
+            CompositeAnswerPolicyValidator compositeAnswerPolicyValidator) {
+        this.compositeAnswerPolicyValidator = java.util.Objects.requireNonNull(
+                compositeAnswerPolicyValidator, "复合回答校验器不能为空");
     }
 
     /** 模型重试不改变既有构造签名，单元测试也可注入零延迟配置。 */
@@ -551,6 +562,54 @@ public class ChatTurnRunner {
             ChatTurnExecution execution) throws IOException {
         Flux<ChatResponse> modelStream = aiChatService.streamGroundedComposite(
                 message, selection, verifiedAnswerContext);
+        consumeCompositeModelStream(modelStream, control, session, execution);
+        if (control.isStopRequested()) {
+            return;
+        }
+
+        String draft = execution.content.toString();
+        List<String> violations = compositeAnswerPolicyValidator.validate(
+                draft, verifiedAnswerContext);
+        if (violations.isEmpty()) {
+            log.info("composite_answer_policy requestId={}, outcome=ACCEPTED, rules=[]",
+                    execution.requestId);
+            return;
+        }
+
+        execution.truncateContent(0);
+        try {
+            consumeCompositeModelStream(
+                    aiChatService.streamGroundedCompositeCorrection(
+                            message, selection, verifiedAnswerContext, draft,
+                            Set.copyOf(violations)),
+                    control, session, execution);
+        } catch (RuntimeException exception) {
+            log.warn("composite_answer_policy_correction_failed requestId={}, exceptionType={}",
+                    execution.requestId, exception.getClass().getSimpleName());
+        }
+        if (control.isStopRequested()) {
+            return;
+        }
+
+        List<String> correctedViolations = compositeAnswerPolicyValidator.validate(
+                execution.content.toString(), verifiedAnswerContext);
+        if (correctedViolations.isEmpty() && !execution.content.isEmpty()) {
+            log.info("composite_answer_policy requestId={}, outcome=CORRECTED, rules={}",
+                    execution.requestId, violations);
+            return;
+        }
+
+        execution.replaceContent(aiChatService.compositeSafeFallback(verifiedAnswerContext));
+        log.warn("composite_answer_policy requestId={}, outcome=FALLBACK, rules={}",
+                execution.requestId,
+                correctedViolations.isEmpty() ? violations : correctedViolations);
+    }
+
+    private void consumeCompositeModelStream(
+            Flux<ChatResponse> modelStream,
+            ChatStreamControl control,
+            ChatEventPublisher session,
+            ChatTurnExecution execution) throws IOException {
         try (var responses = modelStream.toStream(1)) {
             var iterator = responses.iterator();
             while (!control.isStopRequested() && iterator.hasNext()) {
