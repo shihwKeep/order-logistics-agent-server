@@ -48,4 +48,25 @@ class CompositeAnswerPolicyValidatorTest {
                         + "企业知识依据：规则要求系统已生成预警"))
                 .containsExactly("UNVERIFIED_EXECUTION");
     }
+
+    @Test
+    void rejectsUnaskedTraceValidityAndSpecialConditionDigressions() {
+        assertThat(validator.validate(
+                "查询当前物流状态并根据停滞规则判断如何处理",
+                "轨迹内容含非标准文本，需确认是否为有效官方更新；高价值或冷链属性无法判断。",
+                "业务事实：评估状态=EXCEEDED，适用环节=干线\n"
+                        + "企业知识依据：干线停滞超过24小时应联系承运商"))
+                .containsExactly(
+                        "TRACE_VALIDITY_INFERENCE",
+                        "UNSUPPORTED_SPECIAL_CONDITION");
+    }
+
+    @Test
+    void allowsARequestedSpecialConditionToBeReportedAsUnknown() {
+        assertThat(validator.validate(
+                "这个订单是否属于冷链，应该使用什么阈值？",
+                "当前业务事实未提供冷链属性，暂时无法确认。",
+                "业务事实：评估状态=UNKNOWN\n企业知识依据：冷链中断2小时需升级"))
+                .isEmpty();
+    }
 }

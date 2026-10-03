@@ -569,7 +569,7 @@ public class ChatTurnRunner {
 
         String draft = execution.content.toString();
         List<String> violations = compositeAnswerPolicyValidator.validate(
-                draft, verifiedAnswerContext);
+                message, draft, verifiedAnswerContext);
         if (violations.isEmpty()) {
             log.info("composite_answer_policy requestId={}, outcome=ACCEPTED, rules=[]",
                     execution.requestId);
@@ -592,7 +592,7 @@ public class ChatTurnRunner {
         }
 
         List<String> correctedViolations = compositeAnswerPolicyValidator.validate(
-                execution.content.toString(), verifiedAnswerContext);
+                message, execution.content.toString(), verifiedAnswerContext);
         if (correctedViolations.isEmpty() && !execution.content.isEmpty()) {
             log.info("composite_answer_policy requestId={}, outcome=CORRECTED, rules={}",
                     execution.requestId, violations);

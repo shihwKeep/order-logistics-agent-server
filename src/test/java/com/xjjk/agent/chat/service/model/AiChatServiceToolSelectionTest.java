@@ -250,7 +250,8 @@ class AiChatServiceToolSelectionTest {
                 .contains("系统已生成预警，正在核实中。")
                 .contains("UNVERIFIED_EXECUTION")
                 .contains("只返回修正后的最终回答")
-                .contains("不要声称动作已经执行");
+                .contains("不要声称动作已经执行")
+                .contains("删除用户未询问且业务事实未提供的高价值、冷链等特殊条件");
     }
 
     private AiChatService service(
