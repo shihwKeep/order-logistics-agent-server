@@ -1,11 +1,13 @@
 package com.xjjk.agent.chat.service.stream;
 
 import org.springframework.util.StringUtils;
+import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /** 校验复合回答是否把规则建议或轨迹备注扩写成未经业务事实确认的结论。 */
+@Component
 public final class CompositeAnswerPolicyValidator {
 
     private static final List<String> EXECUTION_MARKERS = List.of(
