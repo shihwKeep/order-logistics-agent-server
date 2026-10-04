@@ -390,8 +390,12 @@ public class AiChatService {
         String assessment = businessField(business, "停滞评估状态=");
         String stage = businessField(business, "适用环节=");
         String threshold = businessField(business, "适用阈值小时=");
+        String orderSummary = businessResultLine(business, "order-list");
 
         StringBuilder answer = new StringBuilder();
+        if (!orderSummary.isBlank()) {
+            answer.append("订单查询结果：").append(orderSummary).append("。");
+        }
         if (!status.isBlank()) {
             answer.append("当前物流状态为‘").append(status).append("’。");
         }
@@ -414,6 +418,21 @@ public class AiChatService {
         answer.append("客服应按企业规则处理；上述动作是否已经执行，以业务系统明确返回的执行结果为准。")
                 .append("当前只能依据接口返回事实，无法确认丢失、延误、责任或赔付结论。");
         return answer.toString();
+    }
+
+    private String businessResultLine(String business, String resultKind) {
+        int start = business.indexOf(resultKind + "：");
+        int keyLength = resultKind.length() + 1;
+        if (start < 0) {
+            start = business.indexOf(resultKind + ":");
+            keyLength = resultKind.length() + 1;
+        }
+        if (start < 0) {
+            return "";
+        }
+        start += keyLength;
+        int end = business.indexOf('\n', start);
+        return business.substring(start, end < 0 ? business.length() : end).trim();
     }
 
     private String businessField(String business, String key) {

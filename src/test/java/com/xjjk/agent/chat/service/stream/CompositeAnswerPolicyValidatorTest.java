@@ -83,4 +83,16 @@ class CompositeAnswerPolicyValidatorTest {
                         "UNVERIFIED_BUSINESS_FACT",
                         "UNSUPPORTED_PRICING_DETAIL");
     }
+
+    @Test
+    void rejectsCompositeAnswerThatOmitsACompletedBusinessBranch() {
+        assertThat(validator.validate(
+                "查询订单 XJ202609290001 的商品、物流状态和订单金额，并结合规则分别判断",
+                "当前物流状态为‘在途’，已超过停滞阈值。",
+                "业务事实：\n"
+                        + "order-list：订单数量=1，商品名称=老炊五香牛肉粒，订单成交单价=10.00元\n"
+                        + "logistics-timeline：订单状态=在途，停滞评估状态=EXCEEDED\n"
+                        + "企业知识依据：\n《物流规则》：超过阈值应核查"))
+                .containsExactly("INCOMPLETE_COMPOSITE_ANSWER");
+    }
 }

@@ -101,7 +101,38 @@ public final class CompositeAnswerPolicyValidator {
                 question, answer, context, UNSUPPORTED_PRICING_MARKERS)) {
             violations.add("UNSUPPORTED_PRICING_DETAIL");
         }
+        if (omitsCompletedBusinessBranch(answer, context)) {
+            violations.add("INCOMPLETE_COMPOSITE_ANSWER");
+        }
         return List.copyOf(violations);
+    }
+
+    private boolean omitsCompletedBusinessBranch(String answer, String businessFacts) {
+        if (hasResultKind(businessFacts, "order-list")
+                && !containsAny(answer, List.of("订单", "商品", "金额", "单价", "小计", "SKU"))) {
+            return true;
+        }
+        if (hasResultKind(businessFacts, "logistics-timeline")
+                && !containsAny(answer, List.of("物流", "轨迹", "运单", "在途", "派送", "干线"))) {
+            return true;
+        }
+        if (hasResultKind(businessFacts, "product-list")
+                && !containsAny(answer, List.of("商品", "SKU", "价格", "库存"))) {
+            return true;
+        }
+        if (hasResultKind(businessFacts, "after-sale-list")
+                || hasResultKind(businessFacts, "after-sale-detail")) {
+            return !containsAny(answer, List.of("售后", "退货", "换货", "退款"));
+        }
+        if (hasResultKind(businessFacts, "customer-list")) {
+            return !answer.contains("客户");
+        }
+        return false;
+    }
+
+    private boolean hasResultKind(String businessFacts, String resultKind) {
+        return businessFacts.contains(resultKind + "：")
+                || businessFacts.contains(resultKind + ":");
     }
 
     private String businessFactContext(String verifiedContext) {

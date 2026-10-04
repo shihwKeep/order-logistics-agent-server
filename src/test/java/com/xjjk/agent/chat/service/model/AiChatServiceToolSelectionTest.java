@@ -280,6 +280,25 @@ class AiChatServiceToolSelectionTest {
                 .doesNotContain("真实性");
     }
 
+    @Test
+    void rendersOrderSummaryInSafeFallbackWhenCompositeContextHasOrderFacts() {
+        AiChatService service = service(
+                capability(false, "OFF", Set.of()),
+                capability(false, "OFF", Set.of()));
+
+        String fallback = service.compositeSafeFallback(
+                "业务事实：\n"
+                        + "order-list：订单数量=1；订单号=XJ202609290001，订单状态=在途，商品名称=老炊五香牛肉粒，数量=6，订单成交单价=10.00元，订单商品小计=60.00元\n"
+                        + "logistics-timeline：订单状态=在途；最新轨迹时间=2026-08-20 15:58:06；停滞评估状态=EXCEEDED；适用环节=干线；适用阈值小时=24\n"
+                        + "企业知识依据：干线停滞超过阈值应联系承运商");
+
+        assertThat(fallback)
+                .contains("订单查询结果：")
+                .contains("老炊五香牛肉粒")
+                .contains("订单成交单价=10.00元")
+                .contains("物流");
+    }
+
     private AiChatService service(
             OrderToolAvailability.Capability order,
             OrderToolAvailability.Capability logistics) {
