@@ -299,6 +299,23 @@ class AiChatServiceToolSelectionTest {
                 .contains("物流");
     }
 
+    @Test
+    void rendersPricingBoundaryInSafeFallbackWhenPricingEvidenceIsPresent() {
+        AiChatService service = service(
+                capability(false, "OFF", Set.of()),
+                capability(false, "OFF", Set.of()));
+
+        String fallback = service.compositeSafeFallback(
+                "业务事实：\n"
+                        + "order-list：订单数量=1；订单号=XJ202609290001，订单状态=在途，商品名称=老炊五香牛肉粒，数量=6，订单成交单价=10.00元，订单商品小计=60.00元\n"
+                        + "logistics-timeline：订单状态=在途；最新轨迹时间=2026-08-20 15:58:06；停滞评估状态=EXCEEDED；适用环节=干线；适用阈值小时=24\n"
+                        + "企业知识依据：\n《订单规则》：订单价格以下单时快照为准，缺少定价基准时无法判断定价策略");
+
+        assertThat(fallback)
+                .contains("价格规则判断")
+                .contains("无法确认是否符合企业定价策略");
+    }
+
     private AiChatService service(
             OrderToolAvailability.Capability order,
             OrderToolAvailability.Capability logistics) {

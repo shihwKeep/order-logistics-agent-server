@@ -391,10 +391,18 @@ public class AiChatService {
         String stage = businessField(business, "适用环节=");
         String threshold = businessField(business, "适用阈值小时=");
         String orderSummary = businessResultLine(business, "order-list");
+        boolean pricingEvidence = verifiedContext.contains("价格")
+                || verifiedContext.contains("定价")
+                || verifiedContext.contains("优惠")
+                || verifiedContext.contains("分摊");
 
         StringBuilder answer = new StringBuilder();
         if (!orderSummary.isBlank()) {
             answer.append("订单查询结果：").append(orderSummary).append("。");
+            if (pricingEvidence) {
+                answer.append("价格规则判断：订单成交单价和商品小计已返回，但未提供定价基准，"
+                        + "无法确认是否符合企业定价策略。");
+            }
         }
         if (!status.isBlank()) {
             answer.append("当前物流状态为‘").append(status).append("’。");
