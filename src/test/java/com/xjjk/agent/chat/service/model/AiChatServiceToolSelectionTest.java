@@ -234,6 +234,7 @@ class AiChatServiceToolSelectionTest {
                 .contains("缺少签收状态、签收时间、商品类目或商品完好状态时")
                 .contains("规则条件只能作为待核验条件")
                 .contains("不得索要业务事实和知识证据未要求的凭证或材料")
+                .contains("必须覆盖用户问题中的每个查询维度")
                 .contains("最多400个汉字");
     }
 
