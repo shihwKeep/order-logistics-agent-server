@@ -399,6 +399,10 @@ public class AiChatService {
                 || verifiedContext.contains("定价")
                 || verifiedContext.contains("优惠")
                 || verifiedContext.contains("分摊");
+        boolean afterSaleEvidence = verifiedContext.contains("售后")
+                || verifiedContext.contains("退货")
+                || verifiedContext.contains("签收时限")
+                || verifiedContext.contains("商品完好");
 
         StringBuilder answer = new StringBuilder();
         if (!orderSummary.isBlank()) {
@@ -406,6 +410,10 @@ public class AiChatService {
             if (pricingEvidence) {
                 answer.append("价格规则判断：订单成交单价和商品小计已返回，但未提供定价基准，"
                         + "无法确认是否符合企业定价策略。");
+            }
+            if (afterSaleEvidence) {
+                answer.append("售后规则判断：当前未返回签收状态、签收时间、商品类目、商品完好状态及售后工单查询结果，"
+                        + "无法确认是否符合退货条件。");
             }
         }
         if (!status.isBlank()) {

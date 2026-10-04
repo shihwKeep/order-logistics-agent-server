@@ -112,4 +112,16 @@ class CompositeAnswerPolicyValidatorTest {
                         "UNSUPPORTED_AFTER_SALE_CATEGORY",
                         "UNSUPPORTED_AFTER_SALE_EXCEPTION");
     }
+
+    @Test
+    void rejectsCompositeAnswerThatOmitsRequestedAfterSaleAnalysis() {
+        assertThat(validator.validate(
+                "查询订单 XJ202609290001 的商品和物流，并结合售后规则说明是否具备退货判断依据",
+                "订单商品已查询，当前物流状态为‘在途’，最新轨迹时间已返回。",
+                "业务事实：\n"
+                        + "order-list：订单数量=1，商品名称=老炊五香牛肉粒\n"
+                        + "logistics-timeline：订单状态=在途\n"
+                        + "企业知识依据：\n《售后规则》：退货需满足品类、签收时限和商品完好条件"))
+                .containsExactly("INCOMPLETE_AFTER_SALE_ANALYSIS");
+    }
 }

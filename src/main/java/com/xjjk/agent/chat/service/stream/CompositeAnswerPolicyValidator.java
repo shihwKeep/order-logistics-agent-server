@@ -135,6 +135,11 @@ public final class CompositeAnswerPolicyValidator {
                 && containsAny(answer, List.of("例外审核", "凭物流停滞证据"))) {
             violations.add("UNSUPPORTED_AFTER_SALE_EXCEPTION");
         }
+        if (containsAny(question, List.of("售后", "退货", "换货", "退款"))
+                && !containsAny(answer, List.of(
+                "售后", "退货", "换货", "退款", "签收", "商品完好", "无法确认"))) {
+            violations.add("INCOMPLETE_AFTER_SALE_ANALYSIS");
+        }
         return List.copyOf(violations);
     }
 
