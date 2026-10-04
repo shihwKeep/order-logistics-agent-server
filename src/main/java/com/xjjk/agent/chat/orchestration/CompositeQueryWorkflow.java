@@ -30,6 +30,7 @@ import org.bsc.langgraph4j.action.AsyncNodeAction;
 import org.bsc.langgraph4j.checkpoint.BaseCheckpointSaver;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -579,7 +580,7 @@ public class CompositeQueryWorkflow {
             return summary.toString();
         }
         if (data instanceof OrderSearchResult orders) {
-            return "订单数量=" + orders.total();
+            return safeOrderSearchText(orders);
         }
         if (data instanceof CustomerOrderQueryResult customerOrders) {
             return customerOrders.orders() == null
@@ -593,6 +594,40 @@ public class CompositeQueryWorkflow {
             return afterSale.afterSaleCode() + "，" + afterSale.statusText();
         }
         return "已取得结构化结果";
+    }
+
+    private String safeOrderSearchText(OrderSearchResult orders) {
+        StringBuilder summary = new StringBuilder("订单数量=").append(orders.total());
+        for (var card : orders.items()) {
+            summary.append("；订单号=").append(card.orderCode());
+            appendField(summary, "订单状态", card.statusText());
+            summary.append("，商品行数=").append(card.goods().size());
+            if (card.goods().isEmpty()) {
+                summary.append("，未取得订单商品明细");
+                continue;
+            }
+            for (var goods : card.goods()) {
+                appendField(summary, "商品名称", goods.goodsName());
+                appendField(summary, "SKU", goods.skuCode());
+                appendField(summary, "规格", goods.specification());
+                summary.append("，数量=").append(goods.quantity());
+                appendField(summary, "订单成交单价", amountInYuan(goods.unitPriceInFen()));
+                appendField(summary, "订单商品小计", amountInYuan(goods.subtotalInFen()));
+            }
+        }
+        return summary.toString();
+    }
+
+    private void appendField(StringBuilder target, String label, String value) {
+        if (value != null && !value.isBlank()) {
+            target.append("，").append(label).append("=").append(value);
+        }
+    }
+
+    private String amountInYuan(Long amountInFen) {
+        return amountInFen == null
+                ? null
+                : BigDecimal.valueOf(amountInFen, 2).toPlainString() + "元";
     }
 
     /** 物流服务按最新优先返回轨迹，取首个有效时间供复合回答使用。 */

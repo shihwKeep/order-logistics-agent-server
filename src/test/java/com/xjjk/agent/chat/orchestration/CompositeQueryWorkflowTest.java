@@ -10,7 +10,11 @@ import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
 import com.xjjk.agent.knowledge.service.KnowledgeQueryGateway;
 import com.xjjk.agent.order.domain.OrderIdentifierType;
+import com.xjjk.agent.order.domain.OrderAmount;
+import com.xjjk.agent.order.domain.OrderCard;
+import com.xjjk.agent.order.domain.OrderGoodsSummary;
 import com.xjjk.agent.order.domain.OrderLogisticsResult;
+import com.xjjk.agent.order.domain.OrderRecipient;
 import com.xjjk.agent.order.domain.OrderSearchResult;
 import com.xjjk.agent.order.domain.ShipmentTimeline;
 import com.xjjk.agent.order.domain.TrackNode;
@@ -40,6 +44,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
 class CompositeQueryWorkflowTest {
@@ -240,6 +245,64 @@ class CompositeQueryWorkflowTest {
                 "C24101816040001", IDENTITY, "request-customer");
         verify(orderGateway, org.mockito.Mockito.never()).search(
                 any(), any(), any(), any());
+    }
+
+    @Test
+    void includesOrderGoodsFactsWithoutIndependentProductSearch() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-10-04T06:00:00+08:00");
+        OrderSearchResult orders = new OrderSearchResult(
+                OrderIdentifierType.ORDER_CODE,
+                1,
+                false,
+                now,
+                List.of(new OrderCard(
+                        "XJTS0120260820000011",
+                        "2608204002100615",
+                        80,
+                        "在途",
+                        "2026-08-20 15:40:21",
+                        "曹**",
+                        0L,
+                        6,
+                        List.of(new OrderGoodsSummary(
+                                "老炊五香牛肉粒", "1020300801", "50g/袋",
+                                1000L, 6, 6000L, false)),
+                        "德邦",
+                        List.of("DPK365068298955"),
+                        194L,
+                        "款到发货",
+                        new OrderAmount(6000L, 0L, 6000L, 0L, 0L),
+                        new OrderRecipient("曹**", "1********833", "湖南省 常德市 鼎城区"),
+                        1,
+                        false,
+                        1,
+                        false,
+                        List.of())));
+        when(orderGateway.search("XJTS0120260820000011", OrderIdentifierType.AUTO,
+                IDENTITY, "request-order-product"))
+                .thenReturn(orders);
+
+        CompositeQueryPlan plan = CompositeQueryPlan.withExternalSource(List.of(
+                CompositeQueryIntent.order("XJTS0120260820000011"),
+                CompositeQueryIntent.externalUnavailable("当前市场价格区间")), true);
+
+        CompositeQueryService.CompositeQueryResult result = new CompositeQueryService(
+                new CompositeQueryWorkflow(orderGateway, customerOrderQueryService,
+                        productSearchGateway, afterSaleQueryGateway, knowledgeQueryGateway))
+                .execute(plan, "查询订单中的商品并分析当前市场价格区间",
+                        IDENTITY, "request-order-product");
+
+        assertThat(result.verifiedAnswerContext())
+                .contains(
+                        "订单号=XJTS0120260820000011",
+                        "商品名称=老炊五香牛肉粒",
+                        "SKU=1020300801",
+                        "规格=50g/袋",
+                        "数量=6",
+                        "订单成交单价=10.00元",
+                        "当前未接入外部市场数据")
+                .doesNotContain("联系电话", "收货地址");
+        verify(productSearchGateway, never()).search(any());
     }
 
     @Test
