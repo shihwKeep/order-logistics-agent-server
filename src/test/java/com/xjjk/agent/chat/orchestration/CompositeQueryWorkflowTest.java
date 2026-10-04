@@ -296,6 +296,7 @@ class CompositeQueryWorkflowTest {
                 .contains(
                         "订单号=XJTS0120260820000011",
                         "商品名称=老炊五香牛肉粒",
+                        "商品总数量=6",
                         "SKU=1020300801",
                         "规格=50g/袋",
                         "数量=6",

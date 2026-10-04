@@ -602,6 +602,7 @@ public class CompositeQueryWorkflow {
             summary.append("；订单号=").append(card.orderCode());
             appendField(summary, "订单状态", card.statusText());
             summary.append("，商品行数=").append(card.goods().size());
+            summary.append("，商品总数量=").append(card.goodsTotalCount());
             if (card.goods().isEmpty()) {
                 summary.append("，未取得订单商品明细");
                 continue;
