@@ -229,6 +229,9 @@ class AiChatServiceToolSelectionTest {
                 .contains("不得把异常轨迹文本、非标准联系方式或备注内容直接判定为无效更新")
                 .contains("不得将轨迹内容推断为乱码、非官方或无效")
                 .contains("不得引入业务事实和知识证据未提供的高价值、冷链")
+                .contains("未查询售后工单时，不得声称不存在售后工单")
+                .contains("不得声称系统将自动校验、已提交申请或已进入审核")
+                .contains("缺少签收状态、签收时间、商品类目或商品完好状态时")
                 .contains("最多400个汉字");
     }
 
