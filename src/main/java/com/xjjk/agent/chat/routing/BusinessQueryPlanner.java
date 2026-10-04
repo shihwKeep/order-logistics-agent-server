@@ -167,8 +167,10 @@ public class BusinessQueryPlanner {
         if (afterSale && afterSaleCode != null) {
             intents.add(CompositeQueryIntent.afterSale(afterSaleCode));
         }
+        boolean orderOwnedProduct = product && orderCode != null
+                && isOrderOwnedProductReference(message, orderCode);
         String productIdentifier = extractProductIdentifier(message);
-        if (product && productIdentifier != null) {
+        if (product && !orderOwnedProduct && productIdentifier != null) {
             intents.add(CompositeQueryIntent.product(productIdentifier));
         }
         if (knowledgeRequested) {
@@ -331,6 +333,22 @@ public class BusinessQueryPlanner {
                 .replaceAll("[\\s:：]", "")
                 .trim();
         return after.length() >= 2 ? after : null;
+    }
+
+    private boolean isOrderOwnedProductReference(String message, String orderCode) {
+        int orderIndex = message.indexOf(orderCode);
+        if (orderIndex < 0) {
+            return false;
+        }
+        int productIndex = message.indexOf("商品", orderIndex + orderCode.length());
+        if (productIndex < 0) {
+            return false;
+        }
+        String relation = message
+                .substring(orderIndex + orderCode.length(), productIndex)
+                .replaceAll("\\s+", "");
+        return relation.isEmpty()
+                || relation.matches("(?:的|中|中的|内|内的|里|里的)");
     }
 
     private boolean containsAny(String value, String... candidates) {

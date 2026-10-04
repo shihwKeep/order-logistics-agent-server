@@ -1,9 +1,11 @@
 package com.xjjk.agent.chat.routing;
 
 import com.xjjk.agent.chat.config.BusinessQueryEnforcementProperties;
+import com.xjjk.agent.chat.orchestration.CompositeQueryIntent;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 class BusinessQueryPlannerTest {
 
@@ -158,6 +160,13 @@ class BusinessQueryPlannerTest {
         assertThat(plan.mode()).isEqualTo(BusinessQueryMode.COMPOSITE);
         assertThat(plan.requiresExternalSource()).isTrue();
         assertThat(plan.acceptedResultKinds()).contains("external-data-unavailable");
+        assertThat(plan.compositePlan().intents())
+                .filteredOn(intent -> intent.source() == CompositeQueryIntent.Source.BUSINESS)
+                .extracting(CompositeQueryIntent::resultKind, CompositeQueryIntent::value)
+                .containsExactly(tuple("order-list", "XJTS0120260820000011"));
+        assertThat(plan.acceptedResultKinds())
+                .doesNotContain("product-list")
+                .contains("order-list", "general-analysis", "external-data-unavailable");
     }
 
     @Test
