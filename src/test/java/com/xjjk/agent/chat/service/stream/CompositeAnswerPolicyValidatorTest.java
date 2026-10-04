@@ -95,4 +95,21 @@ class CompositeAnswerPolicyValidatorTest {
                         + "企业知识依据：\n《物流规则》：超过阈值应核查"))
                 .containsExactly("INCOMPLETE_COMPOSITE_ANSWER");
     }
+
+    @Test
+    void rejectsUnqueriedAfterSaleFactsAndInferredCategoryClaims() {
+        assertThat(validator.validate(
+                "查询订单 XJ202609290001 的商品和物流，并结合售后规则判断是否能退货",
+                "当前订单尚未签收，也未查询到关联售后工单。牛肉粒属普通食品，非定制/鲜活/数字类，"
+                        + "如因物流异常导致超期，可凭物流停滞证据申请例外审核。",
+                "业务事实：\n"
+                        + "order-list：订单状态=在途，商品名称=老炊五香牛肉粒\n"
+                        + "logistics-timeline：订单状态=在途\n"
+                        + "企业知识依据：\n《售后规则》：退货需满足品类、时限和完好条件"))
+                .containsExactly(
+                        "UNQUERIED_AFTER_SALE_RESULT",
+                        "UNVERIFIED_AFTER_SALE_FACT",
+                        "UNSUPPORTED_AFTER_SALE_CATEGORY",
+                        "UNSUPPORTED_AFTER_SALE_EXCEPTION");
+    }
 }

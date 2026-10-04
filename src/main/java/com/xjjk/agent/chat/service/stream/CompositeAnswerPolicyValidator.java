@@ -63,6 +63,21 @@ public final class CompositeAnswerPolicyValidator {
             "运费券",
             "积分抵扣");
 
+    private static final List<String> UNQUERIED_AFTER_SALE_MARKERS = List.of(
+            "未查询到关联售后工单",
+            "未查询到售后工单",
+            "尚未关联售后工单",
+            "没有售后工单",
+            "不存在售后工单");
+
+    private static final List<String> UNSUPPORTED_AFTER_SALE_CATEGORY_MARKERS = List.of(
+            "属普通食品",
+            "属于普通食品",
+            "非定制",
+            "非鲜活",
+            "非数字类",
+            "定制/鲜活/数字");
+
     public List<String> validate(String answer, String verifiedContext) {
         return validate("", answer, verifiedContext);
     }
@@ -104,7 +119,28 @@ public final class CompositeAnswerPolicyValidator {
         if (omitsCompletedBusinessBranch(answer, context)) {
             violations.add("INCOMPLETE_COMPOSITE_ANSWER");
         }
+        if (!hasAfterSaleResult(context)
+                && containsAny(answer, UNQUERIED_AFTER_SALE_MARKERS)) {
+            violations.add("UNQUERIED_AFTER_SALE_RESULT");
+        }
+        if (!containsAny(context, List.of("签收", "签收时间", "已签收", "未签收"))
+                && containsAny(answer, List.of("尚未签收", "未签收", "已经签收"))) {
+            violations.add("UNVERIFIED_AFTER_SALE_FACT");
+        }
+        if (!containsAny(context, List.of("品类", "类目", "商品类别"))
+                && containsAny(answer, UNSUPPORTED_AFTER_SALE_CATEGORY_MARKERS)) {
+            violations.add("UNSUPPORTED_AFTER_SALE_CATEGORY");
+        }
+        if (!containsAny(context, List.of("例外审核", "物流停滞证据"))
+                && containsAny(answer, List.of("例外审核", "凭物流停滞证据"))) {
+            violations.add("UNSUPPORTED_AFTER_SALE_EXCEPTION");
+        }
         return List.copyOf(violations);
+    }
+
+    private boolean hasAfterSaleResult(String businessFacts) {
+        return hasResultKind(businessFacts, "after-sale-list")
+                || hasResultKind(businessFacts, "after-sale-detail");
     }
 
     private boolean omitsCompletedBusinessBranch(String answer, String businessFacts) {

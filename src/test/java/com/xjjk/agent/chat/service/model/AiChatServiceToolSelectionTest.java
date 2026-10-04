@@ -232,6 +232,8 @@ class AiChatServiceToolSelectionTest {
                 .contains("未查询售后工单时，不得声称不存在售后工单")
                 .contains("不得声称系统将自动校验、已提交申请或已进入审核")
                 .contains("缺少签收状态、签收时间、商品类目或商品完好状态时")
+                .contains("不得从商品名称推断普通食品、非定制、鲜活或数字类品类属性")
+                .contains("不得凭物流异常自行承诺例外审核")
                 .contains("规则条件只能作为待核验条件")
                 .contains("不得索要业务事实和知识证据未要求的凭证或材料")
                 .contains("必须覆盖用户问题中的每个查询维度")
