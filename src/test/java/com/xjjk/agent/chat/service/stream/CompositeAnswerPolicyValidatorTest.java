@@ -69,4 +69,18 @@ class CompositeAnswerPolicyValidatorTest {
                 "业务事实：评估状态=UNKNOWN\n企业知识依据：冷链中断2小时需升级"))
                 .isEmpty();
     }
+
+    @Test
+    void rejectsUnsupportedPaymentProofAndUnverifiedPricingFacts() {
+        assertThat(validator.validate(
+                "查询订单商品并结合订单价格规则分析",
+                "系统核算金额已固化，建议提供订单创建时的完整支付凭证；"
+                        + "无法确认是否适用满减、运费券或积分抵扣。",
+                "业务事实：商品合计=60.00，优惠抵扣=0.00\n"
+                        + "企业知识依据：订单保存时生成价格快照"))
+                .containsExactly(
+                        "UNSUPPORTED_REQUESTED_MATERIAL",
+                        "UNVERIFIED_BUSINESS_FACT",
+                        "UNSUPPORTED_PRICING_DETAIL");
+    }
 }

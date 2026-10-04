@@ -42,6 +42,27 @@ public final class CompositeAnswerPolicyValidator {
             "高价值",
             "冷链");
 
+    private static final List<String> MATERIAL_MARKERS = List.of(
+            "完整支付凭证",
+            "支付凭证",
+            "签收凭证",
+            "补充凭证",
+            "提供凭证",
+            "提供证明",
+            "补充材料");
+
+    private static final List<String> UNVERIFIED_BUSINESS_FACT_MARKERS = List.of(
+            "系统核算金额已固化",
+            "金额已固化",
+            "价格已固化",
+            "价格已冻结",
+            "价格已锁定");
+
+    private static final List<String> UNSUPPORTED_PRICING_MARKERS = List.of(
+            "满减",
+            "运费券",
+            "积分抵扣");
+
     public List<String> validate(String answer, String verifiedContext) {
         return validate("", answer, verifiedContext);
     }
@@ -66,6 +87,19 @@ public final class CompositeAnswerPolicyValidator {
         if (containsUnaskedMarker(
                 question, answer, context, SPECIAL_CONDITION_MARKERS)) {
             violations.add("UNSUPPORTED_SPECIAL_CONDITION");
+        }
+        if (containsUnaskedMarker(
+                question, answer, verifiedContext == null ? "" : verifiedContext,
+                MATERIAL_MARKERS)) {
+            violations.add("UNSUPPORTED_REQUESTED_MATERIAL");
+        }
+        if (containsUnverifiedMarker(
+                answer, context, UNVERIFIED_BUSINESS_FACT_MARKERS)) {
+            violations.add("UNVERIFIED_BUSINESS_FACT");
+        }
+        if (containsUnaskedMarker(
+                question, answer, context, UNSUPPORTED_PRICING_MARKERS)) {
+            violations.add("UNSUPPORTED_PRICING_DETAIL");
         }
         return List.copyOf(violations);
     }
