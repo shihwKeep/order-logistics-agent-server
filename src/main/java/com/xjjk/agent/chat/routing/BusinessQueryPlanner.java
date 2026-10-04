@@ -167,6 +167,9 @@ public class BusinessQueryPlanner {
             intents.add(CompositeQueryIntent.customer(customerCode));
         }
         String afterSaleCode = find(AFTER_SALE_CODE, message);
+        if (afterSaleCode != null && afterSaleCode.equalsIgnoreCase(orderCode)) {
+            afterSaleCode = null;
+        }
         if (afterSale && afterSaleCode != null) {
             intents.add(CompositeQueryIntent.afterSale(afterSaleCode));
         }

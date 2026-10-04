@@ -119,6 +119,20 @@ class BusinessQueryPlannerTest {
     }
 
     @Test
+    void doesNotTreatOrderCodeAsAfterSaleDetailWhenOnlyAfterSaleRulesAreRequested() {
+        BusinessQueryPlan plan = planner.plan(
+                "请查询订单 XJTS0120260820000011 的商品和当前物流状态，并结合售后规则说明目前是否具备退货判断依据");
+
+        assertThat(plan.mode()).isEqualTo(BusinessQueryMode.COMPOSITE);
+        assertThat(plan.acceptedResultKinds())
+                .contains("order-list", "logistics-timeline", "knowledge-citations")
+                .doesNotContain("after-sale-detail");
+        assertThat(plan.compositePlan().intents())
+                .filteredOn(intent -> intent.resultKind().equals("after-sale-detail"))
+                .isEmpty();
+    }
+
+    @Test
     void keepsRealtimeLogisticsQuestionWithPlaceholderOutOfKnowledgePath() {
         BusinessQueryPlan plan = planner.plan(
                 "请查询订单【完整订单号】当前物流状态，并根据物流停滞规则判断客服应该如何处理");
