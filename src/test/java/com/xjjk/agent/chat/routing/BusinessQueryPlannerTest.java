@@ -103,6 +103,22 @@ class BusinessQueryPlannerTest {
     }
 
     @Test
+    void keepsOrderDetailsWhenLogisticsAndOrderFactsAreRequestedTogether() {
+        BusinessQueryPlan plan = planner.plan(
+                "请查询订单 XJTS0120260820000011 的商品、物流状态和订单金额，并结合价格规则与物流停滞规则分别给出判断");
+
+        assertThat(plan.mode()).isEqualTo(BusinessQueryMode.COMPOSITE);
+        assertThat(plan.acceptedResultKinds())
+                .contains("order-list", "logistics-timeline", "knowledge-citations");
+        assertThat(plan.compositePlan().intents())
+                .filteredOn(intent -> intent.source() == CompositeQueryIntent.Source.BUSINESS)
+                .extracting(CompositeQueryIntent::resultKind, CompositeQueryIntent::value)
+                .containsExactlyInAnyOrder(
+                        tuple("order-list", "XJTS0120260820000011"),
+                        tuple("logistics-timeline", "XJTS0120260820000011"));
+    }
+
+    @Test
     void keepsRealtimeLogisticsQuestionWithPlaceholderOutOfKnowledgePath() {
         BusinessQueryPlan plan = planner.plan(
                 "请查询订单【完整订单号】当前物流状态，并根据物流停滞规则判断客服应该如何处理");
