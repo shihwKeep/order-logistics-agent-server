@@ -63,6 +63,26 @@ public final class CompositeAnswerPolicyValidator {
             "运费券",
             "积分抵扣");
 
+    private static final List<String> PRICING_POLICY_CLAIM_MARKERS = List.of(
+            "符合企业定价策略",
+            "符合定价策略",
+            "成交价合理",
+            "价格合理",
+            "当前价格合理");
+
+    private static final List<String> PRICING_BASELINE_MARKERS = List.of(
+            "定价基准",
+            "历史价",
+            "活动价",
+            "成本参考",
+            "价格快照");
+
+    private static final List<String> PRICING_UNKNOWN_MARKERS = List.of(
+            "无法确认",
+            "无法判断",
+            "不能确认",
+            "不能判断");
+
     private static final List<String> UNQUERIED_AFTER_SALE_MARKERS = List.of(
             "未查询到关联售后工单",
             "未查询到售后工单",
@@ -115,6 +135,11 @@ public final class CompositeAnswerPolicyValidator {
         if (containsUnaskedMarker(
                 question, answer, context, UNSUPPORTED_PRICING_MARKERS)) {
             violations.add("UNSUPPORTED_PRICING_DETAIL");
+        }
+        if (containsAny(answer, PRICING_POLICY_CLAIM_MARKERS)
+                && !containsAny(context, PRICING_BASELINE_MARKERS)
+                && !containsAny(answer, PRICING_UNKNOWN_MARKERS)) {
+            violations.add("UNSUPPORTED_PRICING_POLICY_CLAIM");
         }
         if (omitsCompletedBusinessBranch(answer, context)) {
             violations.add("INCOMPLETE_COMPOSITE_ANSWER");

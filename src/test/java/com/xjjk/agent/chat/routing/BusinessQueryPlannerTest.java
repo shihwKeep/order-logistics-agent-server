@@ -100,7 +100,8 @@ class BusinessQueryPlannerTest {
 
         assertThat(plan.mode()).isEqualTo(BusinessQueryMode.COMPOSITE);
         assertThat(plan.acceptedResultKinds())
-                .containsExactlyInAnyOrder("logistics-timeline", "knowledge-citations");
+                .containsExactlyInAnyOrder("order-list", "logistics-timeline",
+                        "knowledge-citations");
         assertThat(plan.compositePlan()).isNotNull();
     }
 
@@ -203,6 +204,21 @@ class BusinessQueryPlannerTest {
         assertThat(plan.compositePlan().intents())
                 .filteredOn(intent -> "after-sale-detail".equals(intent.resultKind()))
                 .isEmpty();
+    }
+
+    @Test
+    void orderLogisticsRuleQueryChecksOrderExistenceBeforeLogistics() {
+        BusinessQueryPlan plan = planner.plan(
+                "请查询订单 XJTS99999999999999，并结合物流规则判断如何处理");
+
+        assertThat(plan.mode()).isEqualTo(BusinessQueryMode.COMPOSITE);
+        assertThat(plan.compositePlan().intents())
+                .filteredOn(intent -> intent.source() == CompositeQueryIntent.Source.BUSINESS)
+                .extracting(CompositeQueryIntent::resultKind,
+                        CompositeQueryIntent::value)
+                .containsExactlyInAnyOrder(
+                        tuple("order-list", "XJTS99999999999999"),
+                        tuple("logistics-timeline", "XJTS99999999999999"));
     }
 
     @Test

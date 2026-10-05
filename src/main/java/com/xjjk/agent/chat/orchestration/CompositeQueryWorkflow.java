@@ -321,6 +321,14 @@ public class CompositeQueryWorkflow {
             }
             if (state.completedBranches().contains(branchName(intent))
                     || context.completedBranches.contains(branchName(intent))) continue;
+            if (skipLogisticsAfterMissingOrder(intent, context)) {
+                String branch = branchName(intent);
+                context.completedBranches.add(branch);
+                context.branchSnapshots.add(new CompositeQueryBranchSnapshot(
+                        branch, intent.resultKind(), "SKIPPED",
+                        "未找到订单，未执行物流查询", "", 0));
+                continue;
+            }
             try {
                 ToolUiResult result = queryBusinessIntent(
                         intent, intent.value(), identity, requestId);
@@ -377,6 +385,30 @@ public class CompositeQueryWorkflow {
                 context.results.stream().map(ToolUiResult::kind).distinct().toList());
         return CompositeQueryState.update(state, "business.query",
                 context.failures.isEmpty() ? "SUCCESS" : "FAILED", baseData);
+    }
+
+    private boolean skipLogisticsAfterMissingOrder(
+            CompositeQueryIntent intent,
+            InvocationContext context) {
+        if (!"logistics-timeline".equals(intent.resultKind())) {
+            return false;
+        }
+        if (context.businessFailures.contains("order-list")) {
+            return true;
+        }
+        return context.results.stream()
+                .filter(result -> "order-list".equals(result.kind()))
+                .map(ToolUiResult::data)
+                .anyMatch(data -> {
+                    if (data instanceof OrderSearchResult orders) {
+                        return orders.total() == 0;
+                    }
+                    if (data instanceof CustomerOrderQueryResult customerOrders) {
+                        return customerOrders.orders() == null
+                                || customerOrders.orders().total() == 0;
+                    }
+                    return false;
+                });
     }
 
     private Map<String, Object> resolveLatestOrder(

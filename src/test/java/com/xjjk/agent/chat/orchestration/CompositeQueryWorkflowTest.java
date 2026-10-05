@@ -298,6 +298,71 @@ class CompositeQueryWorkflowTest {
     }
 
     @Test
+    void explainsMissingCustomerOrderAndSkipsDependentLogistics() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-09-30T04:00:00+08:00");
+        when(customerOrderQueryService.query(
+                "C99999999999999", IDENTITY, "request-no-customer-order"))
+                .thenReturn(new CustomerOrderQueryResult(
+                        CustomerOrderResolution.NOT_FOUND,
+                        "C99999999999999", null, null));
+        when(knowledgeQueryGateway.retrieve(eq("查询售后规则"), any(), eq(IDENTITY),
+                eq("request-no-customer-order")))
+                .thenReturn(new KnowledgeRetrievalResult(
+                        true, List.of(new KnowledgeRetrievalResult.Evidence(
+                        1L, 2L, 3L, "chunk-1", "售后规则", "规则",
+                        "规则正文", "{}", 0.9, Set.of("kb"))),
+                        "v1", "NONE", "SUCCESS", now));
+
+        CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.customerOrders("C99999999999999"),
+                CompositeQueryIntent.latestOrderLogistics(),
+                CompositeQueryIntent.knowledge("查询售后规则")));
+
+        CompositeQueryService.CompositeQueryResult result = new CompositeQueryService(
+                new CompositeQueryWorkflow(orderGateway, customerOrderQueryService,
+                        productSearchGateway, afterSaleQueryGateway, knowledgeQueryGateway))
+                .execute(plan, "查询客户最近一笔订单的物流状态，并结合售后规则判断",
+                        IDENTITY, "request-no-customer-order");
+
+        assertThat(result.status()).isEqualTo("PARTIAL_SUCCESS");
+        assertThat(result.safeMessage())
+                .contains("未找到客户订单", "未执行物流查询");
+        verify(orderGateway, never()).logistics(any(), any(), any(), any());
+    }
+
+    @Test
+    void explainsMissingOrderAndSkipsLogisticsAfterEmptyOrderLookup() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-09-30T04:00:00+08:00");
+        when(orderGateway.search(eq("XJTS99999999999999"), eq(OrderIdentifierType.AUTO),
+                eq(IDENTITY), eq("request-no-order")))
+                .thenReturn(new OrderSearchResult(
+                        OrderIdentifierType.ORDER_CODE, 0, false, now, List.of()));
+        when(knowledgeQueryGateway.retrieve(eq("物流规则"), any(), eq(IDENTITY),
+                eq("request-no-order")))
+                .thenReturn(new KnowledgeRetrievalResult(
+                        true, List.of(new KnowledgeRetrievalResult.Evidence(
+                        1L, 2L, 3L, "chunk-1", "物流规则", "规则",
+                        "规则正文", "{}", 0.9, Set.of("kb"))),
+                        "v1", "NONE", "SUCCESS", now));
+
+        CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.order("XJTS99999999999999"),
+                CompositeQueryIntent.logistics("XJTS99999999999999"),
+                CompositeQueryIntent.knowledge("物流规则")));
+
+        CompositeQueryService.CompositeQueryResult result = new CompositeQueryService(
+                new CompositeQueryWorkflow(orderGateway, customerOrderQueryService,
+                        productSearchGateway, afterSaleQueryGateway, knowledgeQueryGateway))
+                .execute(plan, "请查询订单 XJTS99999999999999，并结合物流规则判断如何处理",
+                        IDENTITY, "request-no-order");
+
+        assertThat(result.status()).isEqualTo("PARTIAL_SUCCESS");
+        assertThat(result.safeMessage())
+                .contains("未找到该订单", "未执行物流查询");
+        verify(orderGateway, never()).logistics(any(), any(), any(), any());
+    }
+
+    @Test
     void returnsPartialSuccessWithoutInferringLogisticsWhenDependentBranchFails() {
         OffsetDateTime now = OffsetDateTime.parse("2026-09-30T04:00:00+08:00");
         OrderSearchResult orders = new OrderSearchResult(

@@ -1,7 +1,9 @@
 package com.xjjk.agent.chat.orchestration;
 
+import com.xjjk.agent.customer.service.CustomerOrderQueryResult;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
+import com.xjjk.agent.order.domain.OrderSearchResult;
 import com.xjjk.agent.tool.ToolUiResult;
 import org.springframework.stereotype.Service;
 
@@ -78,7 +80,7 @@ public class CompositeQueryService {
             if ("NO_RELIABLE_KNOWLEDGE".equals(state.finalStatus())) {
                 safeMessage = NO_KNOWLEDGE_MESSAGE;
             } else if ("PARTIAL_SUCCESS".equals(state.finalStatus())) {
-                safeMessage = PARTIAL_RESULT_MESSAGE;
+                safeMessage = partialResultMessage(state, uiResults);
             } else if ("FAILED".equals(state.finalStatus())
                     && state.failures().stream()
                     .anyMatch(kind -> !"knowledge-citations".equals(kind))) {
@@ -93,6 +95,41 @@ public class CompositeQueryService {
                     Set.copyOf(actual),
                     state.answerContext(),
                     success ? "" : safeMessage);
+        }
+
+        private static String partialResultMessage(
+                CompositeQueryState state,
+                List<ToolUiResult> results) {
+            boolean logisticsRequested = state.requiredResultKinds()
+                    .contains("logistics-timeline");
+            boolean logisticsMissing = logisticsRequested && results.stream()
+                    .noneMatch(result -> "logistics-timeline".equals(result.kind()));
+            if (logisticsMissing && hasMissingCustomerOrder(results)) {
+                return "未找到客户订单，因此未执行物流查询，无法判断物流状态或售后资格。";
+            }
+            if (logisticsMissing && hasMissingExplicitOrder(results)) {
+                return "未找到该订单，因此未执行物流查询，无法判断物流状态。";
+            }
+            return PARTIAL_RESULT_MESSAGE;
+        }
+
+        private static boolean hasMissingCustomerOrder(List<ToolUiResult> results) {
+            return results.stream()
+                    .filter(result -> "order-list".equals(result.kind()))
+                    .map(ToolUiResult::data)
+                    .filter(CustomerOrderQueryResult.class::isInstance)
+                    .map(CustomerOrderQueryResult.class::cast)
+                    .anyMatch(result -> result.orders() == null
+                            || result.orders().total() == 0);
+        }
+
+        private static boolean hasMissingExplicitOrder(List<ToolUiResult> results) {
+            return results.stream()
+                    .filter(result -> "order-list".equals(result.kind()))
+                    .map(ToolUiResult::data)
+                    .filter(OrderSearchResult.class::isInstance)
+                    .map(OrderSearchResult.class::cast)
+                    .anyMatch(result -> result.total() == 0);
         }
 
         public static CompositeQueryResult success(

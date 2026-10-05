@@ -81,7 +81,17 @@ class CompositeAnswerPolicyValidatorTest {
                 .containsExactly(
                         "UNSUPPORTED_REQUESTED_MATERIAL",
                         "UNVERIFIED_BUSINESS_FACT",
-                        "UNSUPPORTED_PRICING_DETAIL");
+                "UNSUPPORTED_PRICING_DETAIL");
+    }
+
+    @Test
+    void rejectsPricingPolicyConclusionWithoutPricingBaseline() {
+        assertThat(validator.validate(
+                "查询订单商品并结合价格规则判断成交价是否合理",
+                "当前成交价符合企业定价策略，价格合理。",
+                "业务事实：订单成交单价=10.00元，订单商品小计=60.00元\n"
+                        + "企业知识依据：订单价格需按规则核验"))
+                .containsExactly("UNSUPPORTED_PRICING_POLICY_CLAIM");
     }
 
     @Test

@@ -151,9 +151,7 @@ public class BusinessQueryPlanner {
 
         List<CompositeQueryIntent> intents = new ArrayList<>();
         String orderCode = find(ORDER_CODE, message);
-        boolean orderDetailsRequested = containsAny(
-                message, "商品", "金额", "订单信息", "订单详情", "订单明细");
-        if (order && orderCode != null && (!logistics || orderDetailsRequested)) {
+        if (order && orderCode != null) {
             intents.add(CompositeQueryIntent.order(orderCode));
         }
         if (logistics && orderCode != null) {
