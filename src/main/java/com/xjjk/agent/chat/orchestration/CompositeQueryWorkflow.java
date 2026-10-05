@@ -717,6 +717,14 @@ public class CompositeQueryWorkflow {
         if (context.plan.requiresExternalSource()) {
             answer.append("外部数据边界：当前未接入外部市场数据，无法确认普遍价格区间或据此给出市场定价结论。\n");
         }
+        boolean afterSaleNotQueried = context.plan.intents().stream()
+                .noneMatch(intent -> "after-sale-detail".equals(intent.resultKind()))
+                && context.plan.intents().stream().anyMatch(intent ->
+                intent.source() == CompositeQueryIntent.Source.KNOWLEDGE
+                        && containsAfterSaleTopic(intent.value()));
+        if (afterSaleNotQueried) {
+            answer.append("本轮未查询售后工单，无法确认是否存在售后申请或工单状态。\n");
+        }
         if ("PARTIAL_SUCCESS".equals(state.finalStatus())) {
             boolean logisticsMissing = context.plan.intents().stream()
                     .anyMatch(intent -> "logistics-timeline".equals(intent.resultKind()))
@@ -724,14 +732,6 @@ public class CompositeQueryWorkflow {
                     result -> "logistics-timeline".equals(result.kind()));
             if (logisticsMissing) {
                 answer.append("物流查询未完成，因此无法确认当前物流状态、最新轨迹时间或停滞阈值；以上订单状态不等同于物流状态。\n");
-            }
-            boolean afterSaleNotQueried = context.plan.intents().stream()
-                    .noneMatch(intent -> "after-sale-detail".equals(intent.resultKind()))
-                    && context.plan.intents().stream().anyMatch(intent ->
-                    intent.source() == CompositeQueryIntent.Source.KNOWLEDGE
-                            && containsAfterSaleTopic(intent.value()));
-            if (afterSaleNotQueried) {
-                answer.append("本轮未查询售后工单，无法确认是否存在售后申请或工单状态。\n");
             }
             if (hasNoMatchingOrder(context)) {
                 answer.append("没有找到可用于物流查询的订单，因此未执行物流查询。\n");

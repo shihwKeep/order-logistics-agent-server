@@ -291,6 +291,8 @@ class CompositeQueryWorkflowTest {
         assertThat(result.actualResultKinds())
                 .containsExactlyInAnyOrder("order-list", "logistics-timeline",
                         "knowledge-citations");
+        assertThat(result.verifiedAnswerContext())
+                .contains("本轮未查询售后工单，无法确认是否存在售后申请或工单状态");
         verify(orderGateway).logistics("XJ001", OrderIdentifierType.ORDER_CODE,
                 IDENTITY, "request-dependent");
     }
