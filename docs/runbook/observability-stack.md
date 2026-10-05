@@ -49,6 +49,16 @@ docker compose --env-file infra\observability\.env.observability -f infra\observ
 
 日常停止不能增加 `-v`，否则会删除本地指标、Trace、日志和 Grafana 数据卷。
 
+## 离线评测门禁
+
+离线黄金评测不依赖观测容器或外部业务数据，用于在改动编排、门禁和恢复逻辑后快速回归：
+
+```powershell
+.\mvnw.cmd -q -Dtest=OfflineGoldenEvaluationTest test
+```
+
+该命令验证固定的 12 个业务/失败/门禁场景，并额外检查同一规范化工具参数只产生一次下游调用、checkpoint 恢复不重复已完成业务分支。它不能替代真实请求的 SSE、Trace、Prometheus 和 Loki 验收；离线通过后仍需运行 `scripts\verify-observability.ps1` 并执行单次请求排查。
+
 ## 单次请求排查
 
 完整的场景验收矩阵、通过标准和敏感数据检查见

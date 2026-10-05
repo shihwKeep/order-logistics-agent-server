@@ -9,6 +9,19 @@
 3. 打开 Grafana 的 Agent Runtime、Tool Calls、SSE Stream 三个看板，确认目标服务的 `up` 为 1。
 4. 每次验收记录 `requestId`、服务版本和测试时间；不要记录完整问题、Prompt、Token、Cookie 或业务载荷。
 
+## 离线黄金评测
+
+上线前先执行不依赖模型、MySQL、Redis 或外部下游的确定性评测：
+
+```powershell
+.\mvnw.cmd -q -Dtest=OfflineGoldenEvaluationTest test
+```
+
+评测数据位于
+`src/test/resources/evaluation/agent-golden-cases.json`，覆盖正常业务查询、业务加知识库、空结果知识库门禁、下游失败、工具参数复用、并行分支和 checkpoint 恢复。评测使用固定夹具，不代表线上吞吐或外部服务可用性；专项测试通过后，仍必须按本手册的实时 SSE、Trace、指标、日志矩阵验收。
+
+评测失败时先查看失败 case 的状态、结果类型、知识库调用次数和禁止调用断言，再决定是否需要启动完整观测栈。不要为了让离线评测通过而放宽“空业务结果不查知识库”或敏感字段断言。
+
 ## 场景验收矩阵
 
 | 场景 | 操作 | 必须看到的结果 |
@@ -52,4 +65,3 @@
 ## 敏感数据检查
 
 验收结束前抽查 Loki、Tempo、Prometheus 标签和 Grafana 变量，确认不存在用户原始消息、完整 Prompt、记忆正文、知识库证据全文、Authorization、Cookie、业务编号或完整工具参数。发现后立即停止相关采集、限制访问、删除受影响数据并修复埋点。
-
