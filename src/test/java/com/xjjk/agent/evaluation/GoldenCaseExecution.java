@@ -2,6 +2,7 @@ package com.xjjk.agent.evaluation;
 
 import com.xjjk.agent.aftersale.service.AfterSaleQueryGateway;
 import com.xjjk.agent.chat.orchestration.CompositeQueryCheckpointProperties;
+import com.xjjk.agent.chat.orchestration.CompositeQueryCheckpoint;
 import com.xjjk.agent.chat.orchestration.CompositeQueryCheckpointStore;
 import com.xjjk.agent.chat.orchestration.CompositeQueryIntent;
 import com.xjjk.agent.chat.orchestration.CompositeQueryParallelExecutor;
@@ -19,6 +20,8 @@ import com.xjjk.agent.product.service.ProductSearchGateway;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -59,6 +62,56 @@ final class GoldenCaseExecution {
                         GoldenFixtureFactory.identity(), evaluationCase.caseId());
         return new Execution(result, orderGateway, customerOrders, productGateway,
                 knowledgeGateway, checkpointStore, parallelExecutor);
+    }
+
+    static CheckpointExecution runCheckpointTwice() {
+        OrderQueryGateway orderGateway = mock(OrderQueryGateway.class);
+        CustomerOrderQueryService customerOrders = mock(CustomerOrderQueryService.class);
+        CustomerQueryGateway customerGateway = mock(CustomerQueryGateway.class);
+        ProductSearchGateway productGateway = mock(ProductSearchGateway.class);
+        AfterSaleQueryGateway afterSaleGateway = mock(AfterSaleQueryGateway.class);
+        KnowledgeQueryGateway knowledgeGateway = mock(KnowledgeQueryGateway.class);
+        when(orderGateway.search(anyString(), any(), any(), anyString()))
+                .thenReturn(GoldenFixtureFactory.orderNormal());
+        when(productGateway.search(any()))
+                .thenReturn(GoldenFixtureFactory.productNormal());
+
+        AtomicReference<CompositeQueryCheckpoint> saved = new AtomicReference<>();
+        CompositeQueryCheckpointStore checkpointStore = new CompositeQueryCheckpointStore() {
+            @Override
+            public Optional<CompositeQueryCheckpoint> load(String threadId) {
+                return Optional.ofNullable(saved.get());
+            }
+
+            @Override
+            public void save(CompositeQueryCheckpoint checkpoint) {
+                saved.set(checkpoint);
+            }
+
+            @Override
+            public void delete(String threadId) {
+                saved.set(null);
+            }
+        };
+        CompositeQueryParallelExecutor parallelExecutor = new CompositeQueryParallelExecutor(
+                new CompositeQueryParallelProperties(2, 2, 8));
+        CompositeQueryWorkflow workflow = new CompositeQueryWorkflow(
+                orderGateway, customerOrders, customerGateway, productGateway,
+                afterSaleGateway, knowledgeGateway, checkpointStore,
+                new CompositeQueryCheckpointProperties(
+                        true, "golden:composite", "v2", Duration.ofMinutes(10)),
+                parallelExecutor);
+        CompositeQueryService service = new CompositeQueryService(workflow);
+        CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.order("ORDER_FIXTURE_001"),
+                CompositeQueryIntent.product("PRODUCT_FIXTURE_001")));
+        CompositeQueryService.CompositeQueryResult first = service.execute(
+                plan, "checkpoint恢复查询", GoldenFixtureFactory.identity(),
+                "checkpoint-resume-golden-001");
+        CompositeQueryService.CompositeQueryResult resumed = service.execute(
+                plan, "checkpoint恢复查询", GoldenFixtureFactory.identity(),
+                "checkpoint-resume-golden-001");
+        return new CheckpointExecution(first, resumed, orderGateway, productGateway);
     }
 
     static CompositeQueryPlan planFor(GoldenEvaluationCase evaluationCase) {
@@ -149,5 +202,12 @@ final class GoldenCaseExecution {
             KnowledgeQueryGateway knowledgeGateway,
             CompositeQueryCheckpointStore checkpointStore,
             CompositeQueryParallelExecutor parallelExecutor) {
+    }
+
+    record CheckpointExecution(
+            CompositeQueryService.CompositeQueryResult first,
+            CompositeQueryService.CompositeQueryResult resumed,
+            OrderQueryGateway orderGateway,
+            ProductSearchGateway productGateway) {
     }
 }
