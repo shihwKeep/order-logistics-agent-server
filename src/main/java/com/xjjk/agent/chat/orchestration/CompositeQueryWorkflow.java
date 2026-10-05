@@ -38,6 +38,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.Collections;
 import java.util.concurrent.ExecutorService;
@@ -70,6 +71,7 @@ public class CompositeQueryWorkflow {
     private final KnowledgeQueryGateway knowledgeQueryGateway;
     private final Clock clock;
     private final LogisticsStagnationEvaluator stagnationEvaluator;
+    private final LatestOrderResolver latestOrderResolver;
     private final BaseCheckpointSaver checkpointSaver;
     private final Executor parallelExecutor;
     private CompositeQueryMetrics metrics;
@@ -163,6 +165,7 @@ public class CompositeQueryWorkflow {
         this.knowledgeQueryGateway = knowledgeQueryGateway;
         this.clock = clock;
         this.stagnationEvaluator = new LogisticsStagnationEvaluator(clock);
+        this.latestOrderResolver = new LatestOrderResolver();
         this.parallelExecutor = parallelExecutor;
         this.checkpointSaver = checkpointStore != null && checkpointProperties != null
                 && checkpointProperties.enabled()
@@ -215,7 +218,7 @@ public class CompositeQueryWorkflow {
                 metrics.graph("FAILED");
             }
             log.warn("composite_query_workflow_failed requestId={}, exceptionType={}",
-                    requestId, exception.getClass().getSimpleName());
+                    requestId, exception.getClass().getSimpleName(), exception);
             return CompositeQueryService.CompositeQueryResult.failed();
         }
     }
@@ -276,7 +279,9 @@ public class CompositeQueryWorkflow {
         List<String> missing = new ArrayList<>();
         for (CompositeQueryIntent intent : context.plan.intents()) {
             if (intent.source() == CompositeQueryIntent.Source.BUSINESS
-                    && intent.value().isBlank()) {
+                    && intent.value().isBlank()
+                    && intent.identifierSource()
+                    != CompositeQueryIntent.IdentifierSource.RESOLVED_ORDER) {
                 missing.add(intent.resultKind());
             }
         }
@@ -307,10 +312,14 @@ public class CompositeQueryWorkflow {
         restoreCheckpointContext(state, context);
         for (CompositeQueryIntent intent : context.plan.intents()) {
             if (intent.source() != CompositeQueryIntent.Source.BUSINESS) continue;
+            if (intent.identifierSource() == CompositeQueryIntent.IdentifierSource.RESOLVED_ORDER) {
+                continue;
+            }
             if (state.completedBranches().contains(branchName(intent))
                     || context.completedBranches.contains(branchName(intent))) continue;
             try {
-                ToolUiResult result = queryBusinessIntent(intent, identity, requestId);
+                ToolUiResult result = queryBusinessIntent(
+                        intent, intent.value(), identity, requestId);
                 context.results.add(result);
                 String branch = branchName(intent);
                 context.completedBranches.add(branch);
@@ -323,6 +332,7 @@ public class CompositeQueryWorkflow {
                 }
             } catch (RuntimeException exception) {
                 context.failures.add(intent.resultKind());
+                context.businessFailures.add(intent.resultKind());
                 context.branchSnapshots.add(new CompositeQueryBranchSnapshot(
                         branchName(intent), intent.resultKind(), "FAILED", "",
                         exception.getClass().getSimpleName(), 0));
@@ -339,37 +349,176 @@ public class CompositeQueryWorkflow {
         values.put(CompositeQueryState.FAILURES, List.copyOf(context.failures));
         values.put(CompositeQueryState.BRANCH_SNAPSHOTS, List.copyOf(context.branchSnapshots));
         values.put(CompositeQueryState.COMPLETED_BRANCHES, List.copyOf(context.completedBranches));
-        // 业务节点失败后会直接结束图，必须把终态写入状态，避免外层拿到 PENDING。
-        if (!context.failures.isEmpty()) {
-            values.put(CompositeQueryState.FINAL_STATUS, "FAILED");
-        }
+        values.put(CompositeQueryState.DEPENDENCY_STATUSES,
+                mergeDependencyStatuses(state, context));
+        CompositeQueryState baseState = new CompositeQueryState(
+                new LinkedHashMap<>(state.data()));
+        Map<String, Object> baseData = new LinkedHashMap<>(baseState.data());
+        baseData.putAll(values);
+        CompositeQueryState stateAfterBase = new CompositeQueryState(baseData);
+        Map<String, Object> resolvedValues = resolveLatestOrder(stateAfterBase, context);
+        baseData.putAll(resolvedValues);
+        CompositeQueryState stateAfterResolve = new CompositeQueryState(baseData);
+        Map<String, Object> dependentValues = queryDependentBusiness(
+                stateAfterResolve, context, identity, requestId);
+        baseData.putAll(dependentValues);
+        baseData.remove(CompositeQueryState.NODE_STATUSES);
+        baseData.put(CompositeQueryState.RESULT_COUNT, context.results.size());
+        baseData.put(CompositeQueryState.FAILURES, List.copyOf(context.failures));
+        baseData.put(CompositeQueryState.BRANCH_SNAPSHOTS, List.copyOf(context.branchSnapshots));
+        baseData.put(CompositeQueryState.COMPLETED_BRANCHES, List.copyOf(context.completedBranches));
+        baseData.put(CompositeQueryState.DEPENDENCY_STATUSES,
+                mergeDependencyStatuses(stateAfterResolve, context));
+        baseData.put(CompositeQueryState.PUBLISHED_RESULT_KINDS,
+                context.results.stream().map(ToolUiResult::kind).distinct().toList());
         return CompositeQueryState.update(state, "business.query",
-                context.failures.isEmpty() ? "SUCCESS" : "FAILED", values);
+                context.failures.isEmpty() ? "SUCCESS" : "FAILED", baseData);
+    }
+
+    private Map<String, Object> resolveLatestOrder(
+            CompositeQueryState state,
+            InvocationContext context) {
+        restoreCheckpointContext(state, context);
+        List<CompositeQueryIntent> dependentIntents = context.plan.intents().stream()
+                .filter(intent -> intent.dependencyMode()
+                        == CompositeQueryIntent.DependencyMode.LATEST_ORDER)
+                .toList();
+        if (dependentIntents.isEmpty()) {
+            return CompositeQueryState.update(state, "resolve.latest.order", "SKIPPED",
+                    Map.of());
+        }
+        String existingCode = state.resolvedOrderCode();
+        String existingAt = state.resolvedOrderAt();
+        if (!existingCode.isBlank()) {
+            Map<String, String> statuses = mergeDependencyStatuses(state, context);
+            dependentIntents.forEach(intent -> statuses.put(branchName(intent), "SUCCESS"));
+            return CompositeQueryState.update(state, "resolve.latest.order", "SUCCESS",
+                    Map.of(CompositeQueryState.RESOLVED_ORDER_CODE, existingCode,
+                            CompositeQueryState.RESOLVED_ORDER_AT, existingAt,
+                            CompositeQueryState.DEPENDENCY_STATUSES, statuses));
+        }
+        if (context.businessFailures.stream().anyMatch(kind -> "order-list".equals(kind))) {
+            Map<String, String> statuses = mergeDependencyStatuses(state, context);
+            dependentIntents.forEach(intent -> statuses.put(
+                    branchName(intent), "SKIPPED_DEPENDENCY_FAILED"));
+            return CompositeQueryState.update(state, "resolve.latest.order", "SKIPPED",
+                    Map.of(CompositeQueryState.DEPENDENCY_STATUSES, statuses));
+        }
+        Optional<LatestOrderResolver.ResolvedOrder> resolved = context.results.stream()
+                .filter(result -> "order-list".equals(result.kind()))
+                .map(ToolUiResult::data)
+                .filter(CustomerOrderQueryResult.class::isInstance)
+                .map(CustomerOrderQueryResult.class::cast)
+                .map(latestOrderResolver::resolve)
+                .flatMap(Optional::stream)
+                .findFirst();
+        if (resolved.isEmpty()) {
+            Map<String, String> statuses = mergeDependencyStatuses(state, context);
+            dependentIntents.forEach(intent -> statuses.put(
+                    branchName(intent), "SKIPPED_NO_MATCHING_ORDER"));
+            return CompositeQueryState.update(state, "resolve.latest.order", "SKIPPED",
+                    Map.of(CompositeQueryState.DEPENDENCY_STATUSES, statuses));
+        }
+        LatestOrderResolver.ResolvedOrder value = resolved.get();
+        Map<String, String> statuses = mergeDependencyStatuses(state, context);
+        dependentIntents.forEach(intent -> statuses.put(branchName(intent), "RUNNABLE"));
+        if (metrics != null) metrics.dependency("LATEST_ORDER", "RESOLVED");
+        return CompositeQueryState.update(state, "resolve.latest.order", "SUCCESS",
+                Map.of(CompositeQueryState.RESOLVED_ORDER_CODE, value.orderCode(),
+                        CompositeQueryState.RESOLVED_ORDER_AT, value.orderTime(),
+                        CompositeQueryState.DEPENDENCY_STATUSES, statuses));
+    }
+
+    private Map<String, Object> queryDependentBusiness(
+            CompositeQueryState state,
+            InvocationContext context,
+            AgentIdentity identity,
+            String requestId) {
+        restoreCheckpointContext(state, context);
+        String resolvedOrderCode = state.resolvedOrderCode();
+        for (CompositeQueryIntent intent : context.plan.intents()) {
+            if (intent.source() != CompositeQueryIntent.Source.BUSINESS
+                    || intent.identifierSource()
+                    != CompositeQueryIntent.IdentifierSource.RESOLVED_ORDER) {
+                continue;
+            }
+            String branch = branchName(intent);
+            if (state.completedBranches().contains(branch)
+                    || context.completedBranches.contains(branch)) {
+                continue;
+            }
+            if (resolvedOrderCode.isBlank()) {
+                String status = state.dependencyStatuses().getOrDefault(
+                        branch, "SKIPPED_DEPENDENCY_FAILED");
+                context.branchSnapshots.add(new CompositeQueryBranchSnapshot(
+                        branch, intent.resultKind(), "SKIPPED", status, "", 0));
+                continue;
+            }
+            try {
+                ToolUiResult result = queryBusinessIntent(
+                        intent, resolvedOrderCode, identity, requestId);
+                context.results.add(result);
+                context.completedBranches.add(branch);
+                context.branchSnapshots.add(new CompositeQueryBranchSnapshot(
+                        branch, result.kind(), "SUCCESS", safeResultText(result.data()), "", 0));
+                if (metrics != null) {
+                    metrics.result(result.kind(), "SUCCESS");
+                    metrics.branch(branch, "SUCCESS");
+                }
+                Map<String, String> statuses = mergeDependencyStatuses(state, context);
+                statuses.put(branch, "SUCCESS");
+                context.dependencyStatuses.clear();
+                context.dependencyStatuses.putAll(statuses);
+            } catch (RuntimeException exception) {
+                context.failures.add(intent.resultKind());
+                context.businessFailures.add(intent.resultKind());
+                context.branchSnapshots.add(new CompositeQueryBranchSnapshot(
+                        branch, intent.resultKind(), "FAILED", "",
+                        exception.getClass().getSimpleName(), 0));
+                if (metrics != null) {
+                    metrics.result(intent.resultKind(), "FAILURE");
+                    metrics.branch(branch, "FAILED");
+                }
+                log.warn("composite_dependent_business_node_failed requestId={}, kind={}, exceptionType={}",
+                        requestId, intent.resultKind(), exception.getClass().getSimpleName());
+            }
+        }
+        return CompositeQueryState.update(state, "business.dependent.query",
+                context.businessFailures.isEmpty() ? "SUCCESS" : "FAILED",
+                Map.of(CompositeQueryState.RESULT_COUNT, context.results.size(),
+                        CompositeQueryState.FAILURES, List.copyOf(context.failures),
+                        CompositeQueryState.BRANCH_SNAPSHOTS, List.copyOf(context.branchSnapshots),
+                        CompositeQueryState.COMPLETED_BRANCHES, List.copyOf(context.completedBranches),
+                        CompositeQueryState.DEPENDENCY_STATUSES,
+                        mergeDependencyStatuses(state, context),
+                        CompositeQueryState.PUBLISHED_RESULT_KINDS,
+                        context.results.stream().map(ToolUiResult::kind).distinct().toList()));
     }
 
     private ToolUiResult queryBusinessIntent(
             CompositeQueryIntent intent,
+            String queryValue,
             AgentIdentity identity,
             String requestId) {
         OffsetDateTime now = OffsetDateTime.now(clock);
         return switch (intent.resultKind()) {
             case "logistics-timeline" -> {
                 OrderLogisticsResult result = orderGateway.logistics(
-                        intent.value(), OrderIdentifierType.ORDER_CODE, identity, requestId);
+                        queryValue, OrderIdentifierType.ORDER_CODE, identity, requestId);
                 yield new ToolUiResult("get_order_logistics", "logistics-timeline", 1,
                         result.queriedAt(), result);
             }
             case "order-list" -> {
-                if (intent.value().toUpperCase(java.util.Locale.ROOT).startsWith("C")) {
+                if (queryValue.toUpperCase(java.util.Locale.ROOT).startsWith("C")) {
                     CustomerOrderQueryResult result = customerOrderQueryService.query(
-                            intent.value(), identity, requestId);
+                            queryValue, identity, requestId);
                     OffsetDateTime queriedAt = result.orders() == null
                             ? now : result.orders().queriedAt();
                     yield new ToolUiResult("list_customer_orders", "order-list", 1,
                             queriedAt, result);
                 }
                 OrderSearchResult result = orderGateway.search(
-                        intent.value(), OrderIdentifierType.AUTO, identity, requestId);
+                        queryValue, OrderIdentifierType.AUTO, identity, requestId);
                 yield new ToolUiResult("search_orders", "order-list", 1,
                         result.queriedAt(), result);
             }
@@ -378,7 +527,7 @@ public class CompositeQueryWorkflow {
                     throw new IllegalStateException("客户查询服务未配置");
                 }
                 CustomerSearchResult result = customerQueryGateway.search(
-                        intent.value(), CustomerMatchType.AUTO, identity, requestId);
+                        queryValue, CustomerMatchType.AUTO, identity, requestId);
                 yield new ToolUiResult("search_customers", "customer-list", 1,
                         result.queriedAt(), result);
             }
@@ -390,7 +539,7 @@ public class CompositeQueryWorkflow {
             }
             case "after-sale-detail" -> {
                 AfterSaleDetailResult result = afterSaleQueryGateway.detail(
-                        intent.value(), identity, requestId);
+                        queryValue, identity, requestId);
                 yield new ToolUiResult("get_after_sale_detail", "after-sale-detail", 1,
                         result.queriedAt(), result);
             }
@@ -433,6 +582,7 @@ public class CompositeQueryWorkflow {
                 }
             } catch (RuntimeException exception) {
                 context.failures.add("knowledge-citations");
+                context.knowledgeFailures.add("knowledge-citations");
                 context.branchSnapshots.add(new CompositeQueryBranchSnapshot(
                         branchName(intent), "knowledge-citations", "FAILED", "",
                         exception.getClass().getSimpleName(), 0));
@@ -445,7 +595,7 @@ public class CompositeQueryWorkflow {
             }
         }
         return CompositeQueryState.update(state, "knowledge.query",
-                context.failures.isEmpty() ? "SUCCESS" : "FAILED",
+                context.knowledgeFailures.isEmpty() ? "SUCCESS" : "FAILED",
                 Map.of(CompositeQueryState.KNOWLEDGE_COUNT, context.knowledge.size(),
                         CompositeQueryState.FAILURES, List.copyOf(context.failures),
                         CompositeQueryState.BRANCH_SNAPSHOTS, List.copyOf(context.branchSnapshots),
@@ -462,7 +612,7 @@ public class CompositeQueryWorkflow {
                 .forEach(actual::add);
         boolean knowledgeRequested = context.plan.hasSource(CompositeQueryIntent.Source.KNOWLEDGE);
         boolean knowledgeOk = !knowledgeRequested
-                || (context.failures.stream().noneMatch("knowledge-citations"::equals)
+                || (context.knowledgeFailures.isEmpty()
                 && ((!context.knowledge.isEmpty()
                 && context.knowledge.stream().allMatch(
                 result -> result.answerable() && !result.evidences().isEmpty()))
@@ -483,10 +633,35 @@ public class CompositeQueryWorkflow {
         }
         boolean complete = actual.containsAll(context.plan.requiredResultKinds())
                 && knowledgeOk;
-        String status = !context.failures.isEmpty() ? "FAILED"
-                : complete ? "SUCCESS"
-                : !knowledgeOk && knowledgeRequested
-                ? "NO_RELIABLE_KNOWLEDGE" : "MISSING_RESULT";
+        boolean hasSuccessfulBusiness = context.results.stream()
+                .anyMatch(result -> !"knowledge-citations".equals(result.kind()));
+        boolean hasBusinessFailure = !context.businessFailures.isEmpty()
+                || state.branchSnapshots().stream().anyMatch(snapshot ->
+                "FAILED".equals(snapshot.status())
+                        && !"knowledge-citations".equals(snapshot.resultKind()));
+        String status;
+        if (!knowledgeOk && knowledgeRequested) {
+            status = "NO_RELIABLE_KNOWLEDGE";
+        } else if (complete) {
+            status = "SUCCESS";
+        } else if (hasSuccessfulBusiness && (hasBusinessFailure || !actual.containsAll(
+                context.plan.requiredResultKinds()))) {
+            status = "PARTIAL_SUCCESS";
+        } else if (hasBusinessFailure) {
+            status = "FAILED";
+        } else {
+            status = "MISSING_RESULT";
+        }
+        if (!hasSuccessfulBusiness && context.results.isEmpty()
+                && !context.businessFailures.isEmpty()) {
+            status = "FAILED";
+        }
+        if (!hasSuccessfulBusiness && context.results.isEmpty()
+                && state.branchSnapshots().stream().anyMatch(snapshot ->
+                "SUCCESS".equals(snapshot.status())
+                        && !"knowledge-citations".equals(snapshot.resultKind()))) {
+            hasSuccessfulBusiness = true;
+        }
         return CompositeQueryState.update(state, "result.validate", status,
                 Map.of(CompositeQueryState.FINAL_STATUS, status,
                         CompositeQueryState.FAILURES, List.copyOf(context.failures),
@@ -498,13 +673,21 @@ public class CompositeQueryWorkflow {
 
     private Map<String, Object> composeAnswer(
             CompositeQueryState state, InvocationContext context) {
-        if (!"SUCCESS".equals(state.finalStatus())) {
+        if (!"SUCCESS".equals(state.finalStatus())
+                && !"PARTIAL_SUCCESS".equals(state.finalStatus())) {
             return CompositeQueryState.update(state, "answer.compose", "SKIPPED", Map.of());
         }
         StringBuilder answer = new StringBuilder();
         answer.append("业务事实：\n");
-        context.results.forEach(result -> answer.append(result.kind())
-                .append("：").append(safeResultText(result.data())).append("\n"));
+        if (!context.results.isEmpty()) {
+            context.results.forEach(result -> answer.append(result.kind())
+                    .append("：").append(safeResultText(result.data())).append("\n"));
+        } else {
+            state.branchSnapshots().stream()
+                    .filter(snapshot -> "SUCCESS".equals(snapshot.status()))
+                    .forEach(snapshot -> answer.append(snapshot.resultKind())
+                            .append("：").append(snapshot.safeSummary()).append("\n"));
+        }
         answer.append("企业知识依据：\n");
         context.knowledge.forEach(result -> result.evidences().forEach(evidence ->
                 answer.append("《").append(evidence.documentTitle()).append("》")
@@ -524,13 +707,58 @@ public class CompositeQueryWorkflow {
         if (context.plan.requiresExternalSource()) {
             answer.append("外部数据边界：当前未接入外部市场数据，无法确认普遍价格区间或据此给出市场定价结论。\n");
         }
+        if ("PARTIAL_SUCCESS".equals(state.finalStatus())) {
+            boolean logisticsMissing = context.plan.intents().stream()
+                    .anyMatch(intent -> "logistics-timeline".equals(intent.resultKind()))
+                    && context.results.stream().noneMatch(
+                    result -> "logistics-timeline".equals(result.kind()));
+            if (logisticsMissing) {
+                answer.append("物流查询未完成，因此无法确认当前物流状态、最新轨迹时间或停滞阈值；以上订单状态不等同于物流状态。\n");
+            }
+            boolean afterSaleNotQueried = context.plan.intents().stream()
+                    .noneMatch(intent -> "after-sale-detail".equals(intent.resultKind()))
+                    && context.plan.intents().stream().anyMatch(intent ->
+                    intent.source() == CompositeQueryIntent.Source.KNOWLEDGE
+                            && containsAfterSaleTopic(intent.value()));
+            if (afterSaleNotQueried) {
+                answer.append("本轮未查询售后工单，无法确认是否存在售后申请或工单状态。\n");
+            }
+            if (hasNoMatchingOrder(context)) {
+                answer.append("没有找到可用于物流查询的订单，因此未执行物流查询。\n");
+            }
+        }
         return CompositeQueryState.update(state, "answer.compose", "SUCCESS",
                 Map.of(CompositeQueryState.ANSWER_CONTEXT, answer.toString()));
     }
 
+    private boolean containsAfterSaleTopic(String value) {
+        return value != null && (value.contains("售后") || value.contains("退货")
+                || value.contains("换货") || value.contains("退款"));
+    }
+
+    private boolean hasNoMatchingOrder(InvocationContext context) {
+        return context.results.stream()
+                .filter(result -> "order-list".equals(result.kind()))
+                .map(ToolUiResult::data)
+                .filter(CustomerOrderQueryResult.class::isInstance)
+                .map(CustomerOrderQueryResult.class::cast)
+                .anyMatch(result -> result.orders() == null || result.orders().total() == 0);
+    }
+
     private String branchName(CompositeQueryIntent intent) {
-        return intent.source().name().toLowerCase(java.util.Locale.ROOT)
+        String base = intent.source().name().toLowerCase(java.util.Locale.ROOT)
                 + ":" + intent.resultKind();
+        return intent.dependencyMode() == CompositeQueryIntent.DependencyMode.NONE
+                ? base
+                : base + ":" + intent.dependencyMode().name().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private Map<String, String> mergeDependencyStatuses(
+            CompositeQueryState state,
+            InvocationContext context) {
+        Map<String, String> statuses = new LinkedHashMap<>(state.dependencyStatuses());
+        statuses.putAll(context.dependencyStatuses);
+        return statuses;
     }
 
     private void restoreCheckpointContext(
@@ -540,6 +768,16 @@ public class CompositeQueryWorkflow {
         }
         context.completedBranches.addAll(state.completedBranches());
         context.failures.addAll(state.failures());
+        context.dependencyStatuses.putAll(state.dependencyStatuses());
+        state.branchSnapshots().stream()
+                .filter(snapshot -> "FAILED".equals(snapshot.status())
+                        && !"knowledge-citations".equals(snapshot.resultKind()))
+                .map(CompositeQueryBranchSnapshot::resultKind)
+                .forEach(context.businessFailures::add);
+        state.branchSnapshots().stream()
+                .filter(snapshot -> "FAILED".equals(snapshot.status())
+                        && "knowledge-citations".equals(snapshot.resultKind()))
+                .forEach(snapshot -> context.knowledgeFailures.add("knowledge-citations"));
     }
 
     private String safeResultText(Object data) {
@@ -659,6 +897,12 @@ public class CompositeQueryWorkflow {
                 Collections.synchronizedSet(new LinkedHashSet<>());
         private final List<CompositeQueryBranchSnapshot> branchSnapshots =
                 Collections.synchronizedList(new ArrayList<>());
+        private final Set<String> businessFailures =
+                Collections.synchronizedSet(new LinkedHashSet<>());
+        private final Set<String> knowledgeFailures =
+                Collections.synchronizedSet(new LinkedHashSet<>());
+        private final Map<String, String> dependencyStatuses =
+                Collections.synchronizedMap(new LinkedHashMap<>());
 
         private InvocationContext(CompositeQueryPlan plan) {
             this.plan = plan;

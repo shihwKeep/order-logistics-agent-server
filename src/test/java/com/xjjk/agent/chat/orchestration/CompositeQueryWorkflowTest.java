@@ -248,6 +248,131 @@ class CompositeQueryWorkflowTest {
     }
 
     @Test
+    void resolvesLatestCustomerOrderBeforeQueryingItsLogistics() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-09-30T04:00:00+08:00");
+        OrderSearchResult orders = new OrderSearchResult(
+                OrderIdentifierType.CUSTOMER, 2, false, now,
+                List.of(
+                        new OrderCard("XJ001", "", 20, "在途",
+                                "2026-08-20 10:00:00", "张*", 0L, 0,
+                                List.of(), "德邦", List.of()),
+                        new OrderCard("XJ002", "", 20, "在途",
+                                "2026-08-19 10:00:00", "张*", 0L, 0,
+                                List.of(), "德邦", List.of())));
+        when(customerOrderQueryService.query(
+                "C24101816040001", IDENTITY, "request-dependent"))
+                .thenReturn(new CustomerOrderQueryResult(
+                        CustomerOrderResolution.FOUND,
+                        "C24101816040001", "张*", orders));
+        when(orderGateway.logistics(eq("XJ001"), eq(OrderIdentifierType.ORDER_CODE),
+                eq(IDENTITY), eq("request-dependent")))
+                .thenReturn(new OrderLogisticsResult(
+                        new OrderLogisticsResult.OrderSummary("XJ001", 20, "在途"),
+                        now, false, List.of()));
+        when(knowledgeQueryGateway.retrieve(eq("查询售后规则"), any(), eq(IDENTITY),
+                eq("request-dependent"))).thenReturn(new KnowledgeRetrievalResult(
+                true, List.of(new KnowledgeRetrievalResult.Evidence(
+                1L, 2L, 3L, "chunk-1", "售后规则", "规则",
+                "规则正文", "{}", 0.9, Set.of("kb"))),
+                "v1", "NONE", "SUCCESS", now));
+
+        CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.customerOrders("C24101816040001"),
+                CompositeQueryIntent.latestOrderLogistics(),
+                CompositeQueryIntent.knowledge("查询售后规则")));
+
+        CompositeQueryService.CompositeQueryResult result = new CompositeQueryService(
+                new CompositeQueryWorkflow(orderGateway, customerOrderQueryService,
+                        productSearchGateway, afterSaleQueryGateway, knowledgeQueryGateway))
+                .execute(plan, "查询客户最近一笔订单的物流状态，并结合售后规则判断",
+                        IDENTITY, "request-dependent");
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.actualResultKinds())
+                .containsExactlyInAnyOrder("order-list", "logistics-timeline",
+                        "knowledge-citations");
+        verify(orderGateway).logistics("XJ001", OrderIdentifierType.ORDER_CODE,
+                IDENTITY, "request-dependent");
+    }
+
+    @Test
+    void returnsPartialSuccessWithoutInferringLogisticsWhenDependentBranchFails() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-09-30T04:00:00+08:00");
+        OrderSearchResult orders = new OrderSearchResult(
+                OrderIdentifierType.CUSTOMER, 1, false, now,
+                List.of(new OrderCard("XJ001", "", 20, "在途",
+                        "2026-08-20 10:00:00", "张*", 0L, 0,
+                        List.of(), "德邦", List.of())));
+        when(customerOrderQueryService.query(
+                "C24101816040001", IDENTITY, "request-partial"))
+                .thenReturn(new CustomerOrderQueryResult(
+                        CustomerOrderResolution.FOUND,
+                        "C24101816040001", "张*", orders));
+        when(orderGateway.logistics(eq("XJ001"), eq(OrderIdentifierType.ORDER_CODE),
+                eq(IDENTITY), eq("request-partial")))
+                .thenThrow(new OrderServiceUnavailableException("物流服务不可用"));
+        when(knowledgeQueryGateway.retrieve(eq("售后规则"), any(), eq(IDENTITY),
+                eq("request-partial"))).thenReturn(new KnowledgeRetrievalResult(
+                true, List.of(new KnowledgeRetrievalResult.Evidence(
+                1L, 2L, 3L, "chunk-1", "售后规则", "规则",
+                "规则正文", "{}", 0.9, Set.of("kb"))),
+                "v1", "NONE", "SUCCESS", now));
+
+        CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.customerOrders("C24101816040001"),
+                CompositeQueryIntent.latestOrderLogistics(),
+                CompositeQueryIntent.knowledge("售后规则")));
+
+        CompositeQueryService.CompositeQueryResult result = new CompositeQueryService(
+                new CompositeQueryWorkflow(orderGateway, customerOrderQueryService,
+                        productSearchGateway, afterSaleQueryGateway, knowledgeQueryGateway))
+                .execute(plan, "查询客户最近一笔订单物流并结合售后规则判断",
+                        IDENTITY, "request-partial");
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.status()).isEqualTo("PARTIAL_SUCCESS");
+        assertThat(result.actualResultKinds())
+                .contains("order-list", "knowledge-citations")
+                .doesNotContain("logistics-timeline");
+        assertThat(result.verifiedAnswerContext())
+                .contains("订单数量=1", "物流查询未完成")
+                .doesNotContain("停滞评估状态");
+    }
+
+    @Test
+    void skipsDependentLogisticsWhenCustomerHasNoOrders() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-09-30T04:00:00+08:00");
+        when(customerOrderQueryService.query(
+                "C24101816040001", IDENTITY, "request-no-order"))
+                .thenReturn(new CustomerOrderQueryResult(
+                        CustomerOrderResolution.FOUND,
+                        "C24101816040001", "张*",
+                        new OrderSearchResult(OrderIdentifierType.CUSTOMER, 0,
+                                false, now, List.of())));
+        when(knowledgeQueryGateway.retrieve(eq("售后规则"), any(), eq(IDENTITY),
+                eq("request-no-order"))).thenReturn(new KnowledgeRetrievalResult(
+                true, List.of(new KnowledgeRetrievalResult.Evidence(
+                1L, 2L, 3L, "chunk-1", "售后规则", "规则",
+                "规则正文", "{}", 0.9, Set.of("kb"))),
+                "v1", "NONE", "SUCCESS", now));
+
+        CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.customerOrders("C24101816040001"),
+                CompositeQueryIntent.latestOrderLogistics(),
+                CompositeQueryIntent.knowledge("售后规则")));
+
+        CompositeQueryService.CompositeQueryResult result = new CompositeQueryService(
+                new CompositeQueryWorkflow(orderGateway, customerOrderQueryService,
+                        productSearchGateway, afterSaleQueryGateway, knowledgeQueryGateway))
+                .execute(plan, "查询客户最近一笔订单物流并结合售后规则判断",
+                        IDENTITY, "request-no-order");
+
+        assertThat(result.status()).isEqualTo("PARTIAL_SUCCESS");
+        assertThat(result.verifiedAnswerContext()).contains("没有找到可用于物流查询的订单");
+        verify(orderGateway, never()).logistics(any(), any(), any(), any());
+    }
+
+    @Test
     void includesOrderGoodsFactsWithoutIndependentProductSearch() {
         OffsetDateTime now = OffsetDateTime.parse("2026-10-04T06:00:00+08:00");
         OrderSearchResult orders = new OrderSearchResult(
@@ -392,5 +517,66 @@ class CompositeQueryWorkflowTest {
 
         verify(orderGateway).logistics("XJ202609290001", OrderIdentifierType.ORDER_CODE,
                 IDENTITY, "request-resume");
+    }
+
+    @Test
+    void resumesDependentQueryWithResolvedOrderWithoutRepeatingBaseOrLogisticsCalls() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-09-30T04:00:00+08:00");
+        OrderSearchResult orders = new OrderSearchResult(
+                OrderIdentifierType.CUSTOMER, 1, false, now,
+                List.of(new OrderCard("XJ001", "", 20, "在途",
+                        "2026-08-20 10:00:00", "张*", 0L, 0,
+                        List.of(), "德邦", List.of())));
+        when(customerOrderQueryService.query(
+                "C24101816040001", IDENTITY, "request-dependent-resume"))
+                .thenReturn(new CustomerOrderQueryResult(
+                        CustomerOrderResolution.FOUND,
+                        "C24101816040001", "张*", orders));
+        when(orderGateway.logistics(eq("XJ001"), eq(OrderIdentifierType.ORDER_CODE),
+                eq(IDENTITY), eq("request-dependent-resume")))
+                .thenReturn(new OrderLogisticsResult(
+                        new OrderLogisticsResult.OrderSummary("XJ001", 20, "在途"),
+                        now, false, List.of()));
+        when(knowledgeQueryGateway.retrieve(eq("售后规则"), any(), eq(IDENTITY),
+                eq("request-dependent-resume"))).thenReturn(new KnowledgeRetrievalResult(
+                true, List.of(new KnowledgeRetrievalResult.Evidence(
+                1L, 2L, 3L, "chunk-1", "售后规则", "规则",
+                "规则正文", "{}", 0.9, Set.of("kb"))),
+                "v1", "NONE", "SUCCESS", now));
+
+        AtomicReference<CompositeQueryCheckpoint> saved = new AtomicReference<>();
+        when(checkpointStore.load("request-dependent-resume"))
+                .thenAnswer(invocation -> java.util.Optional.ofNullable(saved.get()));
+        doAnswer(invocation -> {
+            saved.set(invocation.getArgument(0));
+            return null;
+        }).when(checkpointStore).save(any(CompositeQueryCheckpoint.class));
+
+        CompositeQueryWorkflow workflow = new CompositeQueryWorkflow(
+                orderGateway, customerOrderQueryService, productSearchGateway,
+                afterSaleQueryGateway, knowledgeQueryGateway,
+                Clock.fixed(Instant.parse("2026-10-03T04:00:00Z"), ZoneId.of("Asia/Shanghai")),
+                checkpointStore,
+                new CompositeQueryCheckpointProperties(
+                        true, "agent:composite:checkpoint:v2", "v2", Duration.ofMinutes(10)));
+        CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.customerOrders("C24101816040001"),
+                CompositeQueryIntent.latestOrderLogistics(),
+                CompositeQueryIntent.knowledge("售后规则")));
+
+        CompositeQueryService service = new CompositeQueryService(workflow);
+        assertThat(service.execute(plan, "查询客户最近一笔订单物流并结合售后规则判断",
+                IDENTITY, "request-dependent-resume").success()).isTrue();
+        assertThat(saved).isNotNull();
+        assertThat(saved.get().stateJson()).containsEntry(
+                CompositeQueryState.RESOLVED_ORDER_CODE, "XJ001");
+
+        assertThat(service.execute(plan, "查询客户最近一笔订单物流并结合售后规则判断",
+                IDENTITY, "request-dependent-resume").success()).isTrue();
+
+        verify(customerOrderQueryService).query(
+                "C24101816040001", IDENTITY, "request-dependent-resume");
+        verify(orderGateway).logistics(
+                "XJ001", OrderIdentifierType.ORDER_CODE, IDENTITY, "request-dependent-resume");
     }
 }
