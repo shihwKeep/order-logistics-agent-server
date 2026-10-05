@@ -166,6 +166,13 @@ public class BusinessQueryPlanner {
         } else if (customer && customerCode != null) {
             intents.add(CompositeQueryIntent.customer(customerCode));
         }
+        boolean latestOrderLogisticsRequested = customer && order && logistics
+                && customerCode != null
+                && containsAny(message, "最近", "最新", "上一笔", "最后一笔");
+        if (latestOrderLogisticsRequested) {
+            intents.removeIf(intent -> "logistics-timeline".equals(intent.resultKind()));
+            intents.add(CompositeQueryIntent.latestOrderLogistics());
+        }
         String afterSaleCode = find(AFTER_SALE_CODE, message);
         if (afterSaleCode != null && afterSaleCode.equalsIgnoreCase(orderCode)) {
             afterSaleCode = null;

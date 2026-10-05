@@ -2,6 +2,8 @@ package com.xjjk.agent.chat.routing;
 
 import com.xjjk.agent.chat.config.BusinessQueryEnforcementProperties;
 import com.xjjk.agent.chat.orchestration.CompositeQueryIntent;
+import com.xjjk.agent.chat.orchestration.CompositeQueryIntent.DependencyMode;
+import com.xjjk.agent.chat.orchestration.CompositeQueryIntent.IdentifierSource;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -180,6 +182,27 @@ class BusinessQueryPlannerTest {
         assertThat(plan.mode()).isEqualTo(BusinessQueryMode.COMPOSITE);
         assertThat(plan.acceptedResultKinds())
                 .contains("order-list", "knowledge-citations", "general-analysis");
+    }
+
+    @Test
+    void customerLatestOrderLogisticsCreatesDependentIntentWithoutAfterSaleTool() {
+        BusinessQueryPlan plan = planner.plan(
+                "查询客户 C24101816040001 最近一笔订单的物流状态，并结合售后规则判断");
+
+        assertThat(plan.mode()).isEqualTo(BusinessQueryMode.COMPOSITE);
+        assertThat(plan.compositePlan().intents())
+                .filteredOn(intent -> intent.source() == CompositeQueryIntent.Source.BUSINESS)
+                .extracting(CompositeQueryIntent::resultKind,
+                        CompositeQueryIntent::dependsOnResultKind,
+                        CompositeQueryIntent::dependencyMode,
+                        CompositeQueryIntent::identifierSource)
+                .containsExactlyInAnyOrder(
+                        tuple("order-list", null, DependencyMode.NONE, IdentifierSource.USER_INPUT),
+                        tuple("logistics-timeline", "order-list", DependencyMode.LATEST_ORDER,
+                                IdentifierSource.RESOLVED_ORDER));
+        assertThat(plan.compositePlan().intents())
+                .filteredOn(intent -> "after-sale-detail".equals(intent.resultKind()))
+                .isEmpty();
     }
 
     @Test

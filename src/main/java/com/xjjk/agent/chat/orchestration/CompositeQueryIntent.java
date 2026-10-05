@@ -8,7 +8,9 @@ public record CompositeQueryIntent(
         String value,
         String resultKind,
         boolean required,
-        String dependsOnResultKind) implements java.io.Serializable {
+        String dependsOnResultKind,
+        DependencyMode dependencyMode,
+        IdentifierSource identifierSource) implements java.io.Serializable {
 
     public enum Source {
         BUSINESS,
@@ -16,8 +18,29 @@ public record CompositeQueryIntent(
         GENERAL
     }
 
+    public enum DependencyMode {
+        NONE,
+        LATEST_ORDER
+    }
+
+    public enum IdentifierSource {
+        USER_INPUT,
+        RESOLVED_ORDER
+    }
+
     public CompositeQueryIntent(Source source, String value, String resultKind) {
-        this(source, value, resultKind, true, null);
+        this(source, value, resultKind, true, null,
+                DependencyMode.NONE, IdentifierSource.USER_INPUT);
+    }
+
+    public CompositeQueryIntent(
+            Source source,
+            String value,
+            String resultKind,
+            boolean required,
+            String dependsOnResultKind) {
+        this(source, value, resultKind, required, dependsOnResultKind,
+                DependencyMode.NONE, IdentifierSource.USER_INPUT);
     }
 
     public CompositeQueryIntent {
@@ -29,6 +52,16 @@ public record CompositeQueryIntent(
         resultKind = requireText(resultKind, "结果类型不能为空");
         dependsOnResultKind = dependsOnResultKind == null || dependsOnResultKind.isBlank()
                 ? null : requireText(dependsOnResultKind, "依赖结果类型不能为空");
+        dependencyMode = dependencyMode == null ? DependencyMode.NONE : dependencyMode;
+        identifierSource = identifierSource == null
+                ? IdentifierSource.USER_INPUT : identifierSource;
+        if (dependencyMode == DependencyMode.NONE
+                && identifierSource == IdentifierSource.RESOLVED_ORDER) {
+            throw new IllegalArgumentException("无依赖意图不能使用已解析订单标识");
+        }
+        if (dependencyMode != DependencyMode.NONE && dependsOnResultKind == null) {
+            throw new IllegalArgumentException("依赖意图必须声明前置结果类型");
+        }
     }
 
     public static CompositeQueryIntent order(String orderCode) {
@@ -38,6 +71,13 @@ public record CompositeQueryIntent(
     public static CompositeQueryIntent logistics(String orderCode) {
         return new CompositeQueryIntent(
                 Source.BUSINESS, orderCode, "logistics-timeline");
+    }
+
+    public static CompositeQueryIntent latestOrderLogistics() {
+        return new CompositeQueryIntent(
+                Source.BUSINESS, "", "logistics-timeline", true,
+                "order-list", DependencyMode.LATEST_ORDER,
+                IdentifierSource.RESOLVED_ORDER);
     }
 
     public static CompositeQueryIntent product(String productIdentifier) {
