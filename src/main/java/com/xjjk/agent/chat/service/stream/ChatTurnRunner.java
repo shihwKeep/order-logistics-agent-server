@@ -514,6 +514,16 @@ public class ChatTurnRunner {
                         queryPlan.compositePlan(), request.message(), identity,
                         execution.requestId));
         if (!composite.success()) {
+            if ("PARTIAL_SUCCESS".equals(composite.status())) {
+                Set<String> publishedCompositeResults = new HashSet<>();
+                for (ToolUiResult result : composite.uiResults()) {
+                    String fingerprint = result == null
+                            ? "null" : result.toolName() + "|" + result.kind() + "|" + result.data();
+                    if (publishedCompositeResults.add(fingerprint)) {
+                        publishPartialToolResult(result, session, execution);
+                    }
+                }
+            }
             execution.replaceContent(composite.safeMessage());
             execution.resolveBufferedOutput();
             session.generating();
@@ -731,6 +741,20 @@ public class ChatTurnRunner {
                 session.result(result);
                 recordToolResult(result.kind(), "PUBLISHED");
             }
+        }
+    }
+
+    /** 部分成功分支没有模型结果门禁，已验证卡片直接进入收尾和 SSE。 */
+    private void publishPartialToolResult(
+            ToolUiResult result,
+            ChatEventPublisher session,
+            ChatTurnExecution execution) throws IOException {
+        synchronized (execution) {
+            PendingMessageResult pending = resultRecorder.prepare(
+                    result, execution.nextResultSequence());
+            execution.addResult(pending);
+            session.result(result);
+            recordToolResult(result.kind(), "PUBLISHED");
         }
     }
 

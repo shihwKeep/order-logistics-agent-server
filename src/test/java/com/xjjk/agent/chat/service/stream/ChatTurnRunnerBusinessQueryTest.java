@@ -248,6 +248,41 @@ class ChatTurnRunnerBusinessQueryTest {
     }
 
     @Test
+    void compositePartialSuccessPublishesCompletedCardsAndSafeMissingBranchMessage()
+            throws Exception {
+        String compositeMessage =
+                "查询客户 C24101816040001 最近一笔订单的物流状态，并结合售后规则判断";
+        ChatTurnContext turn = turn("request-partial", "user-partial", "assistant-partial");
+        when(preparationService.prepare(null, IDENTITY, compositeMessage)).thenReturn(turn);
+        BusinessQueryPlan plan = BusinessQueryPlan.composite(CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.customerOrders("C24101816040001"),
+                CompositeQueryIntent.latestOrderLogistics(),
+                CompositeQueryIntent.knowledge(compositeMessage))));
+        when(planner.plan(compositeMessage)).thenReturn(plan);
+        when(compositeQueryService.execute(
+                eq(plan.compositePlan()), eq(compositeMessage), eq(IDENTITY), anyString()))
+                .thenReturn(new CompositeQueryService.CompositeQueryResult(
+                        false, "PARTIAL_SUCCESS",
+                        List.of(new ToolUiResult(
+                                "list_customer_orders", "order-list", 1,
+                                OffsetDateTime.parse("2026-09-09T13:41:38+08:00"),
+                                Map.of("count", 1))),
+                        Set.of("order-list", "knowledge-citations"),
+                        "业务事实：客户订单数量=1\n",
+                        "部分实时业务查询已完成；物流查询未完成，无法确认物流状态。"));
+        when(resultRecorder.prepare(any(ToolUiResult.class), eq(1)))
+                .thenReturn(pending(1, "order-list"));
+
+        runner().run(new ChatStreamRequest(null, compositeMessage, null), IDENTITY,
+                new ChatStreamControl(), sessionOne, "fallback-partial");
+
+        verify(sessionOne).result(any(ToolUiResult.class));
+        verify(sessionOne).delta(
+                "部分实时业务查询已完成；物流查询未完成，无法确认物流状态。");
+        verifyNoInteractions(contextService, aiChatService);
+    }
+
+    @Test
     void compositeAnswerIsCorrectedBeforePublicationWhenItClaimsUnverifiedExecution()
             throws Exception {
         String compositeMessage = "查询订单 XJ202609290001 的物流，并根据物流规则判断是否需要预警";

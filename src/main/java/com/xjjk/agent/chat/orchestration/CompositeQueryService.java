@@ -17,6 +17,8 @@ public class CompositeQueryService {
             "本轮未完成实时业务查询，请补充查询条件或稍后重试。";
     static final String BUSINESS_QUERY_FAILED_MESSAGE =
             "实时业务查询暂时失败，请核对订单号或稍后重试。";
+    public static final String PARTIAL_RESULT_MESSAGE =
+            "部分实时业务查询已完成；缺失分支未能完成，无法据此确认相关业务结论。";
     private static final String NO_KNOWLEDGE_MESSAGE =
             "知识库中暂未找到相关规定，我不能在没有可靠依据的情况下给出业务结论。";
 
@@ -75,6 +77,8 @@ public class CompositeQueryService {
             String safeMessage;
             if ("NO_RELIABLE_KNOWLEDGE".equals(state.finalStatus())) {
                 safeMessage = NO_KNOWLEDGE_MESSAGE;
+            } else if ("PARTIAL_SUCCESS".equals(state.finalStatus())) {
+                safeMessage = PARTIAL_RESULT_MESSAGE;
             } else if ("FAILED".equals(state.finalStatus())
                     && state.failures().stream()
                     .anyMatch(kind -> !"knowledge-citations".equals(kind))) {

@@ -73,4 +73,28 @@ class CompositeQueryMetricsTest {
                 "node", "business.query",
                 "outcome", "ERROR").count()).isEqualTo(1L);
     }
+
+    @Test
+    void recordsBoundedDependencyPartialAndResumeMetrics() {
+        SimpleMeterRegistry meters = new SimpleMeterRegistry();
+        CompositeQueryMetrics metrics = new CompositeQueryMetrics(
+                meters, ObservationRegistry.create());
+
+        metrics.dependency("LATEST_ORDER", "RESOLVED");
+        metrics.dependency("unbounded-value", "unbounded-value");
+        metrics.partialSuccess();
+        metrics.checkpointResume("success");
+
+        assertThat(meters.counter("agent.composite.dependency",
+                "graph", "composite-v2", "type", "LATEST_ORDER",
+                "outcome", "RESOLVED").count()).isEqualTo(1D);
+        assertThat(meters.counter("agent.composite.dependency",
+                "graph", "composite-v2", "type", "LATEST_ORDER",
+                "outcome", "FAILED").count()).isEqualTo(1D);
+        assertThat(meters.counter("agent.composite.partial_success",
+                "graph", "composite-v2").count()).isEqualTo(1D);
+        assertThat(meters.counter("agent.composite.checkpoint.resume",
+                "graph", "composite-v2", "outcome", "SUCCESS").count())
+                .isEqualTo(1D);
+    }
 }

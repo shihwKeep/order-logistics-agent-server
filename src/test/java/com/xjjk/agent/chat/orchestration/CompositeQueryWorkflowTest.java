@@ -337,6 +337,7 @@ class CompositeQueryWorkflowTest {
         assertThat(result.verifiedAnswerContext())
                 .contains("订单数量=1", "物流查询未完成")
                 .doesNotContain("停滞评估状态");
+        assertThat(result.safeMessage()).contains("部分实时业务查询已完成");
     }
 
     @Test

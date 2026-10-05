@@ -200,10 +200,14 @@ public class CompositeQueryWorkflow {
                     var checkpoint = checkpointSaver.get(runnableConfig);
                     if (metrics != null) {
                         metrics.checkpoint("load", checkpoint.isPresent() ? "RESTORED" : "MISS");
+                        if (checkpoint.isPresent()) {
+                            metrics.checkpointResume("SUCCESS");
+                        }
                     }
                     checkpoint.ifPresent(value -> graphInput.putAll(value.getState()));
                 } catch (RuntimeException exception) {
                     if (metrics != null) metrics.checkpoint("load", "ERROR");
+                    if (metrics != null) metrics.checkpointResume("FAILED");
                     throw exception;
                 }
             }
@@ -384,6 +388,7 @@ public class CompositeQueryWorkflow {
                         == CompositeQueryIntent.DependencyMode.LATEST_ORDER)
                 .toList();
         if (dependentIntents.isEmpty()) {
+            if (metrics != null) metrics.dependency("LATEST_ORDER", "SKIPPED");
             return CompositeQueryState.update(state, "resolve.latest.order", "SKIPPED",
                     Map.of());
         }
@@ -398,6 +403,7 @@ public class CompositeQueryWorkflow {
                             CompositeQueryState.DEPENDENCY_STATUSES, statuses));
         }
         if (context.businessFailures.stream().anyMatch(kind -> "order-list".equals(kind))) {
+            if (metrics != null) metrics.dependency("LATEST_ORDER", "FAILED");
             Map<String, String> statuses = mergeDependencyStatuses(state, context);
             dependentIntents.forEach(intent -> statuses.put(
                     branchName(intent), "SKIPPED_DEPENDENCY_FAILED"));
@@ -413,6 +419,7 @@ public class CompositeQueryWorkflow {
                 .flatMap(Optional::stream)
                 .findFirst();
         if (resolved.isEmpty()) {
+            if (metrics != null) metrics.dependency("LATEST_ORDER", "SKIPPED");
             Map<String, String> statuses = mergeDependencyStatuses(state, context);
             dependentIntents.forEach(intent -> statuses.put(
                     branchName(intent), "SKIPPED_NO_MATCHING_ORDER"));
@@ -661,6 +668,9 @@ public class CompositeQueryWorkflow {
                 "SUCCESS".equals(snapshot.status())
                         && !"knowledge-citations".equals(snapshot.resultKind()))) {
             hasSuccessfulBusiness = true;
+        }
+        if ("PARTIAL_SUCCESS".equals(status) && metrics != null) {
+            metrics.partialSuccess();
         }
         return CompositeQueryState.update(state, "result.validate", status,
                 Map.of(CompositeQueryState.FINAL_STATUS, status,
