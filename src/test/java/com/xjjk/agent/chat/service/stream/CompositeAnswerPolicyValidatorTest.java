@@ -95,6 +95,17 @@ class CompositeAnswerPolicyValidatorTest {
     }
 
     @Test
+    void rejectsTreatingProductListingPriceAsOrderPriceSnapshot() {
+        assertThat(validator.validate(
+                "请查询 SKU 1060904801 的商品详情，并结合企业定价规则说明当前价格是否存在可核验的计算异常。",
+                "已查到商品当前展示价格为系统服务端核算结果，符合“订单保存下单时价格快照”规则，"
+                        + "不随后续调价变动。",
+                "业务事实：\nproduct-list：商品数量=1，价格=111.00元\n"
+                        + "企业知识依据：订单保存时生成价格快照，优惠按订单规则分摊"))
+                .containsExactly("UNSUPPORTED_PRODUCT_PRICE_SNAPSHOT");
+    }
+
+    @Test
     void rejectsCompositeAnswerThatOmitsACompletedBusinessBranch() {
         assertThat(validator.validate(
                 "查询订单 XJ202609290001 的商品、物流状态和订单金额，并结合规则分别判断",

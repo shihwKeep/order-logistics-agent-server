@@ -83,6 +83,12 @@ public final class CompositeAnswerPolicyValidator {
             "不能确认",
             "不能判断");
 
+    private static final List<String> PRODUCT_PRICE_SNAPSHOT_CLAIM_MARKERS = List.of(
+            "符合订单保存下单时价格快照",
+            "符合\"订单保存下单时价格快照",
+            "符合“订单保存下单时价格快照",
+            "符合‘订单保存下单时价格快照");
+
     private static final List<String> UNQUERIED_AFTER_SALE_MARKERS = List.of(
             "未查询到关联售后工单",
             "未查询到售后工单",
@@ -140,6 +146,11 @@ public final class CompositeAnswerPolicyValidator {
                 && !containsAny(context, PRICING_BASELINE_MARKERS)
                 && !containsAny(answer, PRICING_UNKNOWN_MARKERS)) {
             violations.add("UNSUPPORTED_PRICING_POLICY_CLAIM");
+        }
+        if (hasResultKind(context, "product-list")
+                && !hasResultKind(context, "order-list")
+                && containsAny(answer, PRODUCT_PRICE_SNAPSHOT_CLAIM_MARKERS)) {
+            violations.add("UNSUPPORTED_PRODUCT_PRICE_SNAPSHOT");
         }
         if (omitsCompletedBusinessBranch(answer, context)) {
             violations.add("INCOMPLETE_COMPOSITE_ANSWER");
