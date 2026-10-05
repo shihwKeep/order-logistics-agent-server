@@ -45,6 +45,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class CompositeQueryWorkflowTest {
@@ -295,23 +296,17 @@ class CompositeQueryWorkflowTest {
                 .contains("本轮未查询售后工单，无法确认是否存在售后申请或工单状态");
         verify(orderGateway).logistics("XJ001", OrderIdentifierType.ORDER_CODE,
                 IDENTITY, "request-dependent");
+        verify(knowledgeQueryGateway).retrieve(eq("查询售后规则"), any(), eq(IDENTITY),
+                eq("request-dependent"));
     }
 
     @Test
     void explainsMissingCustomerOrderAndSkipsDependentLogistics() {
-        OffsetDateTime now = OffsetDateTime.parse("2026-09-30T04:00:00+08:00");
         when(customerOrderQueryService.query(
                 "C99999999999999", IDENTITY, "request-no-customer-order"))
                 .thenReturn(new CustomerOrderQueryResult(
                         CustomerOrderResolution.NOT_FOUND,
                         "C99999999999999", null, null));
-        when(knowledgeQueryGateway.retrieve(eq("查询售后规则"), any(), eq(IDENTITY),
-                eq("request-no-customer-order")))
-                .thenReturn(new KnowledgeRetrievalResult(
-                        true, List.of(new KnowledgeRetrievalResult.Evidence(
-                        1L, 2L, 3L, "chunk-1", "售后规则", "规则",
-                        "规则正文", "{}", 0.9, Set.of("kb"))),
-                        "v1", "NONE", "SUCCESS", now));
 
         CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
                 CompositeQueryIntent.customerOrders("C99999999999999"),
@@ -327,7 +322,10 @@ class CompositeQueryWorkflowTest {
         assertThat(result.status()).isEqualTo("PARTIAL_SUCCESS");
         assertThat(result.safeMessage())
                 .contains("未找到客户订单", "未执行物流查询");
+        assertThat(result.actualResultKinds()).doesNotContain("knowledge-citations");
+        assertThat(result.verifiedAnswerContext()).doesNotContain("企业知识依据");
         verify(orderGateway, never()).logistics(any(), any(), any(), any());
+        verifyNoInteractions(knowledgeQueryGateway);
     }
 
     @Test
@@ -337,13 +335,6 @@ class CompositeQueryWorkflowTest {
                 eq(IDENTITY), eq("request-no-order")))
                 .thenReturn(new OrderSearchResult(
                         OrderIdentifierType.ORDER_CODE, 0, false, now, List.of()));
-        when(knowledgeQueryGateway.retrieve(eq("物流规则"), any(), eq(IDENTITY),
-                eq("request-no-order")))
-                .thenReturn(new KnowledgeRetrievalResult(
-                        true, List.of(new KnowledgeRetrievalResult.Evidence(
-                        1L, 2L, 3L, "chunk-1", "物流规则", "规则",
-                        "规则正文", "{}", 0.9, Set.of("kb"))),
-                        "v1", "NONE", "SUCCESS", now));
 
         CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
                 CompositeQueryIntent.order("XJTS99999999999999"),
@@ -359,7 +350,10 @@ class CompositeQueryWorkflowTest {
         assertThat(result.status()).isEqualTo("PARTIAL_SUCCESS");
         assertThat(result.safeMessage())
                 .contains("未找到该订单", "未执行物流查询");
+        assertThat(result.actualResultKinds()).doesNotContain("knowledge-citations");
+        assertThat(result.verifiedAnswerContext()).doesNotContain("企业知识依据");
         verify(orderGateway, never()).logistics(any(), any(), any(), any());
+        verifyNoInteractions(knowledgeQueryGateway);
     }
 
     @Test
@@ -417,12 +411,6 @@ class CompositeQueryWorkflowTest {
                         "C24101816040001", "张*",
                         new OrderSearchResult(OrderIdentifierType.CUSTOMER, 0,
                                 false, now, List.of())));
-        when(knowledgeQueryGateway.retrieve(eq("售后规则"), any(), eq(IDENTITY),
-                eq("request-no-order"))).thenReturn(new KnowledgeRetrievalResult(
-                true, List.of(new KnowledgeRetrievalResult.Evidence(
-                1L, 2L, 3L, "chunk-1", "售后规则", "规则",
-                "规则正文", "{}", 0.9, Set.of("kb"))),
-                "v1", "NONE", "SUCCESS", now));
 
         CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
                 CompositeQueryIntent.customerOrders("C24101816040001"),
@@ -437,7 +425,10 @@ class CompositeQueryWorkflowTest {
 
         assertThat(result.status()).isEqualTo("PARTIAL_SUCCESS");
         assertThat(result.verifiedAnswerContext()).contains("没有找到可用于物流查询的订单");
+        assertThat(result.actualResultKinds()).doesNotContain("knowledge-citations");
+        assertThat(result.verifiedAnswerContext()).doesNotContain("企业知识依据");
         verify(orderGateway, never()).logistics(any(), any(), any(), any());
+        verifyNoInteractions(knowledgeQueryGateway);
     }
 
     @Test

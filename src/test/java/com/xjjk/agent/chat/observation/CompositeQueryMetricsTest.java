@@ -84,6 +84,7 @@ class CompositeQueryMetricsTest {
         metrics.dependency("unbounded-value", "unbounded-value");
         metrics.partialSuccess();
         metrics.checkpointResume("success");
+        metrics.knowledgeSkip("NO_BUSINESS_MATCH");
 
         assertThat(meters.counter("agent.composite.dependency",
                 "graph", "composite-v2", "type", "LATEST_ORDER",
@@ -95,6 +96,9 @@ class CompositeQueryMetricsTest {
                 "graph", "composite-v2").count()).isEqualTo(1D);
         assertThat(meters.counter("agent.composite.checkpoint.resume",
                 "graph", "composite-v2", "outcome", "SUCCESS").count())
+                .isEqualTo(1D);
+        assertThat(meters.counter("agent.composite.knowledge.skip",
+                "graph", "composite-v2", "outcome", "NO_BUSINESS_MATCH").count())
                 .isEqualTo(1D);
     }
 }

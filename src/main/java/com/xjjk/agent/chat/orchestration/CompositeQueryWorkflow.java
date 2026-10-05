@@ -261,11 +261,16 @@ public class CompositeQueryWorkflow {
                         ? "RUN" : "WAITING_INPUT"), Map.of(
                         "WAITING_INPUT", END,
                         "RUN", "branch.dispatch"));
-        // 同一入口同时启动业务与知识分支；未请求的分支在节点内部立即 no-op。
+        // 独立信息源并行；依赖业务事实的知识查询必须等业务匹配结果确定后再执行。
         graph.addEdge("branch.dispatch", "business.query");
-        graph.addEdge("branch.dispatch", "knowledge.query");
-        graph.addEdge("business.query", "result.validate");
-        graph.addEdge("knowledge.query", "result.validate");
+        if (context.plan.knowledgeRequiresBusinessGate()) {
+            graph.addEdge("business.query", "knowledge.query");
+            graph.addEdge("knowledge.query", "result.validate");
+        } else {
+            graph.addEdge("branch.dispatch", "knowledge.query");
+            graph.addEdge("business.query", "result.validate");
+            graph.addEdge("knowledge.query", "result.validate");
+        }
         graph.addEdge("result.validate", "answer.compose");
         graph.addEdge("answer.compose", END);
         if (checkpointSaver == null) {
@@ -599,6 +604,29 @@ public class CompositeQueryWorkflow {
             AgentIdentity identity,
             String requestId) {
         restoreCheckpointContext(state, context);
+        if (context.plan.knowledgeRequiresBusinessGate()
+                && hasMissingBusinessMatch(context)) {
+            if (metrics != null) {
+                metrics.knowledgeSkip("NO_BUSINESS_MATCH");
+            }
+            for (CompositeQueryIntent intent : context.plan.intents()) {
+                if (intent.source() != CompositeQueryIntent.Source.KNOWLEDGE) {
+                    continue;
+                }
+                String branch = branchName(intent);
+                context.completedBranches.add(branch);
+                context.branchSnapshots.add(new CompositeQueryBranchSnapshot(
+                        branch, "knowledge-citations", "SKIPPED",
+                        "未找到可适用的业务对象，未执行知识查询", "", 0));
+            }
+            return CompositeQueryState.update(state, "knowledge.query", "SKIPPED",
+                    Map.of(CompositeQueryState.KNOWLEDGE_COUNT, 0,
+                            CompositeQueryState.FAILURES, List.copyOf(context.failures),
+                            CompositeQueryState.BRANCH_SNAPSHOTS,
+                            List.copyOf(context.branchSnapshots),
+                            CompositeQueryState.COMPLETED_BRANCHES,
+                            List.copyOf(context.completedBranches)));
+        }
         for (CompositeQueryIntent intent : context.plan.intents()) {
             if (intent.source() != CompositeQueryIntent.Source.KNOWLEDGE) continue;
             if (state.completedBranches().contains(branchName(intent))
@@ -649,7 +677,10 @@ public class CompositeQueryWorkflow {
                 .filter(snapshot -> "SUCCESS".equals(snapshot.status()))
                 .map(CompositeQueryBranchSnapshot::resultKind)
                 .forEach(actual::add);
-        boolean knowledgeRequested = context.plan.hasSource(CompositeQueryIntent.Source.KNOWLEDGE);
+        boolean knowledgeSkipped = context.plan.knowledgeRequiresBusinessGate()
+                && hasMissingBusinessMatch(context);
+        boolean knowledgeRequested = context.plan.hasSource(CompositeQueryIntent.Source.KNOWLEDGE)
+                && !knowledgeSkipped;
         boolean knowledgeOk = !knowledgeRequested
                 || (context.knowledgeFailures.isEmpty()
                 && ((!context.knowledge.isEmpty()
@@ -664,7 +695,8 @@ public class CompositeQueryWorkflow {
         boolean analysisRequested = context.plan.intents().stream()
                 .anyMatch(intent -> "general-analysis".equals(intent.resultKind()));
         boolean baseFactsReady = context.plan.requiredResultKinds().stream()
-                .filter(kind -> !"general-analysis".equals(kind))
+                .filter(kind -> !"general-analysis".equals(kind)
+                        && !(knowledgeSkipped && "knowledge-citations".equals(kind)))
                 .allMatch(actual::contains);
         if (analysisRequested && baseFactsReady && knowledgeOk) {
             actual.add("general-analysis");
@@ -730,10 +762,12 @@ public class CompositeQueryWorkflow {
                     .forEach(snapshot -> answer.append(snapshot.resultKind())
                             .append("：").append(snapshot.safeSummary()).append("\n"));
         }
-        answer.append("企业知识依据：\n");
-        context.knowledge.forEach(result -> result.evidences().forEach(evidence ->
-                answer.append("《").append(evidence.documentTitle()).append("》")
-                        .append("：").append(evidence.content()).append("\n")));
+        if (!context.knowledge.isEmpty()) {
+            answer.append("企业知识依据：\n");
+            context.knowledge.forEach(result -> result.evidences().forEach(evidence ->
+                    answer.append("《").append(evidence.documentTitle()).append("》")
+                            .append("：").append(evidence.content()).append("\n")));
+        }
         if (context.results.isEmpty() && context.knowledge.isEmpty()) {
             List<CompositeQueryBranchSnapshot> snapshots = state.branchSnapshots().isEmpty()
                     ? List.copyOf(context.branchSnapshots) : state.branchSnapshots();
@@ -779,12 +813,25 @@ public class CompositeQueryWorkflow {
     }
 
     private boolean hasNoMatchingOrder(InvocationContext context) {
+        return hasMissingBusinessMatch(context);
+    }
+
+    private boolean hasMissingBusinessMatch(InvocationContext context) {
+        if (context.businessFailures.contains("order-list")) {
+            return true;
+        }
         return context.results.stream()
                 .filter(result -> "order-list".equals(result.kind()))
                 .map(ToolUiResult::data)
-                .filter(CustomerOrderQueryResult.class::isInstance)
-                .map(CustomerOrderQueryResult.class::cast)
-                .anyMatch(result -> result.orders() == null || result.orders().total() == 0);
+                .anyMatch(data -> {
+                    if (data instanceof CustomerOrderQueryResult result) {
+                        return result.orders() == null || result.orders().total() == 0;
+                    }
+                    if (data instanceof OrderSearchResult result) {
+                        return result.total() == 0;
+                    }
+                    return false;
+                });
     }
 
     private String branchName(CompositeQueryIntent intent) {

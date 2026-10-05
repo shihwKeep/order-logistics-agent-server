@@ -50,6 +50,8 @@ public final class CompositeQueryMetrics {
     private static final Set<String> RESUME_OUTCOMES = Set.of("SUCCESS", "FAILED", "EXPIRED");
     private static final Set<String> RETRY_OUTCOMES = Set.of(
             "SCHEDULED", "SUCCESS", "EXHAUSTED", "SKIPPED");
+    private static final Set<String> KNOWLEDGE_SKIP_OUTCOMES = Set.of(
+            "NO_BUSINESS_MATCH");
 
     private final MeterRegistry meters;
     private final ObservationRegistry observations;
@@ -108,6 +110,14 @@ public final class CompositeQueryMetrics {
 
     public void partialSuccess() {
         meters.counter("agent.composite.partial_success", "graph", GRAPH).increment();
+    }
+
+    public void knowledgeSkip(String outcome) {
+        meters.counter("agent.composite.knowledge.skip",
+                "graph", GRAPH,
+                "outcome", bounded(outcome, KNOWLEDGE_SKIP_OUTCOMES,
+                        "NO_BUSINESS_MATCH"))
+                .increment();
     }
 
     public void checkpointResume(String outcome) {

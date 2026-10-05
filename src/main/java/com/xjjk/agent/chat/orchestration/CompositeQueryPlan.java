@@ -51,4 +51,22 @@ public record CompositeQueryPlan(
     public boolean hasSource(CompositeQueryIntent.Source source) {
         return intents.stream().anyMatch(intent -> intent.source() == source);
     }
+
+    /**
+     * 业务事实决定后续知识是否有适用对象时，知识查询必须在业务查询之后执行。
+     * 独立的业务+知识复合问题仍由图并行执行。
+     */
+    public boolean knowledgeRequiresBusinessGate() {
+        if (!hasSource(CompositeQueryIntent.Source.KNOWLEDGE)
+                || !hasSource(CompositeQueryIntent.Source.BUSINESS)) {
+            return false;
+        }
+        boolean hasDependency = intents.stream().anyMatch(intent ->
+                intent.dependencyMode() != CompositeQueryIntent.DependencyMode.NONE);
+        boolean hasOrderExistenceCheck = intents.stream().anyMatch(intent ->
+                "order-list".equals(intent.resultKind()))
+                && intents.stream().anyMatch(intent ->
+                "logistics-timeline".equals(intent.resultKind()));
+        return hasDependency || hasOrderExistenceCheck;
+    }
 }
