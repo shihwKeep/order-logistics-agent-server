@@ -41,6 +41,10 @@ class LangGraph4jRedisCheckpointSaverTest {
                         "conversationId", "conversation-1",
                         "planHash", "hash-1",
                         "finalStatus", "PENDING",
+                        "resolvedOrderCode", "XJ001",
+                        "resolvedOrderAt", "2026-08-20 10:00:00",
+                        "dependencyStatuses", Map.of("latest-order", "SUCCESS"),
+                        "publishedResultKinds", List.of("order-list"),
                         "userMessage", "不要写入 checkpoint"))
                 .nodeId("business.query")
                 .nextNodeId("result.validate")
@@ -54,6 +58,10 @@ class LangGraph4jRedisCheckpointSaverTest {
         CompositeQueryCheckpoint saved = captor.getValue();
         assertThat(saved.threadId()).isEqualTo("req-1");
         assertThat(saved.stateJson()).containsEntry("finalStatus", "PENDING")
+                .containsEntry("resolvedOrderCode", "XJ001")
+                .containsEntry("resolvedOrderAt", "2026-08-20 10:00:00")
+                .containsKey("dependencyStatuses")
+                .containsKey("publishedResultKinds")
                 .doesNotContainKey("userMessage");
         assertThat(saved.completedNodes()).containsExactly("business.query");
         assertThat(saved.pendingNodes()).containsExactly("result.validate");

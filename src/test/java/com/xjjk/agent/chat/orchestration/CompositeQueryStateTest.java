@@ -26,6 +26,10 @@ class CompositeQueryStateTest {
         assertThat(state.requiredResultKinds())
                 .containsExactlyInAnyOrder("logistics-timeline", "knowledge-citations");
         assertThat(state.finalStatus()).isEqualTo("PENDING");
+        assertThat(state.resolvedOrderCode()).isEmpty();
+        assertThat(state.resolvedOrderAt()).isEmpty();
+        assertThat(state.dependencyStatuses()).isEmpty();
+        assertThat(state.publishedResultKinds()).isEmpty();
         assertThat(state.toSafeLogData()).doesNotContainKey("identity");
     }
 
@@ -64,5 +68,34 @@ class CompositeQueryStateTest {
         assertThat(updated.branchSnapshots()).hasSize(1);
         assertThat(updated.toSafeLogData()).doesNotContainKey("data");
         assertThat(updated.toSafeLogData()).doesNotContainKey("identity");
+    }
+
+    @Test
+    void exposesOnlyPublicResolvedOrderFieldsInSafeState() {
+        CompositeQueryState state = CompositeQueryState.initial(
+                "request-1", "conversation-1", "查询客户最近订单物流", IDENTITY,
+                CompositeQueryPlan.of(List.of(
+                        CompositeQueryIntent.customerOrders("C1"),
+                        CompositeQueryIntent.latestOrderLogistics())));
+        CompositeQueryState resolved = new CompositeQueryState(
+                CompositeQueryState.update(state, "resolve.latest.order", "SUCCESS",
+                        java.util.Map.of(
+                                CompositeQueryState.RESOLVED_ORDER_CODE, "XJ001",
+                                CompositeQueryState.RESOLVED_ORDER_AT, "2026-08-20 10:00:00",
+                                CompositeQueryState.DEPENDENCY_STATUSES,
+                                java.util.Map.of("business:logistics-timeline:latest-order", "SUCCESS"),
+                                CompositeQueryState.PUBLISHED_RESULT_KINDS,
+                                java.util.List.of("order-list"))));
+
+        assertThat(resolved.resolvedOrderCode()).isEqualTo("XJ001");
+        assertThat(resolved.resolvedOrderAt()).isEqualTo("2026-08-20 10:00:00");
+        assertThat(resolved.dependencyStatuses())
+                .containsEntry("business:logistics-timeline:latest-order", "SUCCESS");
+        assertThat(resolved.publishedResultKinds()).containsExactly("order-list");
+        assertThat(resolved.toSafeLogData())
+                .containsEntry("resolvedOrderCode", "XJ001")
+                .containsEntry("resolvedOrderAt", "2026-08-20 10:00:00")
+                .doesNotContainKey("plan")
+                .doesNotContainKey("results");
     }
 }

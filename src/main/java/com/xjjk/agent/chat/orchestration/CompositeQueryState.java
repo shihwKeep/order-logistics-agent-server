@@ -32,6 +32,10 @@ public final class CompositeQueryState extends AgentState {
     static final String PLAN_HASH = "planHash";
     static final String CHECKPOINT_VERSION = "checkpointVersion";
     static final String NEXT_NODE = "nextNode";
+    static final String RESOLVED_ORDER_CODE = "resolvedOrderCode";
+    static final String RESOLVED_ORDER_AT = "resolvedOrderAt";
+    static final String DEPENDENCY_STATUSES = "dependencyStatuses";
+    static final String PUBLISHED_RESULT_KINDS = "publishedResultKinds";
 
     public CompositeQueryState(Map<String, Object> data) {
         super(data);
@@ -65,6 +69,10 @@ public final class CompositeQueryState extends AgentState {
         data.put(PLAN_HASH, plan.planHash());
         data.put(CHECKPOINT_VERSION, "v2");
         data.put(NEXT_NODE, "input.validate");
+        data.put(RESOLVED_ORDER_CODE, "");
+        data.put(RESOLVED_ORDER_AT, "");
+        data.put(DEPENDENCY_STATUSES, Map.of());
+        data.put(PUBLISHED_RESULT_KINDS, List.of());
         return new CompositeQueryState(data);
     }
 
@@ -124,6 +132,39 @@ public final class CompositeQueryState extends AgentState {
         return this.<String>value(FINAL_STATUS).orElse("PENDING");
     }
 
+    public String resolvedOrderCode() {
+        return this.<String>value(RESOLVED_ORDER_CODE).orElse("");
+    }
+
+    public String resolvedOrderAt() {
+        return this.<String>value(RESOLVED_ORDER_AT).orElse("");
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, String> dependencyStatuses() {
+        Object raw = value(DEPENDENCY_STATUSES).orElse(Map.of());
+        if (!(raw instanceof Map<?, ?> map)) return Map.of();
+        Map<String, String> result = new LinkedHashMap<>();
+        map.forEach((key, item) -> {
+            if (key != null && item != null) {
+                result.put(String.valueOf(key), String.valueOf(item));
+            }
+        });
+        return Map.copyOf(result);
+    }
+
+    public Set<String> publishedResultKinds() {
+        Object raw = value(PUBLISHED_RESULT_KINDS).orElse(List.of());
+        if (!(raw instanceof Iterable<?> values)) return Set.of();
+        Set<String> result = new java.util.LinkedHashSet<>();
+        for (Object value : values) {
+            if (value != null && !String.valueOf(value).isBlank()) {
+                result.add(String.valueOf(value));
+            }
+        }
+        return Set.copyOf(result);
+    }
+
     public List<CompositeQueryBranchSnapshot> branchSnapshots() {
         Object raw = value(BRANCH_SNAPSHOTS).orElse(List.of());
         if (!(raw instanceof List<?> list)) return List.of();
@@ -171,6 +212,10 @@ public final class CompositeQueryState extends AgentState {
                 .orElseGet(List::of));
         safe.put(PENDING_BRANCHES, this.<List<String>>value(PENDING_BRANCHES)
                 .orElseGet(List::of));
+        safe.put(RESOLVED_ORDER_CODE, resolvedOrderCode());
+        safe.put(RESOLVED_ORDER_AT, resolvedOrderAt());
+        safe.put(DEPENDENCY_STATUSES, dependencyStatuses());
+        safe.put(PUBLISHED_RESULT_KINDS, publishedResultKinds());
         return safe;
     }
 

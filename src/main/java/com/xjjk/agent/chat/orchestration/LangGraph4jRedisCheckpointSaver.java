@@ -32,7 +32,11 @@ public final class LangGraph4jRedisCheckpointSaver implements BaseCheckpointSave
             CompositeQueryState.RETRY_COUNTS,
             CompositeQueryState.PLAN_HASH,
             CompositeQueryState.CHECKPOINT_VERSION,
-            CompositeQueryState.NEXT_NODE);
+            CompositeQueryState.NEXT_NODE,
+            CompositeQueryState.RESOLVED_ORDER_CODE,
+            CompositeQueryState.RESOLVED_ORDER_AT,
+            CompositeQueryState.DEPENDENCY_STATUSES,
+            CompositeQueryState.PUBLISHED_RESULT_KINDS);
 
     private final CompositeQueryCheckpointStore store;
     private final String graphVersion;
