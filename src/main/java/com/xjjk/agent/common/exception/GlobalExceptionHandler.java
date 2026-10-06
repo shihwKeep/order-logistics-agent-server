@@ -2,6 +2,7 @@ package com.xjjk.agent.common.exception;
 
 import com.xjjk.agent.common.api.ApiErrorCode;
 import com.xjjk.agent.common.api.ApiResponse;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -21,6 +22,7 @@ public class GlobalExceptionHandler {
         ApiErrorCode errorCode = ApiErrorCode.VALIDATION_ERROR;
         return ResponseEntity
                 .status(errorCode.httpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(errorCode));
     }
 
@@ -32,6 +34,7 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity
                 .status(errorCode.httpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(errorCode));
     }
 }
