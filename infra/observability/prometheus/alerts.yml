@@ -76,3 +76,119 @@ groups:
         annotations:
           summary: SSE Redis回放持续失败
           runbook: docs/runbook/observability-stack.md
+
+      - alert: AgentModelStreamRetryExhausted
+        expr: sum(rate(agent_model_stream_retry_total{outcome="EXHAUSTED"}[5m])) > 0
+        for: 2m
+        labels:
+          severity: P1
+        annotations:
+          summary: 模型流重试耗尽，Agent无法完成回答
+          runbook: docs/runbook/observability-stack.md
+
+      - alert: KnowledgeCitationGateRejected
+        expr: |
+          sum(rate(agent_tool_result_total{kind="knowledge-citations",outcome="GATE_REJECTED"}[5m]))
+          /
+          clamp_min(sum(rate(agent_tool_result_total{kind="knowledge-citations"}[5m])), 0.001) > 0.20
+        for: 5m
+        labels:
+          severity: P1
+        annotations:
+          summary: 知识库证据门禁拒绝率连续5分钟超过20%
+          runbook: docs/runbook/knowledge-tool-verification.md
+
+      - alert: AlertWebhookAdapterDown
+        expr: up{exported_job="alert-webhook-adapter"} == 0
+        for: 2m
+        labels:
+          severity: P1
+        annotations:
+          summary: 企微告警适配服务不可用，外部通知链路已中断
+          runbook: docs/runbook/observability-stack.md
+
+      - alert: AlertWebhookDeliveryFailed
+        expr: sum(rate(alert_webhook_delivery_total{outcome="FAILED"}[5m])) > 0
+        for: 2m
+        labels:
+          severity: P1
+        annotations:
+          summary: 企微告警经过有限重试后仍投递失败
+          runbook: docs/runbook/observability-stack.md
+
+  - name: composite-query-v2
+    rules:
+      - alert: CompositeGraphFailureRateHigh
+        expr: |
+          (
+            sum(rate(agent_composite_graph_total{outcome=~"FAILED|UNAVAILABLE"}[5m]))
+            /
+            clamp_min(sum(rate(agent_composite_graph_total[5m])), 0.001) > 0.10
+          )
+          and
+          sum(increase(agent_composite_graph_total[5m])) >= 5
+        for: 5m
+        labels:
+          severity: P1
+        annotations:
+          summary: Composite V2图失败率连续5分钟超过10%
+          runbook: docs/runbook/composite-query-observability.md
+
+      - alert: CompositePartialSuccessRateHigh
+        expr: |
+          (
+            sum(rate(agent_composite_graph_total{outcome="PARTIAL_SUCCESS"}[5m]))
+            /
+            clamp_min(sum(rate(agent_composite_graph_total[5m])), 0.001) > 0.20
+          )
+          and
+          sum(increase(agent_composite_graph_total[5m])) >= 5
+        for: 5m
+        labels:
+          severity: P2
+        annotations:
+          summary: Composite V2部分成功比例连续5分钟超过20%
+          runbook: docs/runbook/composite-query-observability.md
+
+      - alert: CompositeCheckpointOperationError
+        expr: sum(rate(agent_composite_checkpoint_total{outcome=~"ERROR|UNAVAILABLE"}[5m])) > 0
+        for: 2m
+        labels:
+          severity: P1
+        annotations:
+          summary: Composite V2 checkpoint持久化持续异常
+          runbook: docs/runbook/composite-query-observability.md
+
+      - alert: CompositeCheckpointResumeFailed
+        expr: sum(rate(agent_composite_checkpoint_resume_total{outcome="FAILED"}[5m])) > 0
+        for: 2m
+        labels:
+          severity: P1
+        annotations:
+          summary: Composite V2 checkpoint恢复持续失败
+          runbook: docs/runbook/composite-query-observability.md
+
+      - alert: CompositeNodeRetryExhausted
+        expr: sum(rate(agent_composite_retry_total{outcome="EXHAUSTED"}[5m])) > 0
+        for: 2m
+        labels:
+          severity: P1
+        annotations:
+          summary: Composite V2节点重试持续耗尽
+          runbook: docs/runbook/composite-query-observability.md
+
+      - alert: CompositeDependencyFailureRateHigh
+        expr: |
+          (
+            sum(rate(agent_composite_dependency_total{outcome="FAILED"}[5m]))
+            /
+            clamp_min(sum(rate(agent_composite_dependency_total[5m])), 0.001) > 0.20
+          )
+          and
+          sum(increase(agent_composite_dependency_total[5m])) >= 5
+        for: 5m
+        labels:
+          severity: P1
+        annotations:
+          summary: Composite V2依赖解析失败率连续5分钟超过20%
+          runbook: docs/runbook/composite-query-observability.md

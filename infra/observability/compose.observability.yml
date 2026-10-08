@@ -18,6 +18,7 @@ services:
       AGENT_METRICS_TARGET: ${AGENT_METRICS_TARGET:-host.docker.internal:18082}
       # 独立管理端口只供 Collector 抓取，生产环境通过同名环境变量覆盖。
       KNOWLEDGE_METRICS_TARGET: ${KNOWLEDGE_METRICS_TARGET:-host.docker.internal:18085}
+      ALERT_ADAPTER_METRICS_TARGET: ${ALERT_ADAPTER_METRICS_TARGET:-alert-webhook-adapter:8095}
     mem_limit: 768m
     cpus: "1.0"
     ports:
@@ -34,6 +35,8 @@ services:
         condition: service_started
       loki:
         condition: service_started
+      alert-webhook-adapter:
+        condition: service_healthy
 
   prometheus:
     <<: *runtime-defaults
@@ -98,6 +101,31 @@ services:
     volumes:
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager-data:/alertmanager
+    depends_on:
+      alert-webhook-adapter:
+        condition: service_healthy
+
+  alert-webhook-adapter:
+    <<: *runtime-defaults
+    build:
+      context: ./alert-webhook-adapter
+    environment:
+      SERVER_PORT: 8095
+      NACOS_SERVER_ADDR: ${NACOS_SERVER_ADDR:-host.docker.internal:8848}
+      NACOS_USERNAME: ${NACOS_USERNAME:-nacos}
+      NACOS_PASSWORD: ${NACOS_PASSWORD:-nacos}
+      NACOS_DATA_ID: ${NACOS_DATA_ID:-alert-webhook-adapter.yaml}
+      NACOS_GROUP: ${NACOS_GROUP:-DEFAULT_GROUP}
+      ALERT_WEBHOOK_INBOUND_TOKEN: ${ALERT_WEBHOOK_INBOUND_TOKEN:-}
+    mem_limit: 256m
+    cpus: "0.5"
+    ports:
+      - "127.0.0.1:8095:8095"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8095/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
 
   grafana:
     <<: *runtime-defaults

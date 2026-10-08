@@ -16,6 +16,10 @@ receivers:
           metrics_path: /actuator/prometheus
           static_configs:
             - targets: ["${env:KNOWLEDGE_METRICS_TARGET}"]
+        - job_name: alert-webhook-adapter
+          metrics_path: /actuator/prometheus
+          static_configs:
+            - targets: ["${env:ALERT_ADAPTER_METRICS_TARGET}"]
   file_log/agent:
     include: [/var/log/order-logistics/agent/*.json]
     start_at: end
@@ -69,7 +73,8 @@ processors:
       - name: normal-sample
         type: probabilistic
         probabilistic:
-          sampling_percentage: 10
+          # 本地评测阶段保留全部普通 Trace，避免 agent.turn 被尾采样随机丢弃。
+          sampling_percentage: 100
   batch:
     send_batch_size: 1024
     timeout: 2s

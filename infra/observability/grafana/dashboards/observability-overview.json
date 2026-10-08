@@ -75,6 +75,42 @@
       "targets": [{"expr": "up{job=\"otel-collector\"}", "refId": "A"}],
       "title": "Collector健康状态",
       "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "id": 5,
+      "targets": [
+        {
+          "expr": "sum(rate(alert_webhook_delivery_total[5m])) by (outcome)",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "title": "企微告警投递结果",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "id": 6,
+      "targets": [{"expr": "up{exported_job=\"alert-webhook-adapter\"}", "refId": "A"}],
+      "title": "告警适配器健康状态",
+      "type": "stat"
     }
   ],
   "refresh": "30s",
@@ -85,5 +121,5 @@
   "timezone": "browser",
   "title": "Order Logistics Observability Overview",
   "uid": "order-logistics-observability-overview",
-  "version": 1
+  "version": 2
 }
