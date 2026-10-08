@@ -125,6 +125,10 @@ public class ChatStreamController {
         response.setHeader("X-Chat-Request-Id", requestId);
         response.setHeader("X-Chat-Expires-At", expiresAt.toString());
         response.setHeader("X-Chat-Resumable", Boolean.toString(resumable));
+        if (properties.testDelayMs() > 0) {
+            response.setHeader("X-Chat-Test-Delay-Ms",
+                    Long.toString(properties.testDelayMs()));
+        }
         response.setHeader("X-Chat-Reconnect-Max-Attempts",
                 Integer.toString(properties.reconnect().maxAttempts()));
         response.setHeader("X-Chat-Reconnect-Initial-Backoff-Ms",

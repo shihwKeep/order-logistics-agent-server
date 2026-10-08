@@ -17,13 +17,19 @@ import java.util.Objects;
 public class DirectChatEventPublisher implements ChatEventPublisher {
 
     private final SseEmitter emitter;
+    private final ChatStreamEventDelay eventDelay;
     private long sequence;
     private boolean sessionSent;
     private boolean terminal;
     private ChatStreamReplayMetrics metrics;
 
     public DirectChatEventPublisher(SseEmitter emitter) {
+        this(emitter, new ChatStreamEventDelay(0));
+    }
+
+    public DirectChatEventPublisher(SseEmitter emitter, ChatStreamEventDelay eventDelay) {
         this.emitter = Objects.requireNonNull(emitter, "SSE 输出不能为空");
+        this.eventDelay = Objects.requireNonNull(eventDelay, "聊天流事件延迟不能为空");
     }
 
     @Override
@@ -67,7 +73,11 @@ public class DirectChatEventPublisher implements ChatEventPublisher {
 
     @Override
     public synchronized void delta(String text) throws IOException {
-        sendLocked("delta", new ChatStreamPayloads.Delta(text));
+        if (terminal) return;
+        for (String chunk : eventDelay.chunks(text)) {
+            eventDelay.beforeDelta();
+            sendLocked("delta", new ChatStreamPayloads.Delta(chunk));
+        }
     }
 
     @Override

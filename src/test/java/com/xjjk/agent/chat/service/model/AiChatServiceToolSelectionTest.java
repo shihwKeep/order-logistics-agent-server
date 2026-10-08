@@ -319,6 +319,23 @@ class AiChatServiceToolSelectionTest {
     }
 
     @Test
+    void rendersProductPriceAndCalculationBoundaryInSafeFallback() {
+        AiChatService service = service(
+                capability(false, "OFF", Set.of()),
+                capability(false, "OFF", Set.of()));
+
+        String fallback = service.compositeSafeFallback(
+                "业务事实：\n"
+                        + "product-list：商品数量=1；商品=鱼油测试222，SKU=1060904801，当前标价=111.00元，库存=12102\n"
+                        + "企业知识依据：订单价格规则需要订单级核算字段");
+
+        assertThat(fallback)
+                .contains("商品查询结果：")
+                .contains("当前标价=111.00元")
+                .contains("无法确认是否存在可核验的价格计算异常");
+    }
+
+    @Test
     void rendersAfterSaleBoundaryInSafeFallbackWhenAfterSaleEvidenceIsPresent() {
         AiChatService service = service(
                 capability(false, "OFF", Set.of()),

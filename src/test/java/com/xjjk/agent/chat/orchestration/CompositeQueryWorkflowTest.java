@@ -21,6 +21,7 @@ import com.xjjk.agent.order.domain.TrackNode;
 import com.xjjk.agent.order.service.OrderQueryGateway;
 import com.xjjk.agent.order.service.OrderServiceUnavailableException;
 import com.xjjk.agent.product.service.ProductSearchGateway;
+import com.xjjk.agent.product.domain.ProductSearchResult;
 import com.xjjk.agent.aftersale.service.AfterSaleQueryGateway;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -488,6 +489,30 @@ class CompositeQueryWorkflowTest {
                         "当前未接入外部市场数据")
                 .doesNotContain("联系电话", "收货地址");
         verify(productSearchGateway, never()).search(any());
+    }
+
+    @Test
+    void skipsKnowledgeWhenProductSearchReturnsNoMatch() {
+        when(productSearchGateway.search(any())).thenReturn(new ProductSearchResult(
+                "TEST_SKU_000000", 1, 10, 0, false, List.of()));
+
+        CompositeQueryPlan plan = CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.product("TEST_SKU_000000"),
+                CompositeQueryIntent.knowledge("请结合企业定价规则判断当前价格是否存在异常")));
+
+        CompositeQueryService.CompositeQueryResult result = new CompositeQueryService(
+                new CompositeQueryWorkflow(orderGateway, customerOrderQueryService,
+                        productSearchGateway, afterSaleQueryGateway, knowledgeQueryGateway))
+                .execute(plan, "查询不存在的 SKU TEST_SKU_000000，并结合企业定价规则判断当前价格是否存在异常",
+                        IDENTITY, "request-empty-product");
+
+        assertThat(result.status()).isEqualTo("SUCCESS");
+        assertThat(result.safeMessage()).doesNotContain("部分实时业务查询已完成");
+        verifyNoInteractions(knowledgeQueryGateway);
+        assertThat(result.actualResultKinds()).doesNotContain("knowledge-citations");
+        assertThat(result.verifiedAnswerContext())
+                .contains("商品数量=0")
+                .doesNotContain("企业知识依据");
     }
 
     @Test

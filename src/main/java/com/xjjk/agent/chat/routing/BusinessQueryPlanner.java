@@ -31,6 +31,10 @@ public class BusinessQueryPlanner {
             "(?i)(?<![A-Z0-9_-])(C\\d{10,31})(?![A-Z0-9_-])");
     private static final Pattern AFTER_SALE_CODE = Pattern.compile(
             "(?i)(?<![A-Z0-9_-])([A-Z]{2,8}\\d{8}(?:[_-]?\\d{3,32}))(?![A-Z0-9_-])");
+    private static final Pattern PRODUCT_CODE = Pattern.compile(
+            "(?i)(?:SKU|SPU|条码)\\s*[:：]?\\s*([A-Za-z0-9_-]{2,64})");
+    private static final Pattern PRODUCT_PAGE = Pattern.compile(
+            "第\\s*(\\d{1,4})\\s*页");
 
     private final BusinessQueryEnforcementProperties properties;
 
@@ -105,6 +109,27 @@ public class BusinessQueryPlanner {
                 return BusinessQueryPlan.direct(
                         new ChatActionRequest("QUERY_CUSTOMER_ORDERS", null, code),
                         "order-list");
+            }
+        }
+        // 明确 SKU、SPU 或条码的单商品详情查询直接走商品网关，避免模型偶发不选商品工具。
+        // 商品名称和分页查询仍保留模型工具路径，避免把自然语言关键词误当成编码。
+        if (domains == 1 && product) {
+            String productCode = find(PRODUCT_CODE, message);
+            if (productCode != null) {
+                return BusinessQueryPlan.direct(
+                        new ChatActionRequest(
+                                "QUERY_PRODUCT", null, null, null, productCode),
+                        "product-list");
+            }
+            Integer pageIndex = productPageIndex(message);
+            String productKeyword = extractProductIdentifier(message);
+            if (pageIndex != null && productKeyword != null
+                    && !PRODUCT_PAGE.matcher(productKeyword).matches()) {
+                return BusinessQueryPlan.direct(
+                        new ChatActionRequest(
+                                "QUERY_PRODUCT", null, null, null,
+                                productKeyword, pageIndex),
+                        "product-list");
             }
         }
         // 明确售后工单详情且只出现售后域时，允许从当前消息提取工单号直接查询。
@@ -322,9 +347,7 @@ public class BusinessQueryPlanner {
     }
 
     private String extractProductIdentifier(String message) {
-        Matcher code = Pattern.compile(
-                "(?i)(?:SKU|SPU|条码)\\s*[:：]?\\s*([A-Za-z0-9_-]{2,64})")
-                .matcher(message);
+        Matcher code = PRODUCT_CODE.matcher(message);
         if (code.find()) {
             return code.group(1);
         }
@@ -344,6 +367,20 @@ public class BusinessQueryPlanner {
                 .replaceAll("[\\s:：]", "")
                 .trim();
         return after.length() >= 2 ? after : null;
+    }
+
+    /** 从“第N页”表达中提取安全页码；超大页码交给模型路径避免放大下游请求。 */
+    private Integer productPageIndex(String message) {
+        Matcher matcher = PRODUCT_PAGE.matcher(message);
+        if (!matcher.find()) {
+            return null;
+        }
+        try {
+            int page = Integer.parseInt(matcher.group(1));
+            return page >= 1 && page <= 1000 ? page : null;
+        } catch (NumberFormatException exception) {
+            return null;
+        }
     }
 
     private boolean isOrderOwnedProductReference(String message, String orderCode) {

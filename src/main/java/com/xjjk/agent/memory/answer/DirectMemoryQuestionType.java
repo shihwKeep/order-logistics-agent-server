@@ -34,6 +34,8 @@ public enum DirectMemoryQuestionType {
             MemoryCategory memoryCategory,
             MemoryTemporalScope temporalScope,
             String... predicateNames) {
+        // 枚举在编译期固定“问题类型 → 类别、时态、谓词”的查询白名单，
+        // 分类器不能构造任意数据库条件，模型也不能覆盖这些范围。
         this.memoryCategory = memoryCategory;
         this.temporalScope = temporalScope;
         this.predicateNames = List.of(predicateNames);

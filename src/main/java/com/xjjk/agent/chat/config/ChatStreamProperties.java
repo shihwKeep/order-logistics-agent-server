@@ -13,7 +13,8 @@ public record ChatStreamProperties(
         Duration heartbeatInterval,
         Replay replay,
         Reconnect reconnect,
-        ModelRetry modelRetry
+        ModelRetry modelRetry,
+        long testDelayMs
 ) {
 
     @ConstructorBinding
@@ -36,12 +37,15 @@ public record ChatStreamProperties(
         if (modelRetry == null) {
             modelRetry = ModelRetry.defaults();
         }
+        if (testDelayMs < 0) {
+            throw new IllegalArgumentException("聊天流测试延迟不能为负数");
+        }
     }
 
     /** 兼容已有单元测试和直连调用，生产配置仍由顶层字段完整绑定。 */
     public ChatStreamProperties(Duration timeout, Duration heartbeatInterval) {
         this(timeout, heartbeatInterval, Replay.defaults(), Reconnect.defaults(),
-                ModelRetry.defaults());
+                ModelRetry.defaults(), 0);
     }
 
     /** 兼容只显式构造回放/重连配置的测试和内部调用。 */
@@ -51,7 +55,7 @@ public record ChatStreamProperties(
             Replay replay,
             Reconnect reconnect
     ) {
-        this(timeout, heartbeatInterval, replay, reconnect, ModelRetry.defaults());
+        this(timeout, heartbeatInterval, replay, reconnect, ModelRetry.defaults(), 0);
     }
 
     public record Replay(

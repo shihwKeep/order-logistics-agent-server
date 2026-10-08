@@ -24,6 +24,7 @@ public class DeterministicExplicitMemoryCandidateParser {
             ExplicitMemoryCommandDetector.CommandText command
     ) {
         Objects.requireNonNull(command, "command");
+        // 同一正文分别尝试所有受控类别；每个类别自行完成同义词归一化和封闭语法校验。
         List<ExplicitMemoryCandidate> matches = new ArrayList<>();
         for (MemoryCategory category : MemoryCategory.values()) {
             contentPolicy.canonicalize(category, command.payload())
@@ -38,6 +39,7 @@ public class DeterministicExplicitMemoryCandidateParser {
                     ))
                     .ifPresent(matches::add);
         }
+        // 必须唯一命中才走快速路径：零命中交给语义模型，多命中则避免武断选择类别。
         return matches.size() == 1
                 ? Optional.of(matches.getFirst())
                 : Optional.empty();

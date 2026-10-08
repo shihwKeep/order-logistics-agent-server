@@ -108,6 +108,12 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-openfeign</artifactId>
         </dependency>
+        <!-- JDK 11+ HTTP transport for the local cxservice product client. -->
+        <dependency>
+            <groupId>io.github.openfeign</groupId>
+            <artifactId>feign-java11</artifactId>
+            <version>13.6.1</version>
+        </dependency>
 
         <!-- 订单与物流内部调用的熔断、半开探测及 Micrometer 指标 -->
         <dependency>

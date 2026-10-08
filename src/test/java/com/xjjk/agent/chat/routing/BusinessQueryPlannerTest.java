@@ -94,6 +94,26 @@ class BusinessQueryPlannerTest {
     }
 
     @Test
+    void routesExplicitSkuLookupDirectlyWithoutModelToolSelection() {
+        BusinessQueryPlan plan = planner.plan("请查询商品 SKU 1060904801 的详情。");
+
+        assertThat(plan.mode()).isEqualTo(BusinessQueryMode.DIRECT);
+        assertThat(plan.directAction().type()).isEqualTo("QUERY_PRODUCT");
+        assertThat(plan.acceptedResultKinds()).containsExactly("product-list");
+    }
+
+    @Test
+    void routesExplicitProductPageLookupDirectlyWithoutModelToolSelection() {
+        BusinessQueryPlan plan = planner.plan("请查询鱼油商品第 2 页。");
+
+        assertThat(plan.mode()).isEqualTo(BusinessQueryMode.DIRECT);
+        assertThat(plan.directAction().type()).isEqualTo("QUERY_PRODUCT");
+        assertThat(plan.directAction().productKeyword()).isEqualTo("鱼油");
+        assertThat(plan.directAction().productPageIndex()).isEqualTo(2);
+        assertThat(plan.acceptedResultKinds()).containsExactly("product-list");
+    }
+
+    @Test
     void routesBusinessFactAndEnterpriseRuleToCompositeWorkflow() {
         BusinessQueryPlan plan = planner.plan(
                 "查询订单 XJTS0120260820000011 的最新物流，并根据物流规则判断是否需要预警");

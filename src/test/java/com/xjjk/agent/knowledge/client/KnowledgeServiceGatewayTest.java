@@ -1,14 +1,23 @@
 package com.xjjk.agent.knowledge.client;
 
 import com.xjjk.agent.identity.domain.AgentIdentity;
+import com.xjjk.agent.integration.observation.DownstreamCallMetrics;
 import com.xjjk.agent.knowledge.service.KnowledgeServiceUnavailableException;
+import feign.Request;
+import feign.RetryableException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationHandler;
+import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.Test;
 
+import java.net.ConnectException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -61,6 +70,51 @@ class KnowledgeServiceGatewayTest {
                 "退款规则是什么", List.of(), identity, "request-1"))
                 .isInstanceOf(KnowledgeServiceUnavailableException.class)
                 .hasMessage("知识检索服务暂时不可用");
+    }
+
+    @Test
+    void preservesConnectFailureClassificationInDownstreamTrace() {
+        SimpleMeterRegistry meters = new SimpleMeterRegistry();
+        ObservationRegistry observations = ObservationRegistry.create();
+        AtomicReference<Observation.Context> stopped = new AtomicReference<>();
+        observations.observationConfig().observationHandler(
+                new ObservationHandler<Observation.Context>() {
+                    @Override
+                    public void onStop(Observation.Context context) {
+                        stopped.set(context);
+                    }
+
+                    @Override
+                    public boolean supportsContext(Observation.Context context) {
+                        return true;
+                    }
+                });
+        gateway.setDownstreamMetrics(new DownstreamCallMetrics(meters, observations));
+        RetryableException connectFailure = new RetryableException(
+                0, "connection refused", Request.HttpMethod.POST,
+                new ConnectException("connection refused"), (Long) null,
+                Request.create(Request.HttpMethod.POST, "http://knowledge/internal",
+                        java.util.Map.of(), null, null, null));
+        when(client.retrieve(
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any())).thenThrow(connectFailure);
+
+        assertThatThrownBy(() -> gateway.retrieve(
+                "物流轨迹超过24小时没有更新", List.of(), identity, "request-connect-failure"))
+                .isInstanceOf(KnowledgeServiceUnavailableException.class)
+                .hasCause(connectFailure);
+
+        assertThat(stopped.get().getLowCardinalityKeyValue("outcome").getValue())
+                .isEqualTo("CONNECT_FAILURE");
+        assertThat(meters.counter(
+                "agent.downstream.attempt",
+                "service", "knowledge",
+                "operation", "retrieve",
+                "attempt", "1",
+                "outcome", "CONNECT_FAILURE",
+                "retry", "false").count()).isEqualTo(1D);
     }
 
     private KnowledgeClient.ServiceResponse<KnowledgeClient.RetrievalData> success(

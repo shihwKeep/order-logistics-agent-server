@@ -29,12 +29,28 @@ class ChatStreamPropertiesTest {
                         "agent.chat.stream.reconnect.max-attempts=5",
                         "agent.chat.stream.reconnect.initial-backoff=500ms",
                         "agent.chat.stream.reconnect.max-backoff=8s",
-                        "agent.chat.stream.reconnect.jitter-ratio=0.2")
+                        "agent.chat.stream.reconnect.jitter-ratio=0.2",
+                        "agent.chat.stream.test-delay-ms=500")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context.getBean(ChatStreamProperties.class).replay().maxEvents())
                             .isEqualTo(512);
+                    assertThat(context.getBean(ChatStreamProperties.class).testDelayMs())
+                            .isEqualTo(500);
                 });
+    }
+
+    @Test
+    void rejectsNegativeTestDelay() {
+        assertThatThrownBy(() -> new ChatStreamProperties(
+                Duration.ofSeconds(30),
+                Duration.ofSeconds(10),
+                replay(),
+                reconnect(),
+                ChatStreamProperties.ModelRetry.defaults(),
+                -1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("测试延迟");
     }
 
     @Test

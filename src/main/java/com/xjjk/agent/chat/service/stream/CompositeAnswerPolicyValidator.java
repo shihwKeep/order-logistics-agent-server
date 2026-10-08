@@ -4,7 +4,12 @@ import org.springframework.util.StringUtils;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.math.BigDecimal;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** 校验复合回答是否把规则建议或轨迹备注扩写成未经业务事实确认的结论。 */
 @Component
@@ -89,6 +94,42 @@ public final class CompositeAnswerPolicyValidator {
             "符合“订单保存下单时价格快照",
             "符合‘订单保存下单时价格快照");
 
+    private static final List<String> PRODUCT_LISTING_PRICE_LINK_MARKERS = List.of(
+            "标价符合上架状态要求",
+            "价格符合上架状态要求",
+            "售价符合上架状态要求",
+            "标价符合上架要求",
+            "价格符合上架要求",
+            "标价符合上架商品基础展示要求",
+            "价格符合上架商品基础展示要求",
+            "售价符合上架商品基础展示要求",
+            "标价符合商品基础展示要求",
+            "标价本身符合上架商品基础展示要求");
+
+    private static final List<String> PRODUCT_LISTING_PRICE_RULE_MARKERS = List.of(
+            "标价本身无逻辑冲突",
+            "当前标价无逻辑冲突",
+            "标价非负、非零",
+            "当前标价非负、非零",
+            "标价满足单行实付不得为负",
+            "标价本身无负值",
+            "当前标价无负值",
+            "标价无负值",
+            "标价非负",
+            "价格非负",
+            "当前标价本身为正数且非零",
+            "标价为正数且非零",
+            "价格为正数且非零",
+            "标价本身为正数且非零",
+            "标价本身为正数",
+            "符合基础展示要求",
+            "符合基础显示要求",
+            "符合商品基础展示要求",
+            "符合商品基础显示要求");
+
+    private static final Pattern PRICE_PATTERN = Pattern.compile(
+            "(?:¥|￥|(?:当前)?(?:标价|售价|价格|单价|成交价))\\s*(?:为|是|[=:：])?\\s*[¥￥]?\\s*(\\d+(?:\\.\\d{1,2})?)");
+
     private static final List<String> UNQUERIED_AFTER_SALE_MARKERS = List.of(
             "未查询到关联售后工单",
             "未查询到售后工单",
@@ -152,6 +193,19 @@ public final class CompositeAnswerPolicyValidator {
                 && containsAny(answer, PRODUCT_PRICE_SNAPSHOT_CLAIM_MARKERS)) {
             violations.add("UNSUPPORTED_PRODUCT_PRICE_SNAPSHOT");
         }
+        if (hasResultKind(context, "product-list")
+                && !hasResultKind(context, "order-list")
+                && containsAny(answer, PRODUCT_LISTING_PRICE_LINK_MARKERS)) {
+            violations.add("UNSUPPORTED_PRODUCT_LISTING_PRICE_LINK");
+        }
+        if (hasResultKind(context, "product-list")
+                && !hasResultKind(context, "order-list")
+                && containsAny(answer, PRODUCT_LISTING_PRICE_RULE_MARKERS)) {
+            violations.add("UNSUPPORTED_PRODUCT_LISTING_PRICE_RULE");
+        }
+        if (hasProductPriceMismatch(answer, context)) {
+            violations.add("PRODUCT_PRICE_MISMATCH");
+        }
         if (omitsCompletedBusinessBranch(answer, context)) {
             violations.add("INCOMPLETE_COMPOSITE_ANSWER");
         }
@@ -210,6 +264,35 @@ public final class CompositeAnswerPolicyValidator {
     private boolean hasResultKind(String businessFacts, String resultKind) {
         return businessFacts.contains(resultKind + "：")
                 || businessFacts.contains(resultKind + ":");
+    }
+
+    private boolean hasProductPriceMismatch(String answer, String businessFacts) {
+        if (!hasResultKind(businessFacts, "product-list")) {
+            return false;
+        }
+        Set<BigDecimal> verifiedPrices = extractPrices(businessFacts);
+        if (verifiedPrices.isEmpty()) {
+            return false;
+        }
+        for (BigDecimal answerPrice : extractPrices(answer)) {
+            if (!verifiedPrices.contains(answerPrice)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Set<BigDecimal> extractPrices(String text) {
+        Set<BigDecimal> prices = new HashSet<>();
+        Matcher matcher = PRICE_PATTERN.matcher(text == null ? "" : text);
+        while (matcher.find()) {
+            try {
+                prices.add(new BigDecimal(matcher.group(1)).stripTrailingZeros());
+            } catch (NumberFormatException ignored) {
+                // Ignore malformed model text; it will be handled by the normal answer boundary.
+            }
+        }
+        return prices;
     }
 
     private String businessFactContext(String verifiedContext) {

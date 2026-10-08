@@ -26,6 +26,7 @@ import com.xjjk.agent.memory.answer.DeterministicUserMemoryAnswerResult;
 import com.xjjk.agent.memory.answer.DeterministicUserMemoryAnswerService;
 import com.xjjk.agent.memory.domain.ExplicitMemoryCommandResult;
 import com.xjjk.agent.memory.service.ExplicitMemoryCommandService;
+import com.xjjk.agent.product.domain.ProductSearchResult;
 import com.xjjk.agent.tool.AgentToolRequestContext;
 import com.xjjk.agent.tool.ToolCallGuard;
 import com.xjjk.agent.tool.ToolUiResult;
@@ -407,6 +408,7 @@ public class ChatTurnRunner {
             case QUERY_ORDER_LOGISTICS -> session.queryingLogistics();
             case QUERY_CUSTOMER_ORDERS -> session.queryingCustomerOrders();
             case QUERY_AFTER_SALE_DETAIL -> session.queryingAfterSaleDetail();
+            case QUERY_PRODUCT -> session.generating();
         }
         ChatActionDispatcher.DispatchResult dispatched = actionDispatcher.dispatch(
                 request.action(), identity, execution.requestId);
@@ -548,6 +550,17 @@ public class ChatTurnRunner {
                 publishToolResult(result, session, execution);
             }
         }
+        String deterministicNoMatch = deterministicProductNoMatch(composite.uiResults());
+        if (deterministicNoMatch != null) {
+            session.generating();
+            execution.replaceContent(deterministicNoMatch);
+            execution.status = MessageStatus.SUCCESS;
+            execution.error = ChatStreamError.forStatus(execution.status);
+            execution.finishReason = "COMPOSITE_NO_MATCH";
+            observeIoStage("result.gate", () ->
+                    freshBusinessResultGate.flush(execution, session));
+            return;
+        }
         session.generating();
         execution.error = ChatStreamError.forStatus(MessageStatus.FAILED);
         observeIoStage("model.stream", () -> consumeGroundedComposite(
@@ -561,6 +574,19 @@ public class ChatTurnRunner {
                         freshBusinessResultGate.flush(execution, session));
             }
         }
+    }
+
+    private String deterministicProductNoMatch(List<ToolUiResult> results) {
+        return results.stream()
+                .filter(result -> result != null && "product-list".equals(result.kind()))
+                .map(ToolUiResult::data)
+                .filter(ProductSearchResult.class::isInstance)
+                .map(ProductSearchResult.class::cast)
+                .filter(result -> result.total() == 0)
+                .map(result -> "未查询到 SKU 为 " + result.keyword()
+                        + " 的商品信息，该 SKU 在系统中不存在。")
+                .findFirst()
+                .orElse(null);
     }
 
     private void consumeGroundedComposite(

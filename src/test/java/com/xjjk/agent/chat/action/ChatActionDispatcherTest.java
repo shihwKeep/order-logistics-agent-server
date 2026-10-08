@@ -2,6 +2,7 @@ package com.xjjk.agent.chat.action;
 
 import com.xjjk.agent.aftersale.domain.AfterSaleDetailResult;
 import com.xjjk.agent.aftersale.service.AfterSaleQueryGateway;
+import com.xjjk.agent.aftersale.service.AfterSaleServiceUnavailableException;
 import com.xjjk.agent.aftersale.tool.AfterSaleToolAvailability;
 import com.xjjk.agent.chat.api.dto.ChatActionRequest;
 import com.xjjk.agent.chat.api.dto.ChatStreamRequest;
@@ -25,7 +26,14 @@ import com.xjjk.agent.order.domain.OrderIdentifierType;
 import com.xjjk.agent.order.domain.OrderLogisticsResult;
 import com.xjjk.agent.order.domain.OrderSearchResult;
 import com.xjjk.agent.order.service.OrderQueryGateway;
+import com.xjjk.agent.order.service.OrderServiceUnavailableException;
 import com.xjjk.agent.order.tool.OrderToolAvailability;
+import com.xjjk.agent.product.service.ProductSearchGateway;
+import com.xjjk.agent.product.service.ProductSearchUnavailableException;
+import com.xjjk.agent.common.api.ApiErrorCode;
+import com.xjjk.agent.common.exception.BusinessException;
+import com.xjjk.agent.product.domain.ProductSearchQuery;
+import com.xjjk.agent.product.domain.ProductSearchResult;
 import com.xjjk.agent.tool.ToolUiResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,6 +49,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @ExtendWith(MockitoExtension.class)
 class ChatActionDispatcherTest {
@@ -66,9 +75,109 @@ class ChatActionDispatcherTest {
     @Mock
     private AfterSaleToolAvailability afterSaleAvailability;
     @Mock
+    private ProductSearchGateway productSearchGateway;
+    @Mock
     private BusinessQueryPlanner businessQueryPlanner;
     @Mock
     private ChatSseSession session;
+
+    @Test
+    void queryProductActionUsesProductGatewayWithoutModel() {
+        AgentIdentity identity = new AgentIdentity(
+                10567, "account", "name", 3673, 1);
+        ProductSearchResult result = new ProductSearchResult(
+                "鱼油", 2, 10, 30, true, List.of());
+        when(productSearchGateway.search(ProductSearchQuery.of(
+                "鱼油", 2, 10))).thenReturn(result);
+        ChatActionDispatcher dispatcher = new ChatActionDispatcher(
+                orderGateway, customerOrderQueryService, availability,
+                afterSaleGateway, afterSaleAvailability, productSearchGateway);
+
+        ChatActionDispatcher.DispatchResult dispatched = dispatcher.dispatch(
+                new ChatActionRequest(
+                        "QUERY_PRODUCT", null, null, null, "鱼油", 2),
+                identity,
+                "request-product");
+
+        verify(productSearchGateway).search(ProductSearchQuery.of(
+                "鱼油", 2, 10));
+        verifyNoInteractions(orderGateway, customerOrderQueryService, afterSaleGateway);
+        org.assertj.core.api.Assertions.assertThat(dispatched.uiResult().kind())
+                .isEqualTo("product-list");
+        org.assertj.core.api.Assertions.assertThat(dispatched.assistantText())
+                .contains("鱼油");
+    }
+
+    @Test
+    void queryProductActionMapsDownstreamUnavailableToStableBusinessError() {
+        AgentIdentity identity = new AgentIdentity(
+                10567, "account", "name", 3673, 1);
+        when(productSearchGateway.search(ProductSearchQuery.of(
+                "1060904801", 1, 10)))
+                .thenThrow(new ProductSearchUnavailableException("product service down"));
+        ChatActionDispatcher dispatcher = new ChatActionDispatcher(
+                orderGateway, customerOrderQueryService, availability,
+                afterSaleGateway, afterSaleAvailability, productSearchGateway);
+
+        assertThatThrownBy(() -> dispatcher.dispatch(
+                new ChatActionRequest(
+                        "QUERY_PRODUCT", null, null, null, "1060904801"),
+                identity,
+                "request-product-unavailable"))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        org.assertj.core.api.Assertions.assertThat(exception.errorCode())
+                                .isEqualTo(ApiErrorCode.CHAT_ACTION_UNAVAILABLE));
+    }
+
+    @Test
+    void queryOrderActionMapsDownstreamUnavailableToStableBusinessError() {
+        AgentIdentity identity = new AgentIdentity(
+                10567, "account", "name", 3673, 1);
+        when(availability.isLogisticsAvailable(identity)).thenReturn(true);
+        when(orderGateway.logistics(
+                "XJ202609290001", OrderIdentifierType.ORDER_CODE, identity,
+                "request-order-unavailable"))
+                .thenThrow(new OrderServiceUnavailableException("order service down"));
+        ChatActionDispatcher dispatcher = new ChatActionDispatcher(
+                orderGateway, customerOrderQueryService, availability,
+                afterSaleGateway, afterSaleAvailability, productSearchGateway);
+
+        assertThatThrownBy(() -> dispatcher.dispatch(
+                new ChatActionRequest("QUERY_ORDER_LOGISTICS", "XJ202609290001"),
+                identity,
+                "request-order-unavailable"))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    org.assertj.core.api.Assertions.assertThat(exception.errorCode())
+                            .isEqualTo(ApiErrorCode.CHAT_ACTION_UNAVAILABLE);
+                    org.assertj.core.api.Assertions.assertThat(exception.errorCode().message())
+                            .isEqualTo("当前业务查询暂时不可用，请稍后重试");
+                });
+    }
+
+    @Test
+    void queryAfterSaleActionMapsDownstreamUnavailableToStableBusinessError() {
+        AgentIdentity identity = new AgentIdentity(
+                10567, "account", "name", 3673, 1);
+        when(afterSaleAvailability.isDetailAvailable(identity)).thenReturn(true);
+        when(afterSaleGateway.detail(
+                "HH20260414_00002", identity, "request-after-sale-unavailable"))
+                .thenThrow(new AfterSaleServiceUnavailableException("after-sale service down"));
+        ChatActionDispatcher dispatcher = new ChatActionDispatcher(
+                orderGateway, customerOrderQueryService, availability,
+                afterSaleGateway, afterSaleAvailability, productSearchGateway);
+
+        assertThatThrownBy(() -> dispatcher.dispatch(
+                new ChatActionRequest(
+                        "QUERY_AFTER_SALE_DETAIL", null, null, "HH20260414_00002"),
+                identity,
+                "request-after-sale-unavailable"))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    org.assertj.core.api.Assertions.assertThat(exception.errorCode())
+                            .isEqualTo(ApiErrorCode.CHAT_ACTION_UNAVAILABLE);
+                    org.assertj.core.api.Assertions.assertThat(exception.errorCode().message())
+                            .isEqualTo("当前业务查询暂时不可用，请稍后重试");
+                });
+    }
 
     @Test
     void queryOrderLogisticsActionBypassesModelButKeepsNormalTurnLifecycle()
@@ -101,7 +210,7 @@ class ChatActionDispatcherTest {
                 .thenReturn(pending);
         ChatActionDispatcher dispatcher = new ChatActionDispatcher(
                 orderGateway, customerOrderQueryService, availability,
-                afterSaleGateway, afterSaleAvailability);
+                afterSaleGateway, afterSaleAvailability, productSearchGateway);
         ChatTurnRunner runner = new ChatTurnRunner(
                 preparationService, contextService, aiChatService,
                 finalizer, resultRecorder, dispatcher,
@@ -154,7 +263,7 @@ class ChatActionDispatcherTest {
                 .thenReturn(pending);
         ChatActionDispatcher dispatcher = new ChatActionDispatcher(
                 orderGateway, customerOrderQueryService, availability,
-                afterSaleGateway, afterSaleAvailability);
+                afterSaleGateway, afterSaleAvailability, productSearchGateway);
         ChatTurnRunner runner = new ChatTurnRunner(
                 preparationService, contextService, aiChatService,
                 finalizer, resultRecorder, dispatcher,
@@ -206,7 +315,7 @@ class ChatActionDispatcherTest {
                 .thenReturn(pending);
         ChatActionDispatcher dispatcher = new ChatActionDispatcher(
                 orderGateway, customerOrderQueryService, availability,
-                afterSaleGateway, afterSaleAvailability);
+                afterSaleGateway, afterSaleAvailability, productSearchGateway);
         ChatTurnRunner runner = new ChatTurnRunner(
                 preparationService, contextService, aiChatService,
                 finalizer, resultRecorder, dispatcher,

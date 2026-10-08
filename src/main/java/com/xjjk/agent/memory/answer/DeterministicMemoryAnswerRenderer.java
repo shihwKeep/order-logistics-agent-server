@@ -35,6 +35,7 @@ public class DeterministicMemoryAnswerRenderer {
             DirectMemoryQuestionType type,
             RecalledMemory memory) {
         Objects.requireNonNull(type, "问题类型不能为空");
+        // 第一步：再次核对类别、正文长度和控制字符；召回成功不等于可以直接展示。
         if (memory == null
                 || !type.memoryCategory().name().equals(memory.category())
                 || memory.content() == null
@@ -43,6 +44,7 @@ public class DeterministicMemoryAnswerRenderer {
                 || memory.content().codePoints().anyMatch(Character::isISOControl)) {
             return Optional.empty();
         }
+        // 第二步：新版结构化记忆优先从 valueJson 和 predicate 渲染；旧数据走封闭语法兼容路径。
         if (Integer.valueOf(2).equals(memory.schemaVersion())
                 || Integer.valueOf(3).equals(memory.schemaVersion())) {
             return renderStructured(type, memory);
@@ -53,6 +55,7 @@ public class DeterministicMemoryAnswerRenderer {
             return Optional.empty();
         }
         if (type == DirectMemoryQuestionType.PROGRAMMING_LANGUAGE) {
+            // 旧版编程语言正文只允许重新识别出受控语言后输出，避免自由文本直接进入回答。
             Matcher matcher = LEGACY_PROGRAMMING_LANGUAGE.matcher(canonical.get());
             if (!matcher.find()) {
                 return Optional.empty();
@@ -70,6 +73,7 @@ public class DeterministicMemoryAnswerRenderer {
     private Optional<String> renderStructured(
             DirectMemoryQuestionType type,
             RecalledMemory memory) {
+        // 结构化事实必须稳定、predicate 与问题匹配、值存在并且当前/历史范围一致。
         if (!("STABLE".equals(memory.stability())
                 || "TIME_BOUND".equals(memory.stability()))
                 || memory.predicateName() == null
@@ -80,6 +84,7 @@ public class DeterministicMemoryAnswerRenderer {
         }
         final String value;
         try {
+            // valueJson 必须是单一文本值；对象、数组或损坏 JSON 均拒绝确定性直答。
             var node = objectMapper.readTree(memory.valueJson());
             if (!node.isTextual()) {
                 return Optional.empty();
@@ -93,6 +98,7 @@ public class DeterministicMemoryAnswerRenderer {
             return Optional.empty();
         }
         String fact = switch (type) {
+            // 每种封闭问题使用固定句式，避免再调用模型造成“有记忆却回答不知道”。
             case PREFERRED_NAME -> "您希望被称为" + value;
             case AGE -> renderAge(value);
             case PROGRAMMING_LANGUAGE -> "您平时主要使用 " + value;
@@ -114,6 +120,7 @@ public class DeterministicMemoryAnswerRenderer {
     private boolean matchesTemporalScope(
             DirectMemoryQuestionType type,
             RecalledMemory memory) {
+        // Schema v2 没有完整历史版本语义，只兼容为当前事实；v3 必须严格匹配时间范围。
         if (Integer.valueOf(2).equals(memory.schemaVersion())) {
             return type.temporalScope() == MemoryTemporalScope.CURRENT;
         }
@@ -124,6 +131,7 @@ public class DeterministicMemoryAnswerRenderer {
     }
 
     private String renderAge(String value) {
+        // 年龄只接受合理的十进制整数，并使用“当时”避免把旧观察值自动推算成当前年龄。
         if (!value.matches("[0-9]{1,3}")) {
             return null;
         }
@@ -132,6 +140,7 @@ public class DeterministicMemoryAnswerRenderer {
     }
 
     public String notRemembered(DirectMemoryQuestionType type) {
+        // 未命中时使用与问题类型对应的固定提示，不泄露内部 predicate 或存储结构。
         return switch (Objects.requireNonNull(type, "问题类型不能为空")) {
             case PREFERRED_NAME -> "我还没有记住您偏好的称呼。";
             case AGE -> "我还没有记住您此前提供的年龄。";

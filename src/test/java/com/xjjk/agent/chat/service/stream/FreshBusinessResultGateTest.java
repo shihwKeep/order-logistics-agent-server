@@ -9,6 +9,7 @@ import com.xjjk.agent.chat.stream.ChatSseSession;
 import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
 import com.xjjk.agent.tool.ToolUiResult;
 import com.xjjk.agent.tool.observation.ToolCallMetrics;
+import com.xjjk.agent.product.domain.ProductSearchResult;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.Test;
@@ -247,6 +248,28 @@ class FreshBusinessResultGateTest {
         verify(session, org.mockito.Mockito.times(2)).result(any(ToolUiResult.class));
         assertThat(execution.resultSnapshot()).hasSize(2);
         assertThat(execution.stagedResultSnapshot()).isEmpty();
+    }
+
+    @Test
+    void acceptsEmptyProductResultWhenKnowledgeWasSkipped() throws Exception {
+        BusinessQueryPlan plan = BusinessQueryPlan.composite(CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.product("TEST_SKU_000000"),
+                CompositeQueryIntent.knowledge("企业定价规则"))));
+        ChatTurnExecution execution = execution(plan);
+        ProductSearchResult empty = new ProductSearchResult(
+                "TEST_SKU_000000", 1, 10, 0, false, List.of());
+        ToolUiResult ui = new ToolUiResult(
+                "search_products", "product-list", 1,
+                OffsetDateTime.parse("2026-09-09T12:00:00+08:00"), empty);
+        execution.stageResult(pending(1, "product-list"), ui);
+        execution.content.append("未找到匹配商品");
+
+        gate.flush(execution, session);
+
+        verify(session).result(ui);
+        verify(session).delta("未找到匹配商品");
+        assertThat(execution.resultSnapshot()).hasSize(1);
+        assertThat(execution.content.toString()).isEqualTo("未找到匹配商品");
     }
 
     private ChatTurnExecution execution(BusinessQueryPlan plan) {

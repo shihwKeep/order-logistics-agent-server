@@ -16,6 +16,10 @@ import com.xjjk.agent.order.domain.OrderLogisticsResult;
 import com.xjjk.agent.order.service.OrderQueryGateway;
 import com.xjjk.agent.order.service.OrderServiceUnavailableException;
 import com.xjjk.agent.order.tool.OrderToolAvailability;
+import com.xjjk.agent.product.domain.ProductSearchQuery;
+import com.xjjk.agent.product.domain.ProductSearchResult;
+import com.xjjk.agent.product.service.ProductSearchGateway;
+import com.xjjk.agent.product.service.ProductSearchUnavailableException;
 import com.xjjk.agent.tool.ToolUiResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,6 +42,7 @@ public class ChatActionDispatcher {
     private final OrderToolAvailability availability;
     private final AfterSaleQueryGateway afterSaleGateway;
     private final AfterSaleToolAvailability afterSaleAvailability;
+    private final ProductSearchGateway productSearchGateway;
 
     /**
      * 解析并执行前端提交的白名单动作。
@@ -59,7 +64,51 @@ public class ChatActionDispatcher {
                     action.customerCode(), identity, requestId);
             case QUERY_AFTER_SALE_DETAIL -> queryAfterSaleDetail(
                     action.afterSaleCode(), identity, requestId);
+            case QUERY_PRODUCT -> queryProduct(
+                    action.productKeyword(), action.productPageIndex(), identity, requestId);
         };
+    }
+
+    /** 明确商品标识的直查动作，绕过模型工具选择但复用同一商品网关和 UI 协议。 */
+    private DispatchResult queryProduct(
+            String productKeyword,
+            Integer productPageIndex,
+            AgentIdentity identity,
+            String requestId) {
+        String normalizedKeyword = normalizeProductKeyword(productKeyword);
+        int pageIndex = normalizeProductPageIndex(productPageIndex);
+        try {
+            ProductSearchResult result = productSearchGateway.search(
+                    ProductSearchQuery.of(normalizedKeyword, pageIndex, 10));
+            ToolUiResult uiResult = new ToolUiResult(
+                    "search_products",
+                    "product-list",
+                    1,
+                    java.time.OffsetDateTime.now(),
+                    result);
+            String assistantText;
+            if (result.total() == 0) {
+                assistantText = pageIndex > 1
+                        ? "未查询到商品标识 " + normalizedKeyword + " 的第"
+                        + pageIndex + "页商品信息。"
+                        : "未查询到商品标识 " + normalizedKeyword
+                        + " 对应的商品信息。";
+            } else {
+                assistantText = pageIndex > 1
+                        ? "已为你查询商品标识 " + normalizedKeyword + " 的第"
+                        + pageIndex + "页，商品卡片已展示。"
+                        : "已为你查询商品标识 " + normalizedKeyword
+                        + " 的详情，商品卡片已展示。";
+            }
+            return new DispatchResult(uiResult, assistantText);
+        } catch (ProductSearchUnavailableException exception) {
+            log.warn(
+                    "chat_action_failed requestId={}, action={}, exceptionType={}",
+                    requestId,
+                    ChatActionType.QUERY_PRODUCT,
+                    exception.getClass().getSimpleName());
+            throw new BusinessException(ApiErrorCode.CHAT_ACTION_UNAVAILABLE);
+        }
     }
 
     /** 查询售后详情，并把完整领域结果转换成前端卡片协议。 */
@@ -208,6 +257,31 @@ public class ChatActionDispatcher {
             throw new BusinessException(ApiErrorCode.VALIDATION_ERROR);
         }
         return normalized;
+    }
+
+    /** 清理商品标识，阻止控制字符或超长值进入商品服务。 */
+    private String normalizeProductKeyword(String productKeyword) {
+        if (productKeyword == null) {
+            throw new BusinessException(ApiErrorCode.VALIDATION_ERROR);
+        }
+        String normalized = productKeyword.strip();
+        if (normalized.isEmpty()
+                || normalized.length() > 64
+                || normalized.codePoints().anyMatch(Character::isISOControl)) {
+            throw new BusinessException(ApiErrorCode.VALIDATION_ERROR);
+        }
+        return normalized;
+    }
+
+    /** 限制确定性分页动作的页码，避免客户端构造超大下游查询。 */
+    private int normalizeProductPageIndex(Integer productPageIndex) {
+        if (productPageIndex == null) {
+            return 1;
+        }
+        if (productPageIndex < 1 || productPageIndex > 1000) {
+            throw new BusinessException(ApiErrorCode.VALIDATION_ERROR);
+        }
+        return productPageIndex;
     }
 
     /** 分发成功后的完整 UI 结果与服务端固定回答正文。 */

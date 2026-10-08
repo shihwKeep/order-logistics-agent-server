@@ -13,7 +13,10 @@ public enum ChatActionType {
     QUERY_CUSTOMER_ORDERS,
 
     /** 使用售后卡片中的完整工单号查询售后详情。 */
-    QUERY_AFTER_SALE_DETAIL;
+    QUERY_AFTER_SALE_DETAIL,
+
+    /** 使用明确 SKU、SPU 或条码确定性查询商品详情。 */
+    QUERY_PRODUCT;
 
     /** 未知值严格失败，不允许降级为模型自由解释。 */
     public static ChatActionType parse(String value) {

@@ -103,7 +103,7 @@ public enum ApiErrorCode {
     CHAT_ACTION_UNAVAILABLE(
             HttpStatus.SERVICE_UNAVAILABLE,
             "CHAT_ACTION_UNAVAILABLE",
-            "当前物流查询暂时不可用，请稍后重试"
+            "当前业务查询暂时不可用，请稍后重试"
     ),
 
     MEMORY_WRITE_FAILED(

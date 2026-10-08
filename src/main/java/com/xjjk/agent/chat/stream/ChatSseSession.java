@@ -11,4 +11,8 @@ public final class ChatSseSession extends DirectChatEventPublisher {
     public ChatSseSession(SseEmitter emitter) {
         super(emitter);
     }
+
+    public ChatSseSession(SseEmitter emitter, ChatStreamEventDelay eventDelay) {
+        super(emitter, eventDelay);
+    }
 }

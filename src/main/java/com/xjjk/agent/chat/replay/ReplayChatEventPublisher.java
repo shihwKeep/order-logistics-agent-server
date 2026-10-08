@@ -4,6 +4,7 @@ import com.xjjk.agent.chat.api.dto.ChatStreamPayloads;
 import com.xjjk.agent.chat.observation.ChatStreamReplayMetrics;
 import com.xjjk.agent.chat.stream.ChatEventPublisher;
 import com.xjjk.agent.chat.stream.ChatStreamError;
+import com.xjjk.agent.chat.stream.ChatStreamEventDelay;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import com.xjjk.agent.tool.ToolUiResult;
 
@@ -24,6 +25,7 @@ public final class ReplayChatEventPublisher implements ChatEventPublisher {
     private final AgentIdentity identity;
     private final String requestId;
     private final Instant taskExpiresAt;
+    private final ChatStreamEventDelay eventDelay;
     private boolean sessionSent;
     private boolean terminal;
     private ChatStreamReplayMetrics metrics;
@@ -33,7 +35,7 @@ public final class ReplayChatEventPublisher implements ChatEventPublisher {
             AgentIdentity identity,
             String requestId
     ) {
-        this(repository, identity, requestId, null);
+        this(repository, identity, requestId, null, new ChatStreamEventDelay(0));
     }
 
     public ReplayChatEventPublisher(
@@ -42,10 +44,21 @@ public final class ReplayChatEventPublisher implements ChatEventPublisher {
             String requestId,
             Instant taskExpiresAt
     ) {
+        this(repository, identity, requestId, taskExpiresAt, new ChatStreamEventDelay(0));
+    }
+
+    public ReplayChatEventPublisher(
+            ChatReplayRepository repository,
+            AgentIdentity identity,
+            String requestId,
+            Instant taskExpiresAt,
+            ChatStreamEventDelay eventDelay
+    ) {
         this.repository = Objects.requireNonNull(repository, "回放仓储不能为空");
         this.identity = Objects.requireNonNull(identity, "认证身份不能为空");
         this.requestId = Objects.requireNonNull(requestId, "请求 ID 不能为空");
         this.taskExpiresAt = taskExpiresAt;
+        this.eventDelay = Objects.requireNonNull(eventDelay, "聊天流事件延迟不能为空");
     }
 
     @Override
@@ -109,7 +122,11 @@ public final class ReplayChatEventPublisher implements ChatEventPublisher {
 
     @Override
     public synchronized void delta(String text) throws IOException {
-        appendNonTerminal("delta", new ChatStreamPayloads.Delta(text));
+        if (terminal) return;
+        for (String chunk : eventDelay.chunks(text)) {
+            eventDelay.beforeDelta();
+            appendNonTerminal("delta", new ChatStreamPayloads.Delta(chunk));
+        }
     }
 
     @Override

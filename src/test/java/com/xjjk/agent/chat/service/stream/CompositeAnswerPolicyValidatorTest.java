@@ -106,6 +106,98 @@ class CompositeAnswerPolicyValidatorTest {
     }
 
     @Test
+    void rejectsProductPriceThatDiffersFromVerifiedListingPrice() {
+        assertThat(validator.validate(
+                "请查询 SKU 1060904801 的商品详情，并结合企业定价规则说明当前价格是否存在可核验的计算异常。",
+                "商品 SKU 1060904801 当前标价为 ¥299.00，无法核验订单级计算异常。",
+                "业务事实：\nproduct-list：商品数量=1；商品=鱼油测试222，SKU=1060904801，当前标价=111.00元，库存=12102\n"
+                        + "企业知识依据：价格规则需要订单级核算字段"))
+                .containsExactly("PRODUCT_PRICE_MISMATCH");
+    }
+
+    @Test
+    void acceptsVerifiedProductListingPrice() {
+        assertThat(validator.validate(
+                "请查询 SKU 1060904801 的商品详情，并结合企业定价规则说明当前价格是否存在可核验的计算异常。",
+                "商品 SKU 1060904801 当前标价为 ¥111.00，未提供订单级核算字段，暂无法确认计算异常。",
+                "业务事实：\nproduct-list：商品数量=1；商品=鱼油测试222，SKU=1060904801，当前标价=111.00元，库存=12102\n"
+                        + "企业知识依据：价格规则需要订单级核算字段"))
+                .isEmpty();
+    }
+
+    @Test
+    void rejectsLinkingListingStatusToPriceCompliance() {
+        assertThat(validator.validate(
+                "请查询 SKU 1060904801 的商品详情，并结合企业定价规则说明当前价格是否存在可核验的计算异常。",
+                "当前商品已上架，标价为111.00元；当前标价符合上架状态要求，"
+                        + "但无法判断是否存在价格计算异常。",
+                "业务事实：\nproduct-list：商品数量=1；商品=鱼油测试222，SKU=1060904801，"
+                        + "当前标价=111.00元，状态=已上架\n"
+                        + "企业知识依据：价格规则需要订单级核算字段"))
+                .containsExactly("UNSUPPORTED_PRODUCT_LISTING_PRICE_LINK");
+    }
+
+    @Test
+    void rejectsApplyingOrderPaidAmountRuleToListingPrice() {
+        assertThat(validator.validate(
+                "请查询 SKU 1060904801 的商品详情，并结合企业定价规则说明当前价格是否存在可核验的计算异常。",
+                "商品 SKU 1060904801 当前标价本身无逻辑冲突（非负、非零），"
+                        + "但无法核验订单级计算异常。",
+                "业务事实：\nproduct-list：商品数量=1；商品=鱼油测试222，SKU=1060904801，"
+                        + "当前标价=111.00元，状态=已上架\n"
+                        + "企业知识依据：单行实付不得为负，价格异常核验需订单级数据"))
+                .containsExactly("UNSUPPORTED_PRODUCT_LISTING_PRICE_RULE");
+    }
+
+    @Test
+    void rejectsInventingListingDisplayRequirementForProductPrice() {
+        assertThat(validator.validate(
+                "请查询 SKU 1060904801 的商品详情，并结合企业定价规则说明当前价格是否存在可核验的计算异常。",
+                "商品 SKU 1060904801 当前标价为111.00元，状态已上架；"
+                        + "当前标价本身符合上架商品基础展示要求，但无法核验订单级计算异常。",
+                "业务事实：\nproduct-list：商品数量=1；商品=鱼油测试222，SKU=1060904801，"
+                        + "当前标价=111.00元，状态=已上架\n"
+                        + "企业知识依据：价格规则需要订单级核算字段"))
+                .containsExactly("UNSUPPORTED_PRODUCT_LISTING_PRICE_LINK");
+    }
+
+    @Test
+    void rejectsInferringNoListingPriceAnomalyFromNonNegativeValue() {
+        assertThat(validator.validate(
+                "请查询 SKU 1060904801 的商品详情，并结合企业定价规则说明当前价格是否存在可核验的计算异常。",
+                "商品 SKU 1060904801 当前标价为111.00元，状态已上架；"
+                        + "当前标价本身无负值、零值等明显异常，但无法核验订单级计算异常。",
+                "业务事实：\nproduct-list：商品数量=1；商品=鱼油测试222，SKU=1060904801，"
+                        + "当前标价=111.00元，状态=已上架\n"
+                        + "企业知识依据：价格规则需要订单级核算字段"))
+                .containsExactly("UNSUPPORTED_PRODUCT_LISTING_PRICE_RULE");
+    }
+
+    @Test
+    void rejectsPositiveNonZeroListingPriceAsBasicDisplayCompliance() {
+        assertThat(validator.validate(
+                "请查询 SKU 1060904801 的商品详情，并结合企业定价规则说明当前价格是否存在可核验的计算异常。",
+                "商品 SKU 1060904801 当前标价为111.00元，状态已上架；"
+                        + "当前标价本身为正数且非零，符合基础展示要求，但无法核验订单级计算异常。",
+                "业务事实：\nproduct-list：商品数量=1；商品=鱼油测试222，SKU=1060904801，"
+                        + "当前标价=111.00元，状态=已上架\n"
+                        + "企业知识依据：价格规则需要订单级核算字段"))
+                .containsExactly("UNSUPPORTED_PRODUCT_LISTING_PRICE_RULE");
+    }
+
+    @Test
+    void rejectsDisplaySynonymAndOmittedCurrentQualifier() {
+        assertThat(validator.validate(
+                "请查询 SKU 1060904801 的商品详情，并结合企业定价规则说明当前价格是否存在可核验的计算异常。",
+                "商品 SKU 1060904801 当前标价为111.00元，状态已上架；"
+                        + "标价本身为正数且非零，符合基础显示要求，但无法核验订单级计算异常。",
+                "业务事实：\nproduct-list：商品数量=1；商品=鱼油测试222，SKU=1060904801，"
+                        + "当前标价=111.00元，状态=已上架\n"
+                        + "企业知识依据：价格规则需要订单级核算字段"))
+                .containsExactly("UNSUPPORTED_PRODUCT_LISTING_PRICE_RULE");
+    }
+
+    @Test
     void rejectsCompositeAnswerThatOmitsACompletedBusinessBranch() {
         assertThat(validator.validate(
                 "查询订单 XJ202609290001 的商品、物流状态和订单金额，并结合规则分别判断",

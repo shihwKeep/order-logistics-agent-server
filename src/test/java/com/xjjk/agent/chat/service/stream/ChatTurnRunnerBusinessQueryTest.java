@@ -30,6 +30,9 @@ import com.xjjk.agent.memory.service.ExplicitMemoryCommandService;
 import com.xjjk.agent.order.service.OrderQueryGateway;
 import com.xjjk.agent.order.tool.OrderToolAvailability;
 import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
+import com.xjjk.agent.product.domain.ProductSearchResult;
+import com.xjjk.agent.product.domain.ProductSearchQuery;
+import com.xjjk.agent.product.service.ProductSearchGateway;
 import com.xjjk.agent.tool.ToolUiResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -89,6 +92,8 @@ class ChatTurnRunnerBusinessQueryTest {
     @Mock
     private AfterSaleToolAvailability afterSaleAvailability;
     @Mock
+    private ProductSearchGateway productSearchGateway;
+    @Mock
     private BusinessQueryPlanner planner;
     @Mock
     private CompositeQueryService compositeQueryService;
@@ -98,6 +103,32 @@ class ChatTurnRunnerBusinessQueryTest {
     private ChatSseSession sessionOne;
     @Mock
     private ChatSseSession sessionTwo;
+
+    @Test
+    void explicitSkuQueryUsesDeterministicProductActionWithoutModel() throws Exception {
+        String message = "请查询商品 SKU 1060904801 的详情。";
+        ChatTurnContext turn = turn("request-product", "user-product", "assistant-product");
+        when(preparationService.prepare(null, IDENTITY, message)).thenReturn(turn);
+        when(planner.plan(message)).thenReturn(BusinessQueryPlan.direct(
+                new ChatActionRequest(
+                        "QUERY_PRODUCT", null, null, null, "1060904801"),
+                "product-list"));
+        ProductSearchResult result = new ProductSearchResult(
+                "1060904801", 1, 10, 0, false, List.of());
+        when(productSearchGateway.search(ProductSearchQuery.of(
+                "1060904801", 1, 10))).thenReturn(result);
+        when(resultRecorder.prepare(any(ToolUiResult.class), eq(1)))
+                .thenReturn(pending("product-list"));
+
+        runner().run(new ChatStreamRequest(null, message, null), IDENTITY,
+                new ChatStreamControl(), sessionOne, "fallback-product");
+
+        verify(productSearchGateway).search(ProductSearchQuery.of(
+                "1060904801", 1, 10));
+        verify(sessionOne).result(any(ToolUiResult.class));
+        verify(sessionOne).delta("未查询到商品标识 1060904801 对应的商品信息。");
+        verifyNoInteractions(contextService, aiChatService, compositeQueryService);
+    }
 
     @Test
     void repeatedManualAfterSaleQueriesEachExecuteAFreshDirectCall() throws Exception {
@@ -283,6 +314,38 @@ class ChatTurnRunnerBusinessQueryTest {
     }
 
     @Test
+    void emptyProductCompositeReturnsDeterministicNoMatchWithoutModelAnswer() throws Exception {
+        String compositeMessage =
+                "请查询不存在的 SKU TEST_SKU_000000 的商品详情，并结合企业定价规则判断当前价格是否存在可核验的计算异常";
+        ChatTurnContext turn = turn("request-empty-product", "user-empty-product",
+                "assistant-empty-product");
+        when(preparationService.prepare(null, IDENTITY, compositeMessage)).thenReturn(turn);
+        BusinessQueryPlan plan = BusinessQueryPlan.composite(CompositeQueryPlan.of(List.of(
+                CompositeQueryIntent.product("TEST_SKU_000000"),
+                CompositeQueryIntent.knowledge(compositeMessage))));
+        when(planner.plan(compositeMessage)).thenReturn(plan);
+        ProductSearchResult empty = new ProductSearchResult(
+                "TEST_SKU_000000", 1, 10, 0, false, List.of());
+        ToolUiResult product = new ToolUiResult(
+                "search_products", "product-list", 1,
+                OffsetDateTime.parse("2026-09-09T13:41:38+08:00"), empty);
+        when(compositeQueryService.execute(
+                eq(plan.compositePlan()), eq(compositeMessage), eq(IDENTITY), anyString()))
+                .thenReturn(new CompositeQueryService.CompositeQueryResult(
+                        true, "SUCCESS", List.of(product), Set.of("product-list"),
+                        "业务事实：\nproduct-list：商品数量=0", ""));
+        when(resultRecorder.prepare(any(ToolUiResult.class), eq(1)))
+                .thenReturn(pending(1, "product-list"));
+        runner().run(new ChatStreamRequest(null, compositeMessage, null), IDENTITY,
+                new ChatStreamControl(), sessionOne, "fallback-empty-product");
+
+        verify(sessionOne).result(product);
+        verify(sessionOne).delta("未查询到 SKU 为 TEST_SKU_000000 的商品信息，该 SKU 在系统中不存在。");
+        verify(aiChatService, never()).streamGroundedComposite(
+                anyString(), any(), anyString());
+    }
+
+    @Test
     void compositeAnswerIsCorrectedBeforePublicationWhenItClaimsUnverifiedExecution()
             throws Exception {
         String compositeMessage = "查询订单 XJ202609290001 的物流，并根据物流规则判断是否需要预警";
@@ -440,7 +503,8 @@ class ChatTurnRunnerBusinessQueryTest {
                 customerOrderQueryService,
                 orderAvailability,
                 afterSaleGateway,
-                afterSaleAvailability);
+                afterSaleAvailability,
+                productSearchGateway);
         ChatTurnRunner runner = new ChatTurnRunner(
                 preparationService,
                 contextService,

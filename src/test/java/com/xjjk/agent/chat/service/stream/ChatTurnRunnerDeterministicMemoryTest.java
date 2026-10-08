@@ -134,14 +134,16 @@ class ChatTurnRunnerDeterministicMemoryTest {
         when(directMemory.answer(IDENTITY, message, "request"))
                 .thenReturn(DeterministicUserMemoryAnswerResult.notHandled());
         when(context.prepare(turn, message, control)).thenReturn(selection);
-        when(ai.stream(eq(message), eq(selection), any(AgentToolRequestContext.class)))
+        when(ai.stream(eq(message), eq(selection), any(AgentToolRequestContext.class),
+                any(BusinessQueryPlan.class)))
                 .thenReturn(Flux.just(response("根据当前会话，我称呼您为石海文。")));
 
         runner().run(new ChatStreamRequest(null, message, null), IDENTITY,
                 control, session, "fallback");
 
         verify(context).prepare(turn, message, control);
-        verify(ai).stream(eq(message), eq(selection), any(AgentToolRequestContext.class));
+        verify(ai).stream(eq(message), eq(selection), any(AgentToolRequestContext.class),
+                any(BusinessQueryPlan.class));
         verify(session).delta("根据当前会话，我称呼您为石海文。");
     }
 
@@ -157,14 +159,16 @@ class ChatTurnRunnerDeterministicMemoryTest {
         when(planner.plan(message)).thenReturn(
                 BusinessQueryPlan.modelRequired(Set.of("knowledge-citations")));
         when(context.prepare(turn, message, control)).thenReturn(selection);
-        when(ai.stream(eq(message), eq(selection), any(AgentToolRequestContext.class)))
+        when(ai.stream(eq(message), eq(selection), any(AgentToolRequestContext.class),
+                any(BusinessQueryPlan.class)))
                 .thenReturn(Flux.just(response("知识回答")));
 
         runner().run(new ChatStreamRequest(null, message, null), IDENTITY,
                 control, session, "fallback");
 
         verifyNoInteractions(directMemory);
-        verify(ai).stream(eq(message), eq(selection), any(AgentToolRequestContext.class));
+        verify(ai).stream(eq(message), eq(selection), any(AgentToolRequestContext.class),
+                any(BusinessQueryPlan.class));
     }
 
     @Test

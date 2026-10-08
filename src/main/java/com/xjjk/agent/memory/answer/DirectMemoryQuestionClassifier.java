@@ -20,17 +20,21 @@ public class DirectMemoryQuestionClassifier {
             "是否", "吗", "多大", "几岁", "？", "?");
 
     public Optional<DirectMemoryQuestionType> classify(String rawQuery) {
+        // 第一步：只接受短且明确的问题；长文本更可能包含上下文或复合意图，交给普通模型处理。
         if (rawQuery == null || rawQuery.isBlank()
                 || rawQuery.codePointCount(0, rawQuery.length()) > 80) {
             return Optional.empty();
         }
         String query = rawQuery.strip().toLowerCase(Locale.ROOT)
                 .replaceAll("\\s+", "");
+        // 第二步：必须同时具备问句特征和第一人称；业务词或复合连接词命中时立即退出，
+        // 避免把“我的订单多大了”误判成年龄，把多意图请求截断成单一记忆回答。
         if (!containsAny(query, QUESTION) || !query.contains("我")
                 || containsAny(query, BUSINESS) || containsAny(query, MULTI_INTENT)) {
             return Optional.empty();
         }
 
+        // 第三步：并行收集所有可能类型，最后只接受唯一命中，避免规则重叠时随意选一个答案。
         List<DirectMemoryQuestionType> matches = new ArrayList<>();
         if (containsAny(query, List.of("多大年纪", "多大年龄", "几岁"))
                 || (query.contains("年龄") && containsAny(query, List.of("什么", "多少")))) {
@@ -63,6 +67,7 @@ public class DirectMemoryQuestionClassifier {
         boolean historical = containsAny(query, List.of(
                 "以前", "过去", "曾经", "原来", "之前"));
         if (occupationQuestion) {
+            // 职业使用同一个语义属性，但根据时态分别查询 CURRENT 或 HISTORICAL 事实。
             matches.add(historical
                     ? DirectMemoryQuestionType.HISTORICAL_OCCUPATION
                     : DirectMemoryQuestionType.CURRENT_OCCUPATION);
@@ -70,6 +75,7 @@ public class DirectMemoryQuestionClassifier {
         if (containsAny(query, List.of("工作范围", "技术栈"))) {
             matches.add(DirectMemoryQuestionType.WORK_SCOPE);
         }
+        // 零命中和多命中都返回 empty，由聊天主路由继续进入普通 Agent，保证分类偏保守。
         return matches.size() == 1 ? Optional.of(matches.getFirst()) : Optional.empty();
     }
 

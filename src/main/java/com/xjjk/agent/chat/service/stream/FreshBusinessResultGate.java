@@ -3,6 +3,7 @@ package com.xjjk.agent.chat.service.stream;
 import com.xjjk.agent.chat.routing.BusinessQueryMode;
 import com.xjjk.agent.chat.stream.ChatEventPublisher;
 import com.xjjk.agent.knowledge.domain.KnowledgeRetrievalResult;
+import com.xjjk.agent.product.domain.ProductSearchResult;
 import com.xjjk.agent.tool.observation.ToolCallMetrics;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -56,8 +57,7 @@ public class FreshBusinessResultGate {
                 .collect(Collectors.toUnmodifiableSet());
         boolean accepted = !staged.isEmpty()
                 && execution.queryPlan.acceptedResultKinds().containsAll(actualKinds);
-        boolean knowledgeRequired = execution.queryPlan.acceptedResultKinds()
-                .contains("knowledge-citations");
+        boolean knowledgeRequired = knowledgeRequired(execution, staged);
         boolean grounded = !knowledgeRequired || (staged.stream()
                 .filter(value -> "knowledge-citations".equals(value.uiResult().kind()))
                 .findAny()
@@ -114,9 +114,8 @@ public class FreshBusinessResultGate {
                 && execution.stagedResultSnapshot().isEmpty())) {
             return;
         }
-        boolean knowledgeRequired = execution.queryPlan.acceptedResultKinds()
-                .contains("knowledge-citations");
         List<StagedToolResult> staged = execution.stagedResultSnapshot();
+        boolean knowledgeRequired = knowledgeRequired(execution, staged);
         recordGateRejected(execution, staged);
         execution.discardStagedResults();
         execution.replaceContent(knowledgeRequired
@@ -158,6 +157,19 @@ public class FreshBusinessResultGate {
         }
         String normalized = content.replaceAll("\\s+", "");
         return KNOWLEDGE_REFUSAL_MARKERS.stream().anyMatch(normalized::contains);
+    }
+
+    /** 商品明确查无结果时，复合问题中的知识分支是有意跳过，不应阻断商品结果发布。 */
+    private boolean knowledgeRequired(
+            ChatTurnExecution execution,
+            List<StagedToolResult> staged) {
+        if (!execution.queryPlan.acceptedResultKinds().contains("knowledge-citations")) {
+            return false;
+        }
+        return staged.stream().noneMatch(value ->
+                "product-list".equals(value.uiResult().kind())
+                        && value.uiResult().data() instanceof ProductSearchResult result
+                        && result.total() == 0);
     }
 
     /** 只记录类型集合和结果，不记录工具正文或业务敏感字段。 */

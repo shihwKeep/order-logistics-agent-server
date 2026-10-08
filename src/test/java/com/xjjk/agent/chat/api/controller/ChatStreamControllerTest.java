@@ -31,7 +31,12 @@ class ChatStreamControllerTest {
         ChatStreamService streams = mock(ChatStreamService.class);
         ChatSseRelayService relays = mock(ChatSseRelayService.class);
         ChatStreamProperties properties = new ChatStreamProperties(
-                Duration.ofSeconds(30), Duration.ofSeconds(10));
+                Duration.ofSeconds(30),
+                Duration.ofSeconds(10),
+                ChatStreamProperties.Replay.defaults(),
+                ChatStreamProperties.Reconnect.defaults(),
+                ChatStreamProperties.ModelRetry.defaults(),
+                1000);
         ChatStreamController controller = new ChatStreamController(
                 streams, relays, properties);
         Instant expiresAt = Instant.parse("2026-09-14T08:00:30Z");
@@ -80,6 +85,7 @@ class ChatStreamControllerTest {
         assertThat(response.getHeader("X-Chat-Expires-At"))
                 .isEqualTo(expiresAt.toString());
         assertThat(response.getHeader("X-Chat-Resumable")).isEqualTo("true");
+        assertThat(response.getHeader("X-Chat-Test-Delay-Ms")).isEqualTo("1000");
         assertThat(response.getHeader("X-Chat-Reconnect-Max-Attempts")).isEqualTo("5");
         assertThat(response.getHeader("X-Accel-Buffering")).isEqualTo("no");
     }

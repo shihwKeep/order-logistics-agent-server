@@ -3,12 +3,15 @@ package com.xjjk.agent.chat.service.stream;
 import com.xjjk.agent.chat.api.dto.ChatStreamPayloads;
 import com.xjjk.agent.chat.replay.ChatReplayRepository;
 import com.xjjk.agent.chat.replay.ReplayChatEventPublisher;
+import com.xjjk.agent.chat.stream.ChatStreamEventDelay;
 import com.xjjk.agent.identity.domain.AgentIdentity;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -85,5 +88,33 @@ class ReplayChatEventPublisherTest {
                 "session",
                 new ChatStreamPayloads.Session(
                         "conversation-1", REQUEST_ID, expiresAt, true));
+    }
+
+    @Test
+    void delaysReplayDeltaEventsWhenConfigured() throws Exception {
+        ChatReplayRepository repository = mock(ChatReplayRepository.class);
+        List<Long> delays = new ArrayList<>();
+        ReplayChatEventPublisher publisher = new ReplayChatEventPublisher(
+                repository, IDENTITY, REQUEST_ID, null,
+                new ChatStreamEventDelay(500, delays::add));
+
+        publisher.delta("回答");
+
+        assertThat(delays).containsExactly(500L);
+    }
+
+    @Test
+    void splitsOneLargeReplayDeltaIntoSeveralTestEvents() throws Exception {
+        ChatReplayRepository repository = mock(ChatReplayRepository.class);
+        List<Long> delays = new ArrayList<>();
+        ReplayChatEventPublisher publisher = new ReplayChatEventPublisher(
+                repository, IDENTITY, REQUEST_ID, null,
+                new ChatStreamEventDelay(500, delays::add));
+
+        publisher.delta("12345678901234567890");
+
+        verify(repository, times(2)).append(
+                eq(IDENTITY), eq(REQUEST_ID), eq("delta"), any());
+        assertThat(delays).hasSize(2);
     }
 }

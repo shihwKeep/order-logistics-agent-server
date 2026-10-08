@@ -33,6 +33,34 @@ class DirectChatEventPublisherTest {
                 .containsExactly("session", "status", "delta", "done");
     }
 
+    @Test
+    void delaysOnlyDeltaEventsWhenConfigured() throws Exception {
+        RecordingEmitter emitter = new RecordingEmitter();
+        List<Long> delays = new ArrayList<>();
+        ChatStreamEventDelay delay = new ChatStreamEventDelay(500, delays::add);
+        ChatEventPublisher publisher = new DirectChatEventPublisher(emitter, delay);
+
+        publisher.session("conversation-1", "request-1", Instant.now(), false);
+        publisher.generating();
+        publisher.delta("回答");
+        publisher.done("message-1");
+
+        assertThat(delays).containsExactly(500L);
+    }
+
+    @Test
+    void splitsOneLargeDeltaIntoSeveralTestEvents() throws Exception {
+        RecordingEmitter emitter = new RecordingEmitter();
+        List<Long> delays = new ArrayList<>();
+        ChatEventPublisher publisher = new DirectChatEventPublisher(
+                emitter, new ChatStreamEventDelay(500, delays::add));
+
+        publisher.delta("12345678901234567890");
+
+        assertThat(emitter.eventNames()).containsExactly("delta", "delta");
+        assertThat(delays).hasSize(2);
+    }
+
     private static final class RecordingEmitter extends SseEmitter {
 
         private final List<SseEventBuilder> events = new ArrayList<>();

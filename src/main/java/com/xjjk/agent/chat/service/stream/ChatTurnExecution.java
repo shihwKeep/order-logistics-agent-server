@@ -76,6 +76,11 @@ final class ChatTurnExecution {
         queryPlan = Objects.requireNonNull(plan, "业务查询计划不能为空");
     }
 
+    /** 返回本轮固定的业务查询计划，供模型层决定是否强制工具选择。 */
+    BusinessQueryPlan queryPlan() {
+        return queryPlan;
+    }
+
     void intent(String value) {
         intent = Objects.requireNonNull(value, "意图类型不能为空");
     }
