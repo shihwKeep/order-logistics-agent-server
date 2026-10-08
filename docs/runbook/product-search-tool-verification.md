@@ -23,13 +23,13 @@ AGENT_PRODUCT_INTERNAL_TOKEN=<与 Agent 相同的内部令牌>
 server.port=8080
 
 # cxservice 地址；生产环境改为注册中心服务地址或内网负载均衡地址
-integration.cx.base-url=${CX_SERVICE_BASE_URL:http://127.0.0.1:8082}
+integration.cx.base-url=${CX_SERVICE_BASE_URL:http://127.0.0.1:8080}
 
 # 与 cxservice 相同的内部凭据，真实值来自 Agent 运行环境
 integration.cx.internal-token=${AGENT_CX_INTERNAL_TOKEN}
 
 spring.cloud.openfeign.client.config.cx-product.connect-timeout=1000
-spring.cloud.openfeign.client.config.cx-product.read-timeout=3000
+spring.cloud.openfeign.client.config.cx-product.read-timeout=30000
 spring.cloud.openfeign.client.config.cx-product.logger-level=basic
 
 # 工具 schema 与紧凑工具结果的输入预留；与估算误差安全余量分开计算

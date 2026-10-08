@@ -33,6 +33,27 @@ checkpoint 使用 `agent:composite:checkpoint:v2:{requestId}` 前缀和 10 分�
 
 Trace 中可以通过 `request.id` 关联节点 Observation 与 `agent.turn` 根 Span；指标只保留低基数标签。
 
+## Grafana 与告警
+
+Grafana 自动加载 `Composite Query V2` 看板，包含图最终状态、节点 P95、分支状态、依赖解析、checkpoint 操作、checkpoint 恢复、节点重试、降级与知识跳过八类面板。节点 P95 依赖 `management.metrics.distribution.percentiles-histogram.agent.composite.node=true` 导出的 histogram bucket。
+
+Prometheus 为复合图配置以下专项告警：
+
+- `CompositeGraphFailureRateHigh`：图失败或不可用比例持续过高；
+- `CompositePartialSuccessRateHigh`：部分成功比例持续过高；
+- `CompositeCheckpointOperationError`：checkpoint 加载、保存或释放持续异常；
+- `CompositeCheckpointResumeFailed`：checkpoint 恢复持续失败；
+- `CompositeNodeRetryExhausted`：节点重试持续耗尽；
+- `CompositeDependencyFailureRateHigh`：最近订单等依赖解析失败率持续过高。
+
+失败率和部分成功率告警至少需要五个样本才会触发，避免本地单次请求造成误报。checkpoint 错误、恢复失败和重试耗尽属于明确故障事件，不使用比例门槛。
+
+推荐按以下顺序定位：
+
+```text
+Composite Query V2 看板 -> Tempo request.id -> Loki traceId/requestId
+```
+
 ## 验证要点
 
 验证“订单物流 + 物流规则”时，应看到同一轮的 `agent.turn` 意图为 `COMPOSITE`，并出现复合图节点 Span；结果门禁同时放行 `logistics-timeline` 和 `knowledge-citations` 后，才发送二阶段模型回答。知识库不可回答或业务下游失败时，图状态应为失败/不可回答，不能发送模型猜测的成功话术。

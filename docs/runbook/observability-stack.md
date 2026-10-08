@@ -2,6 +2,14 @@
 
 ## 本地启动
 
+先执行不依赖 Docker 和业务服务的配置契约测试：
+
+```powershell
+.\scripts\test-observability-config.ps1
+```
+
+再启动观测基础设施：
+
 ```powershell
 Copy-Item infra\observability\.env.observability.example infra\observability\.env.observability
 notepad infra\observability\.env.observability
@@ -19,6 +27,14 @@ docker compose --env-file infra\observability\.env.observability -f infra\observ
 
 完整验收必须去掉该参数，确保两个业务健康接口正常，并且 Collector 确实抓取到了两个业务服务的指标。
 
+本地完整验收或面试演示时，需要在 **Agent 进程的启动环境** 中设置：
+
+```text
+MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0
+```
+
+生产默认仍保持 `0.1`。Collector 的 100% 尾采样只能保留应用已经上报的 Trace，无法恢复被应用头采样丢弃的 Trace；因此不能只把该变量写入观测容器使用的 `.env.observability`，必须配置到 IDEA/命令行启动的 Agent 进程。
+
 ## 地址
 
 | 组件 | 地址 |
@@ -26,6 +42,7 @@ docker compose --env-file infra\observability\.env.observability -f infra\observ
 | Grafana | `http://127.0.0.1:3000` |
 | Prometheus | `http://127.0.0.1:9090` |
 | Alertmanager | `http://127.0.0.1:9093` |
+| Alert Webhook Adapter | `http://127.0.0.1:8095` |
 | Tempo API | `http://127.0.0.1:3200` |
 | Loki API | `http://127.0.0.1:3100` |
 | Collector Health | `http://127.0.0.1:13133` |
@@ -34,7 +51,9 @@ Tempo 和 Loki 不直接作为日常查询界面，统一从 Grafana Explore 进
 
 ## Agent 业务看板
 
-Grafana 会自动加载四个看板：总览、Agent Runtime、Tool Calls 和 SSE Stream。Agent Runtime 查看单轮吞吐、终态失败率、P95 总耗时和首 Token 延迟；Tool Calls 查看真实下游调用、保护器复用与超限、结构化结果门禁；SSE Stream 查看活动中继、直连与可恢复模式、断点恢复结果、心跳、Redis 回放故障和取消结果。
+Grafana 会自动加载五个看板：总览、Agent Runtime、Tool Calls、SSE Stream 和 Composite Query V2。Agent Runtime 查看单轮吞吐、终态失败率、P95 总耗时和首 Token 延迟；Tool Calls 查看真实下游调用、保护器复用与超限、结构化结果门禁；SSE Stream 查看活动中继、直连与可恢复模式、断点恢复结果、心跳、Redis 回放故障和取消结果；Composite Query V2 查看图终态、节点 P95、分支、依赖、checkpoint、恢复、重试和部分成功状态。
+
+总览看板同时展示告警适配器健康状态和企微投递结果。`AlertWebhookAdapterDown` 表示外部通知链路已中断；`AlertWebhookDeliveryFailed` 表示适配器已完成有限重试但仍未成功投递。由于适配器故障时无法通过自身发送企微消息，这两类告警必须同时在 Alertmanager/Grafana 中保留，并在生产环境配置第二条独立通知通道作为兜底。
 
 关键指标的标签只使用服务端白名单值。`requestId`、`conversationId`、业务编号、问题正文、模型正文和工具载荷只允许出现在受控 Trace 或排障日志上下文，不能作为 Prometheus 标签。
 
@@ -85,6 +104,10 @@ docker compose --env-file infra\observability\.env.observability -f infra\observ
 ### Tempo或Loki不可写
 
 检查组件 `/ready`、Collector 导出错误和 Docker 卷磁盘空间。禁止通过关闭 Collector 队列上限来掩盖故障；先恢复后端，再确认丢弃计数和告警恢复。
+
+Tempo 启用 `local-blocks` 时，`metrics_generator` 必须同时配置独立的 `traces_storage.path`。仅看到 `/ready` 返回 200 不能证明 metrics-generator 正常；统一执行 `scripts/verify-observability.ps1`，该脚本会检查配置并扫描当前 Tempo 启动日志中的 backoff/WAL 错误。
+
+重启 Collector 后，Prometheus 指标需要等待几秒重新抓取。不要在容器刚启动时立即判定业务指标丢失，使用验证脚本的重试检查确认 `exported_job` 已回填。
 
 ### 磁盘不足
 
